@@ -1,0 +1,2 @@
+"""AKOUO benchmark adapter package."""
+

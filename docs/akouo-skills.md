@@ -1,0 +1,75 @@
+# AKOUO Skill Manifests
+
+`hmm` exposes AKOUO listening skills as explicit manifests. A skill is not a
+model by itself. It is a routed listening position that tells the daemon,
+dashboard, memory layer, and future desktop shell how to frame one audio segment.
+
+Built-in manifests live in `aear/akouo_skills.py` and are exposed by:
+
+```bash
+curl -sS http://127.0.0.1:8765/akouo/skills
+curl -sS http://127.0.0.1:8765/akouo/schema
+```
+
+## Skill Fields
+
+Each `ListeningSkillManifest` has:
+
+- `id`: stable lowercase identifier such as `signal-health`.
+- `name`: reader-facing name.
+- `version`: skill contract version.
+- `description`: what the skill listens for.
+- `listening_mode`: one of the schema modes, such as `basic`, `signal`,
+  `spectral`, `ecological`, `music`, `speech`, `comparative`, `generative`, or
+  `experimental`.
+- `input_requirements`: duration, stream/file, stereo, or sample-rate hints.
+- `model_requirements`: adapters required by the skill, such as `moss-audio`,
+  `aear-dsp`, `akouo`, or `akousmata`.
+- `memory_policy`: `none`, `read`, `write`, or `read_write`.
+- `output_schema`: optional future structured-output contract.
+- `ui_card`: dashboard card renderer hint.
+- `enabled_by_default`: whether the skill should appear active by default in
+  contributor-facing route presets.
+
+## Presets
+
+A `RoutePreset` names a reusable chain of skills:
+
+- `basic`: first pass with general listening, spectral facts, and signal health.
+- `environment`: field/soundscape route.
+- `signal`: technical diagnostics.
+- `music`: musicological route.
+- `speech`: speech route without making speech the product center.
+- `memory`: local Akousmata comparison.
+- `extended-spectrum`: DSP-first caution route for high/low-frequency claims.
+- `generative`: future bridge from listening observations to transformation
+  prompts. It does not generate audio.
+
+Requests may override the preset skill chain with `enabled_skill_ids`:
+
+```json
+{
+  "path": "clip.wav",
+  "route_preset": "basic",
+  "enabled_skill_ids": ["signal-health", "spectral-cartographer"]
+}
+```
+
+The daemon rejects unknown skills and rejects an empty active skill chain.
+
+## Adding A Skill
+
+1. Add a `ListeningSkillManifest` entry to `SKILLS` in `aear/akouo_skills.py`.
+2. Add it to one or more `RoutePreset.skill_ids` entries, or create a new preset.
+3. Keep claims grounded in MOSS and DSP limits. MOSS-Audio receives 16 kHz mono
+   input; do not claim unsupported stereo image, ultrasonic content, or absolute
+   physical level without capture-chain or DSP evidence.
+4. Run:
+
+```bash
+uv run python -m unittest discover -s tests
+node --check aear/static/app.js
+```
+
+The dashboard skill manager loads the manifest dynamically, so new skills appear
+without hard-coded UI changes.

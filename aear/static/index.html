@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hmm</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23145c49'/%3E%3Cpath d='M7 16h4l2-8 5 16 2-8h5' fill='none' stroke='%23c7ef62' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="rail" aria-label="hmm status">
+        <div class="brand">
+          <div class="mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img"><path d="M4 12c0-4.4 3.6-8 8-8 3.6 0 6.7 2.4 7.7 5.7" /><path d="M4 12c0 4.4 3.6 8 8 8 3.7 0 6.8-2.5 7.7-5.9" /><path d="M8.8 12a3.2 3.2 0 1 0 6.4 0 3.2 3.2 0 0 0-6.4 0Z" /></svg>
+          </div>
+          <div>
+            <h1>hmm</h1>
+            <p>Local machine-listening agent</p>
+          </div>
+        </div>
+
+        <section class="status-panel">
+          <div class="status-row">
+            <span class="dot" id="statusDot"></span>
+            <span id="statusText">Checking daemon...</span>
+          </div>
+          <dl>
+            <div><dt>Profile</dt><dd id="profileValue">-</dd></div>
+            <div><dt>Host</dt><dd id="hostValue">-</dd></div>
+            <div><dt>Port</dt><dd id="portValue">-</dd></div>
+          </dl>
+        </section>
+
+        <nav class="links" aria-label="Service links">
+          <a href="/docs">OpenAPI docs</a>
+          <a href="/health">Health JSON</a>
+          <a href="/hmm/status">hmm status</a>
+          <a href="/api">API root</a>
+        </nav>
+      </aside>
+
+      <section class="workspace" aria-label="Listening workspace">
+        <div class="workspace-header">
+          <div>
+            <h2>Listen across sound, signal, environment, and voice</h2>
+            <p>Route local audio through MOSS-Audio, DSP, AKOÚŌ skills, and Akousmata memory without turning every sound into a transcript.</p>
+          </div>
+          <button class="ghost-button" id="useSample" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14" /><path d="m5 12 7 7 7-7" /></svg>
+            Sample
+          </button>
+        </div>
+
+        <form class="control-surface" id="taskForm">
+          <section class="input-methods" aria-label="Audio input methods">
+            <label class="upload-card" id="uploadCard">
+              <input id="audioFile" type="file" accept="audio/*,video/*" />
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12" /><path d="m7 8 5-5 5 5" /><path d="M5 21h14" /></svg>
+              <span>Drop sound</span>
+            </label>
+            <div class="record-card">
+              <button class="ghost-button" id="recordButton" type="button" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><path d="M12 19v3" /></svg>
+                Record
+              </button>
+              <span id="recordStatus">Mic idle</span>
+            </div>
+            <div class="live-card">
+              <button class="ghost-button" id="liveButton" type="button" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-6 4 12 2-6h5" /></svg>
+                Live
+              </button>
+              <button class="icon-button" id="captureLiveButton" type="button" title="Capture last 10 seconds" aria-label="Capture last 10 seconds" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-6 4 12 2-6h5" /><path d="M20 5v14" /></svg>
+              </button>
+              <span id="liveStatus">Live idle</span>
+            </div>
+            <div class="upload-status" id="uploadStatus">No uploaded input.</div>
+          </section>
+
+          <section class="source-panel" aria-label="Audio source selection">
+            <label class="field">
+              <span>Source</span>
+              <select id="sourceMode">
+                <option value="live_input">Live input</option>
+                <option value="system_output">System audio</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Input device</span>
+              <select id="audioDevice">
+                <option value="">Default input</option>
+              </select>
+            </label>
+            <button class="ghost-button" id="refreshDevices" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.3 6.4" /><path d="M3 12A9 9 0 0 1 18.3 5.6" /><path d="M3 18h5v-5" /><path d="M21 6h-5v5" /></svg>
+              Devices
+            </button>
+            <div class="source-status" id="sourceStatus">Live input uses browser permission.</div>
+          </section>
+
+          <section class="background-panel" aria-label="Background runtime controls">
+            <div>
+              <strong>Background runtime</strong>
+              <span id="backgroundStatus">Checking</span>
+            </div>
+            <button class="ghost-button" id="backgroundCapture" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-6 4 12 2-6h5" /><path d="M20 5v14" /></svg>
+              Quick capture
+            </button>
+            <button class="ghost-button" id="backgroundPause" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14" /><path d="M16 5v14" /></svg>
+              Pause
+            </button>
+            <button class="ghost-button" id="backgroundResume" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z" /></svg>
+              Resume
+            </button>
+          </section>
+
+          <section class="agent-settings-panel" aria-label="Floating spectral agent settings">
+            <div>
+              <strong>Floating spectral agent</strong>
+              <span id="agentSettingsStatus">Visible / compact</span>
+            </div>
+            <label class="check-control">
+              <input id="agentVisible" type="checkbox" checked />
+              <span>Show</span>
+            </label>
+            <label class="field compact-field">
+              <span>Size</span>
+              <select id="agentSize">
+                <option value="compact">Compact</option>
+                <option value="medium">Medium</option>
+              </select>
+            </label>
+            <label class="check-control">
+              <input id="agentPinned" type="checkbox" checked />
+              <span>Pin</span>
+            </label>
+            <label class="check-control">
+              <input id="agentReducedMotion" type="checkbox" />
+              <span>Reduce motion</span>
+            </label>
+          </section>
+
+          <label class="field path-field">
+            <span>Audio path</span>
+            <input id="audioPath" name="path" value="MOSS-Audio/test/test_en.mp3" autocomplete="off" spellcheck="false" />
+          </label>
+
+          <div class="segmented task-tabs" role="radiogroup" aria-label="Listening mode">
+            <label><input type="radio" name="task" value="listen_event" checked /> <span>Listen</span></label>
+            <label><input type="radio" name="task" value="report" /> <span>Report</span></label>
+            <label><input type="radio" name="task" value="environment" /> <span>Environment</span></label>
+            <label><input type="radio" name="task" value="music" /> <span>Music</span></label>
+            <label><input type="radio" name="task" value="transcribe" /> <span>Speech</span></label>
+            <label><input type="radio" name="task" value="qa" /> <span>QA</span></label>
+          </div>
+
+          <div class="options-grid">
+            <label class="field option listen-option">
+              <span>Route preset</span>
+              <select id="routePreset">
+                <option value="basic">Basic</option>
+                <option value="environment">Environment</option>
+                <option value="signal">Signal</option>
+                <option value="music">Music</option>
+                <option value="speech">Speech</option>
+                <option value="memory">Memory</option>
+              </select>
+            </label>
+
+            <label class="field option transcribe-option">
+              <span>Timestamps</span>
+              <select id="timestamps">
+                <option value="sentence">Sentence</option>
+                <option value="word">Word</option>
+                <option value="none">None</option>
+              </select>
+            </label>
+
+            <label class="field option qa-option hidden">
+              <span>Question</span>
+              <input id="question" value="What happens after the spoken sentence?" />
+            </label>
+
+            <label class="field option thinking-option hidden">
+              <span>Thinking budget</span>
+              <input id="thinkingBudget" type="number" min="0" max="2048" step="64" value="128" />
+            </label>
+
+          </div>
+
+          <section class="skill-manager" aria-label="AKOUO skill manager">
+            <div class="skill-manager-header">
+              <div>
+                <strong>AKOÚŌ skill manager</strong>
+                <span id="skillManagerStatus">Loading skills</span>
+              </div>
+              <button class="ghost-button" id="resetPresetSkills" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.3 6.4" /><path d="M3 12A9 9 0 0 1 18.3 5.6" /><path d="M3 18h5v-5" /></svg>
+                Preset
+              </button>
+            </div>
+            <div class="skill-list" id="skillList"></div>
+          </section>
+
+          <section class="system-status" aria-label="Listening system status">
+            <div>
+              <strong>Source</strong>
+              <span id="sourceStatusShort">Live input</span>
+            </div>
+            <div>
+              <strong>System audio</strong>
+              <span id="systemAudioStatus">Checking</span>
+            </div>
+            <div>
+              <strong>AKOUO route mapping</strong>
+              <span>Ready</span>
+            </div>
+            <div>
+              <strong>Akousmata memory</strong>
+              <span>Explicit save</span>
+            </div>
+          </section>
+
+          <button class="primary-button" id="runButton" type="submit">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z" /></svg>
+            Listen
+          </button>
+        </form>
+
+        <section class="result-panel" id="resultPanel">
+          <div class="result-header">
+            <div>
+              <h3 id="resultTitle">Ready</h3>
+              <p id="resultSubtitle" aria-live="polite" aria-atomic="true">Choose a source and run a local listening pass.</p>
+            </div>
+            <div class="result-actions">
+              <button class="icon-button" id="rerunRouteResult" type="button" title="Run selected route" aria-label="Run selected route" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.3 6.4" /><path d="M3 12A9 9 0 0 1 18.3 5.6" /><path d="M3 18h5v-5" /></svg>
+              </button>
+              <button class="icon-button" id="rememberResult" type="button" title="Remember this sound" aria-label="Remember this sound" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.4A4 4 0 0 1 19 11c0 5.6-7 10-7 10Z" /></svg>
+              </button>
+              <button class="icon-button" id="forgetResult" type="button" title="Forget saved trace" aria-label="Forget saved trace" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v5" /><path d="M14 11v5" /></svg>
+              </button>
+              <button class="icon-button" id="copyJson" type="button" title="Copy JSON" aria-label="Copy JSON">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v12H8z" /><path d="M6 16H4V4h12v2" /></svg>
+              </button>
+            </div>
+          </div>
+          <div class="rendered" id="renderedResult" aria-live="off"></div>
+          <div class="conversation-panel" id="conversationPanel" aria-label="Event conversation">
+            <label class="field conversation-question">
+              <span>Question</span>
+              <input id="eventQuestion" value="What is happening in this sound?" />
+            </label>
+            <button class="ghost-button" id="askEventQuestion" type="button" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" /></svg>
+              Ask
+            </button>
+          </div>
+          <div class="conversation-result" id="conversationResult"></div>
+          <div class="generation-panel" id="generationPanel" aria-label="Generative bridge">
+            <label class="field generation-prompt">
+              <span>Generation prompt</span>
+              <textarea id="generationPrompt" rows="4" spellcheck="true"></textarea>
+            </label>
+            <div class="generation-actions">
+              <button class="ghost-button" id="deriveGenerationPrompt" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4" /><path d="M12 17v4" /><path d="M3 12h4" /><path d="M17 12h4" /><path d="m6 6 3 3" /><path d="m15 15 3 3" /><path d="m18 6-3 3" /><path d="m9 15-3 3" /></svg>
+                Prompt
+              </button>
+              <button class="ghost-button" id="saveGenerationPrompt" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><path d="M17 21v-8H7v8" /><path d="M7 3v5h8" /></svg>
+                Save
+              </button>
+              <button class="ghost-button" id="refreshGenerationHistory" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.3-6.4" /><path d="M21 12a9 9 0 0 1-15.3 6.4" /><path d="M21 6h-5V1" /><path d="M3 18h5v5" /></svg>
+                History
+              </button>
+            </div>
+          </div>
+          <div class="generation-result" id="generationResult"></div>
+          <div class="result-history" id="resultHistory" aria-label="Recent listening results"></div>
+          <details class="json-details">
+            <summary>Raw JSON</summary>
+            <pre id="jsonOutput" aria-live="off">{}</pre>
+          </details>
+        </section>
+
+        <section class="memory-panel" id="memoryPanel" aria-label="Akousmata memory browser">
+          <div class="memory-header">
+            <div>
+              <h3>Akousmata memory</h3>
+              <p id="memoryStatus">Saved traces are local and explicit.</p>
+            </div>
+            <div class="memory-actions">
+              <button class="icon-button" id="refreshMemory" type="button" title="Refresh memory" aria-label="Refresh memory">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.3 6.4" /><path d="M3 12A9 9 0 0 1 18.3 5.6" /><path d="M3 18h5v-5" /><path d="M21 6h-5v5" /></svg>
+              </button>
+              <button class="icon-button" id="exportMemory" type="button" title="Export memory JSON" aria-label="Export memory JSON">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>
+              </button>
+            </div>
+          </div>
+          <div class="memory-search">
+            <label class="field">
+              <span>Search traces</span>
+              <input id="memorySearch" type="search" placeholder="machine hum, tag, source, route" />
+            </label>
+            <button class="ghost-button" id="searchMemory" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3" /><path d="M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z" /></svg>
+              Search
+            </button>
+          </div>
+          <div class="memory-list" id="memoryList"></div>
+        </section>
+      </section>
+    </main>
+
+    <section class="spectral-agent" id="spectralAgent" role="region" aria-label="hmm floating spectral agent" data-size="compact" data-pinned="true">
+      <button class="agent-surface" id="agentSurface" type="button" aria-label="Open spectral agent controls" aria-expanded="false">
+        <span class="agent-field" aria-hidden="true">
+          <span class="agent-ring"></span>
+          <span class="agent-band" style="--band-index: 0"></span>
+          <span class="agent-band" style="--band-index: 1"></span>
+          <span class="agent-band" style="--band-index: 2"></span>
+          <span class="agent-band" style="--band-index: 3"></span>
+          <span class="agent-band" style="--band-index: 4"></span>
+          <span class="agent-band" style="--band-index: 5"></span>
+          <span class="agent-band" style="--band-index: 6"></span>
+          <span class="agent-band" style="--band-index: 7"></span>
+          <span class="agent-band" style="--band-index: 8"></span>
+          <span class="agent-band" style="--band-index: 9"></span>
+          <span class="agent-band" style="--band-index: 10"></span>
+          <span class="agent-band" style="--band-index: 11"></span>
+        </span>
+        <span class="agent-status" id="agentStatus">idle</span>
+      </button>
+      <div class="agent-popover hidden" id="agentPopover" role="menu" aria-label="Spectral agent controls">
+        <div class="agent-popover-status">
+          <strong id="agentPopoverTitle">hmm</strong>
+          <span id="agentPopoverMeta">No live buffer</span>
+        </div>
+        <button class="ghost-button" id="agentQuickCapture" type="button" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-6 4 12 2-6h5" /><path d="M20 5v14" /></svg>
+          Capture
+        </button>
+        <button class="ghost-button" id="agentShowResult" type="button" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12" /><path d="M8 12h12" /><path d="M8 18h12" /><path d="M4 6h.01" /><path d="M4 12h.01" /><path d="M4 18h.01" /></svg>
+          Result
+        </button>
+        <button class="ghost-button" id="agentTogglePause" type="button" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14" /><path d="M16 5v14" /></svg>
+          Pause
+        </button>
+        <button class="ghost-button" id="agentHide" type="button" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          Hide
+        </button>
+      </div>
+    </section>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

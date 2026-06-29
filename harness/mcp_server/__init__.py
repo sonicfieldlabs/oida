@@ -1,0 +1,2 @@
+"""MCP stdio server package."""
+

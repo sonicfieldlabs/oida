@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import plistlib
+import re
+import sys
+import urllib.error
+import urllib.request
+import zipfile
+from pathlib import Path
+from typing import Any
+
+
+REQUIRED_ENDPOINTS = {
+    "/background/status",
+    "/background/history",
+    "/listen-event",
+    "/listen-event/rerun",
+    "/conversation/ask",
+    "/generation/prompt",
+    "/generation/history",
+    "/generation/{generation_id}",
+    "/generation/relisten",
+    "/native/system-audio/routes",
+    "/native/system-audio/temp",
+}
+
+REQUIRED_CAPABILITIES = {
+    "daemon_background_runtime",
+    "native_shell_api",
+    "live_signal_api",
+    "route_rerun_api",
+    "recent_history_management",
+    "generation_prompt_api",
+    "generation_relisten_api",
+}
+
+EXPECTED_BUNDLE = {
+    "CFBundleName": "hmm",
+    "CFBundleExecutable": "hmm-macos",
+    "CFBundleIdentifier": "org.sonicfield.hmm",
+    "CFBundlePackageType": "APPL",
+}
+
+
+class CheckResult:
+    def __init__(self) -> None:
+        self.failures: list[str] = []
+        self.warnings: list[str] = []
+        self.notes: list[str] = []
+
+    def ok(self, message: str) -> None:
+        self.notes.append(f"ok: {message}")
+
+    def warn(self, message: str) -> None:
+        self.warnings.append(f"warn: {message}")
+
+    def fail(self, message: str) -> None:
+        self.failures.append(f"fail: {message}")
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser(description="Validate local hmm release artifacts and daemon contract.")
+    parser.add_argument("--server", default=os.environ.get("HMM_SERVER", "http://127.0.0.1:8765"))
+    parser.add_argument("--app", type=Path, default=repo_root / "apps/macos/dist/hmm.app")
+    parser.add_argument("--archive", type=Path, default=repo_root / "apps/macos/dist/hmm-macos-unsigned.zip")
+    parser.add_argument("--mutating", action="store_true", help="Create and clean up one prompt record through /generation/prompt.")
+    args = parser.parse_args()
+
+    result = CheckResult()
+    app_path = resolve_app_path(args.app, repo_root)
+
+    check_daemon(args.server.rstrip("/"), repo_root, args.mutating, result)
+    check_app_bundle(app_path, result)
+    check_archive(args.archive, result)
+
+    for line in result.notes:
+        print(line)
+    for line in result.warnings:
+        print(line)
+    for line in result.failures:
+        print(line, file=sys.stderr)
+    return 1 if result.failures else 0
+
+
+def resolve_app_path(path: Path, repo_root: Path) -> Path:
+    if path.exists():
+        return path
+    packaged = repo_root / "apps/macos/dist/package/hmm.app"
+    if path == repo_root / "apps/macos/dist/hmm.app" and packaged.exists():
+        return packaged
+    return path
+
+
+def check_daemon(server: str, repo_root: Path, mutating: bool, result: CheckResult) -> None:
+    try:
+        health = get_json(server, "/health")
+        api = get_json(server, "/api")
+        hmm_status = get_json(server, "/hmm/status")
+        background = get_json(server, "/background/status")
+        generation_history = get_json(server, "/generation/history?limit=1")
+    except urllib.error.URLError as exc:
+        result.fail(f"daemon is not reachable at {server}: {exc}")
+        return
+
+    if health.get("ok") is True and health.get("name") == "hmm":
+        result.ok(f"daemon health {health.get('profile') or 'profile'} at {server}")
+    else:
+        result.fail(f"unexpected health payload: {health}")
+
+    endpoints = set(api.get("endpoints") or [])
+    missing_endpoints = sorted(REQUIRED_ENDPOINTS - endpoints)
+    if missing_endpoints:
+        result.fail(f"missing API endpoints: {', '.join(missing_endpoints)}")
+    else:
+        result.ok(f"{len(REQUIRED_ENDPOINTS)} required endpoints exposed")
+
+    privacy = hmm_status.get("privacy_defaults") if isinstance(hmm_status.get("privacy_defaults"), dict) else {}
+    if privacy.get("generation_default_adapter") == "prompt_only":
+        result.ok("generation default adapter is prompt_only")
+    else:
+        result.fail("generation default adapter is not prompt_only")
+
+    capabilities = background.get("capabilities") if isinstance(background.get("capabilities"), dict) else {}
+    missing_capabilities = sorted(name for name in REQUIRED_CAPABILITIES if capabilities.get(name) is not True)
+    if missing_capabilities:
+        result.fail(f"missing background capabilities: {', '.join(missing_capabilities)}")
+    else:
+        result.ok(f"{len(REQUIRED_CAPABILITIES)} release capabilities exposed")
+
+    if generation_history.get("adapter_default") == "prompt_only" and isinstance(generation_history.get("records"), list):
+        result.ok("generation history endpoint responds")
+    else:
+        result.fail(f"unexpected generation history payload: {generation_history}")
+
+    if mutating:
+        smoke_generation_prompt(server, repo_root, result)
+
+
+def smoke_generation_prompt(server: str, repo_root: Path, result: CheckResult) -> None:
+    payload = {
+        "event": {
+            "id": "evt_release_smoke",
+            "source": {"type": "file", "label": "release-smoke.wav"},
+            "segment": {"duration_ms": 1000, "data_ref": {"kind": "path", "uri": "release-smoke.wav"}},
+            "aggregate": {
+                "title": "Release smoke",
+                "short_summary": "A synthetic release-check event for prompt derivation.",
+                "signal_facts": ["No raw audio is required for this prompt-only check."],
+                "warnings": ["This event is synthetic."],
+            },
+            "routes": [{"route_id": "signal-health", "summary": "synthetic stable signal"}],
+            "features": {"duration_s": 1.0, "rmsDbfs": -24.0},
+            "tags": ["release-smoke"],
+            "privacy_mode": "session",
+            "raw_audio_policy": "external_ref",
+        },
+        "intent": "variation",
+        "adapter": "prompt_only",
+        "generate": False,
+    }
+    try:
+        record = post_json(server, "/generation/prompt", payload)
+    except urllib.error.URLError as exc:
+        result.fail(f"mutating prompt smoke failed: {exc}")
+        return
+
+    generation_id = str(record.get("id") or "")
+    if record.get("status") == "prompt_ready" and generation_id.startswith("gen_"):
+        result.ok("mutating prompt smoke returned prompt_ready")
+    else:
+        result.fail(f"unexpected prompt smoke payload: {record}")
+        return
+
+    record_path = repo_root / "generations/records" / f"{safe_id(generation_id)}.json"
+    if record_path.exists():
+        record_path.unlink()
+        result.ok("mutating prompt smoke record cleaned up")
+    else:
+        result.warn(f"could not find prompt smoke record for cleanup: {record_path}")
+
+
+def check_app_bundle(app_path: Path, result: CheckResult) -> None:
+    if not app_path.exists():
+        result.fail(f"app bundle is missing: {app_path}")
+        return
+    if app_path.suffix != ".app":
+        result.fail(f"app path is not an .app bundle: {app_path}")
+        return
+
+    info_path = app_path / "Contents/Info.plist"
+    binary_path = app_path / "Contents/MacOS/hmm-macos"
+    if not info_path.exists():
+        result.fail(f"Info.plist is missing: {info_path}")
+        return
+    if not binary_path.exists():
+        result.fail(f"app executable is missing: {binary_path}")
+        return
+
+    with info_path.open("rb") as handle:
+        plist = plistlib.load(handle)
+    mismatched = [
+        f"{key}={plist.get(key)!r}, expected {expected!r}"
+        for key, expected in EXPECTED_BUNDLE.items()
+        if plist.get(key) != expected
+    ]
+    if mismatched:
+        result.fail(f"Info.plist mismatch: {'; '.join(mismatched)}")
+    else:
+        result.ok(f"app bundle metadata valid: {app_path}")
+
+    if os.access(binary_path, os.X_OK):
+        result.ok("app executable bit is set")
+    else:
+        result.fail(f"app executable is not executable: {binary_path}")
+
+    if not (app_path / "Contents/_CodeSignature").exists():
+        result.warn("app bundle is unsigned; this is expected for the local unsigned archive")
+
+
+def check_archive(archive_path: Path, result: CheckResult) -> None:
+    if not archive_path.exists():
+        result.fail(f"unsigned archive is missing: {archive_path}")
+        return
+    if archive_path.stat().st_size <= 0:
+        result.fail(f"unsigned archive is empty: {archive_path}")
+        return
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            names = set(archive.namelist())
+    except zipfile.BadZipFile:
+        result.fail(f"unsigned archive is not a valid zip file: {archive_path}")
+        return
+
+    required = {
+        "hmm.app/Contents/Info.plist",
+        "hmm.app/Contents/MacOS/hmm-macos",
+    }
+    missing = sorted(required - names)
+    if missing:
+        result.fail(f"unsigned archive is missing entries: {', '.join(missing)}")
+    else:
+        result.ok(f"unsigned archive contains app metadata and binary: {archive_path}")
+
+
+def get_json(server: str, path: str) -> dict[str, Any]:
+    with urllib.request.urlopen(f"{server}{path}", timeout=15) as response:
+        return json.loads(response.read())
+
+
+def post_json(server: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    request = urllib.request.Request(
+        f"{server}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.loads(response.read())
+
+
+def safe_id(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-") or "generation"
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

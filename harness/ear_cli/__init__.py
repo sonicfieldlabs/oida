@@ -1,0 +1,2 @@
+"""`ear` CLI package."""
+
