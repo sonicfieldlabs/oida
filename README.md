@@ -299,6 +299,8 @@ into memory.
 
 See `docs/native-macos-shell.md` for the SwiftPM package layout, run script,
 menu bar behavior, optional hotkey format, and current native-shell limits.
+See `docs/macos-signing-notarization.md` for Developer ID signing,
+notarization, and release packaging.
 
 ## Architecture Notes
 

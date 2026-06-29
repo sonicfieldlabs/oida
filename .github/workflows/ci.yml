@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Python, Web, and macOS checks
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+
+      - name: Run Python tests
+        run: |
+          uv run python -m unittest discover -s tests
+          uv run pytest -q
+
+      - name: Compile Python modules
+        run: uv run python -m compileall -q aear harness bench_adapter scripts tests
+
+      - name: Check dashboard JavaScript
+        run: node --check aear/static/app.js
+
+      - name: Build macOS shell
+        working-directory: apps/macos
+        run: |
+          swift build
+          swift build -Xswiftc -strict-concurrency=complete
+
+      - name: Package unsigned app
+        run: apps/macos/script/package_unsigned.sh
+
+      - name: Release smoke
+        run: scripts/release_smoke_with_stub.sh

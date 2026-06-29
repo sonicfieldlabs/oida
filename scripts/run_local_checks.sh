@@ -5,6 +5,7 @@ MODE="${1:-default}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"
 
 uv run python -m unittest discover -s tests
+uv run --extra dev pytest -q
 uv run python -m compileall -q aear harness bench_adapter scripts tests
 
 if command -v node >/dev/null 2>&1; then
@@ -17,7 +18,7 @@ case "$MODE" in
   --release|release)
     apps/macos/script/build_and_run.sh --verify
     apps/macos/script/package_unsigned.sh
-    uv run python scripts/release_smoke.py --server "${HMM_SERVER:-http://127.0.0.1:8765}"
+    scripts/release_smoke_with_stub.sh
     ;;
   *)
     echo "usage: $0 [release|--release]" >&2
