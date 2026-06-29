@@ -7,6 +7,7 @@ enum HotkeyRegistrationResult {
     case failed(OSStatus)
 }
 
+@MainActor
 final class GlobalHotkeyManager {
     static let shared = GlobalHotkeyManager()
 
@@ -33,7 +34,7 @@ final class GlobalHotkeyManager {
             { _, _, userData in
                 guard let userData else { return noErr }
                 let manager = Unmanaged<GlobalHotkeyManager>.fromOpaque(userData).takeUnretainedValue()
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     manager.action?()
                 }
                 return noErr
