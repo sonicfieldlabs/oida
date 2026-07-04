@@ -1,8 +1,9 @@
 import Foundation
 
-func hmmDataDirectory() -> URL {
+func oidaDataDirectory() -> URL {
     let environment = ProcessInfo.processInfo.environment
-    if let configured = environment["HMM_DATA_DIR"] ?? environment["AEAR_DATA_DIR"], !configured.isEmpty {
+    if let configured = environment["OIDA_DATA_DIR"] ?? environment["HMM_DATA_DIR"] ?? environment["AEAR_DATA_DIR"],
+       !configured.isEmpty {
         return URL(fileURLWithPath: configured, isDirectory: true)
             .standardizedFileURL
     }
@@ -11,9 +12,10 @@ func hmmDataDirectory() -> URL {
     return applicationSupport.appendingPathComponent("oida", isDirectory: true)
 }
 
-func hmmAudioDirectory() -> URL {
+func oidaAudioDirectory() -> URL {
     let environment = ProcessInfo.processInfo.environment
-    if let configured = environment["HMM_AUDIO_DIR"] ?? environment["AEAR_AUDIO_DIR"], !configured.isEmpty {
+    if let configured = environment["OIDA_AUDIO_DIR"] ?? environment["HMM_AUDIO_DIR"] ?? environment["AEAR_AUDIO_DIR"],
+       !configured.isEmpty {
         return URL(fileURLWithPath: (configured as NSString).expandingTildeInPath, isDirectory: true)
             .standardizedFileURL
     }
@@ -29,7 +31,7 @@ func findOidaRepositoryRoot() -> URL? {
         URL(fileURLWithPath: fileManager.currentDirectoryPath),
         // Known checkout location so a packaged app (run from /Applications)
         // can still supervise the daemon.
-        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents/oida/oida", isDirectory: true)
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("workspace/oida", isDirectory: true)
     ].compactMap { $0 }
 
     for candidate in candidates {

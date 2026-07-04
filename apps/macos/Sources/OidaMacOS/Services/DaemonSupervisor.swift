@@ -126,11 +126,11 @@ final class DaemonSupervisor {
                 ? homebrewLibPaths.joined(separator: ":")
                 : "\(homebrewLibPaths.joined(separator: ":")):\(existingDylibPath)"
         }
-        if environment["HMM_DATA_DIR"] == nil, environment["AEAR_DATA_DIR"] == nil {
-            environment["HMM_DATA_DIR"] = hmmDataDirectory().path
+        if environment["OIDA_DATA_DIR"] == nil, environment["HMM_DATA_DIR"] == nil, environment["AEAR_DATA_DIR"] == nil {
+            environment["OIDA_DATA_DIR"] = oidaDataDirectory().path
         }
-        if environment["HMM_AUDIO_DIR"] == nil, environment["AEAR_AUDIO_DIR"] == nil {
-            environment["HMM_AUDIO_DIR"] = hmmAudioDirectory().path
+        if environment["OIDA_AUDIO_DIR"] == nil, environment["HMM_AUDIO_DIR"] == nil, environment["AEAR_AUDIO_DIR"] == nil {
+            environment["OIDA_AUDIO_DIR"] = oidaAudioDirectory().path
         }
         return environment
     }

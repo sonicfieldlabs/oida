@@ -54,7 +54,7 @@ final class MicTapManager {
         queue.sync { ringSamples.removeAll(keepingCapacity: true) }
     }
 
-    func writeRecentAudio(seconds: Double, audioDirectory: URL = hmmAudioDirectory()) throws -> URL {
+    func writeRecentAudio(seconds: Double, audioDirectory: URL = oidaAudioDirectory()) throws -> URL {
         guard isCapturing else { throw MicTapError.notCapturing }
         let requestedSeconds = max(0.25, min(seconds, ringMaxSeconds))
         let snapshot: (samples: [Float], sampleRate: Double) = queue.sync {

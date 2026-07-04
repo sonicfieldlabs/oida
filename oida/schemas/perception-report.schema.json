@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oida.local/schemas/perception-report.schema.json",
-  "title": "hmm PerceptionReport",
+  "title": "oida PerceptionReport",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -413,7 +413,7 @@
         "object",
         "null"
       ],
-      "description": "Deterministic signal-level reading from measured DSP features (hmm signal listener)."
+      "description": "Deterministic signal-level reading from measured DSP features (oida signal listener)."
     },
     "moss_passes": {
       "type": "array",

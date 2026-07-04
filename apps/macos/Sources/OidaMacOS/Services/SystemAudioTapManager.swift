@@ -123,7 +123,7 @@ final class SystemAudioTapManager: NSObject {
         onStateChange?(.stopped)
     }
 
-    func writeRecentAudio(seconds: Double, audioDirectory: URL = hmmAudioDirectory()) throws -> NativeSystemAudioCapture {
+    func writeRecentAudio(seconds: Double, audioDirectory: URL = oidaAudioDirectory()) throws -> NativeSystemAudioCapture {
         guard isCapturing else { throw SystemAudioTapCaptureError.notCapturing }
         let sourceRoute = currentSourceRoute ?? fallbackDisplayMixRoute()
         let requestedSeconds = max(0.25, min(seconds, ringMaxSeconds))
