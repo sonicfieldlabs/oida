@@ -12,13 +12,14 @@ from uuid import uuid4
 import numpy as np
 import soundfile as sf
 
-from aear.config import REPO_ROOT
+from aear.config import data_dir, uploads_dir
 from aear.contracts import SourceType, audio_segment_from_path, source_for_path, to_dict
 from aear.dsp import AudioData, inspect_path, load_audio
 from aear.storage import write_json_atomic
 
 CAPTURE_LAST_PATTERN = "*-hmm-capture-last-*s.wav"
 CAPTURE_LAST_KEEP = 12
+STOPPED_SESSIONS_KEEP = 8
 
 
 def _synchronized(method):
@@ -109,7 +110,20 @@ class LiveManager:
         session.active = False
         session.updated_at = datetime.now(timezone.utc).isoformat()
         self._write_manifest(session)
-        return self.status(session_id)
+        status = self.status(session_id)
+        self._evict_stopped_sessions()
+        return status
+
+    def _evict_stopped_sessions(self, keep: int = STOPPED_SESSIONS_KEEP) -> None:
+        # Stopped sessions previously accumulated in self.sessions for the daemon's
+        # lifetime. Their manifests are already on disk, so keep only the most
+        # recently stopped few queryable and drop the rest.
+        stopped = [session for session in self.sessions.values() if not session.active]
+        if len(stopped) <= keep:
+            return
+        stopped.sort(key=lambda session: str(session.updated_at))
+        for session in stopped[: len(stopped) - keep]:
+            self.sessions.pop(session.session_id, None)
 
     @_synchronized
     def capture_last(self, session_id: str, seconds: float = 10.0) -> dict[str, Any]:
@@ -119,7 +133,7 @@ class LiveManager:
         if not selected:
             raise ValueError(f"live session has no captured chunks: {session_id}")
 
-        output_dir = REPO_ROOT / "uploads"
+        output_dir = uploads_dir()
         output_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         output_path = output_dir / f"{stamp}-hmm-capture-last-{math.ceil(capture_seconds)}s.wav"
@@ -131,6 +145,7 @@ class LiveManager:
                 output_path,
                 source_type=session.source_type,
                 label=f"{session.source_label}: last {capture_seconds:g}s",
+                device_id=session.device_id,
             ),
             privacy_mode="ephemeral",
             ephemeral=True,
@@ -247,7 +262,7 @@ class LiveManager:
         return list(reversed(selected))
 
     def _write_manifest(self, session: LiveSession) -> Path:
-        output = REPO_ROOT / "sessions" / f"live-{session.session_id}.json"
+        output = data_dir() / "sessions" / f"live-{session.session_id}.json"
         write_json_atomic(output, self.status(session.session_id))
         return output
 
@@ -320,12 +335,12 @@ def _source_type(value: str) -> SourceType:
 
 
 def _unlink_if_upload(path: object) -> None:
-    # Only delete files that are genuinely inside this repo's uploads/ directory. The
+    # Only delete files that are genuinely inside the configured uploads/ directory. The
     # previous `"uploads" in parts` substring test would also match an unrelated
     # external path such as $HOME/keep.wav.
     if not isinstance(path, str) or not path:
         return
-    uploads_root = (REPO_ROOT / "uploads").resolve()
+    uploads_root = uploads_dir().resolve()
     try:
         resolved = Path(path).resolve()
     except OSError:
@@ -340,9 +355,8 @@ def _unlink_if_upload(path: object) -> None:
 
 def _prune_capture_temp_files(keep: int = CAPTURE_LAST_KEEP) -> None:
     # Bound the temporary "capture last N seconds" WAVs. They are labelled
-    # raw_audio_policy:"temp" and were previously never deleted, so raw captured audio
-    # accumulated in uploads/ indefinitely. Keep only the most recent few.
-    directory = REPO_ROOT / "uploads"
+    # raw_audio_policy:"temp"; keep only the most recent few between explicit wipes.
+    directory = uploads_dir()
     if not directory.exists():
         return
     files = sorted(

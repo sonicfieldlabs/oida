@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+title: "hmm: local listening agent for the Listening Stack"
+message: "If you use hmm in research, please cite the software and the Listening Stack paper."
+type: software
+authors:
+  - name: "Sonic Field Labs"
+version: 0.1.0
+date-released: 2026-07-02
+license: Apache-2.0
+repository-code: "https://github.com/sonicfieldlabs/hmm"
+preferred-citation:
+  type: article
+  title: "The Listening Stack: Agentic Sonic Computation for Hybrid Listening Ecologies"
+  authors:
+    - family-names: "Isaza"
+      given-names: "eme"
+  year: 2026

@@ -7,6 +7,8 @@ struct HealthResponse: Codable {
     let profile: String?
     let host: String?
     let port: Int?
+    let audioDir: String?
+    let engine: EngineStatusModel?
 
     enum CodingKeys: String, CodingKey {
         case ok
@@ -15,6 +17,98 @@ struct HealthResponse: Codable {
         case profile
         case host
         case port
+        case audioDir = "audio_dir"
+        case engine
+    }
+}
+
+struct EngineStatusModel: Codable {
+    let profile: String?
+    let state: String?
+    let detail: String?
+    let loadedModels: [String]?
+    let device: String?
+
+    enum CodingKeys: String, CodingKey {
+        case profile
+        case state
+        case detail
+        case loadedModels = "loaded_models"
+        case device
+    }
+}
+
+struct CaptureRequestModel: Codable {
+    let id: String
+    let seconds: Double?
+    let routePreset: String?
+    let requestedAt: String?
+    let status: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case seconds
+        case routePreset = "route_preset"
+        case requestedAt = "requested_at"
+        case status
+    }
+}
+
+struct CaptureRequestClaimPayload: Codable {
+    let id: String
+}
+
+struct RoutePresetModel: Codable, Identifiable {
+    let id: String
+    let name: String
+    let description: String?
+    let mossPasses: [String]?
+    let enabledByDefault: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case description
+        case mossPasses = "moss_passes"
+        case enabledByDefault = "enabled_by_default"
+    }
+}
+
+struct AkouoSkillsResponse: Codable {
+    let routePresets: [RoutePresetModel]?
+
+    enum CodingKeys: String, CodingKey {
+        case routePresets = "route_presets"
+    }
+}
+
+struct ListenEventPayload: Codable {
+    let path: String
+    let routePreset: String
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case routePreset = "route_preset"
+    }
+}
+
+struct ListenEventResponse: Codable {
+    let listeningEvent: ListeningEventSummary?
+    let background: BackgroundStatusResponse?
+
+    enum CodingKeys: String, CodingKey {
+        case listeningEvent = "listening_event"
+        case background
+    }
+}
+
+struct CaptureRequestClaimResponse: Codable {
+    let captureRequest: CaptureRequestModel?
+    let claimed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case captureRequest = "capture_request"
+        case claimed
     }
 }
 
@@ -114,6 +208,7 @@ struct BackgroundStateModel: Codable {
     let latestEvent: ListeningEventSummary?
     let pinnedEvents: [ListeningEventSummary]?
     let recentEvents: [ListeningEventSummary]?
+    let captureRequest: CaptureRequestModel?
 
     enum CodingKeys: String, CodingKey {
         case activeLiveSessionId = "active_live_session_id"
@@ -124,6 +219,7 @@ struct BackgroundStateModel: Codable {
         case latestEvent = "latest_event"
         case pinnedEvents = "pinned_events"
         case recentEvents = "recent_events"
+        case captureRequest = "capture_request"
     }
 }
 

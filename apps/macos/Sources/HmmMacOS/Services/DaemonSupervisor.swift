@@ -29,7 +29,7 @@ final class DaemonSupervisor {
         process?.isRunning == true
     }
 
-    func start(profile: String = "stub", host: String = "127.0.0.1", port: Int = 8765) throws {
+    func start(profile: String = "mac-mps", host: String = "127.0.0.1", port: Int = 8765) throws {
         guard process?.isRunning != true else {
             throw DaemonSupervisorError.alreadyRunning
         }
@@ -125,6 +125,12 @@ final class DaemonSupervisor {
             environment["DYLD_LIBRARY_PATH"] = existingDylibPath.isEmpty
                 ? homebrewLibPaths.joined(separator: ":")
                 : "\(homebrewLibPaths.joined(separator: ":")):\(existingDylibPath)"
+        }
+        if environment["HMM_DATA_DIR"] == nil, environment["AEAR_DATA_DIR"] == nil {
+            environment["HMM_DATA_DIR"] = hmmDataDirectory().path
+        }
+        if environment["HMM_AUDIO_DIR"] == nil, environment["AEAR_AUDIO_DIR"] == nil {
+            environment["HMM_AUDIO_DIR"] = hmmAudioDirectory().path
         }
         return environment
     }

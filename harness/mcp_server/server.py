@@ -11,8 +11,8 @@ SERVER = os.getenv("AEAR_SERVER_URL", "http://127.0.0.1:8765")
 
 TOOLS = [
     {
-        "name": "aear_report",
-        "description": "Run AEAR /report on a local audio file.",
+        "name": "hmm_report",
+        "description": "Run hmm /report on a local audio file.",
         "inputSchema": {
             "type": "object",
             "required": ["path"],
@@ -20,8 +20,8 @@ TOOLS = [
         },
     },
     {
-        "name": "aear_transcribe",
-        "description": "Run AEAR timestamped transcription.",
+        "name": "hmm_transcribe",
+        "description": "Run hmm timestamped transcription.",
         "inputSchema": {
             "type": "object",
             "required": ["path"],
@@ -29,7 +29,7 @@ TOOLS = [
         },
     },
     {
-        "name": "aear_qa",
+        "name": "hmm_qa",
         "description": "Ask a time-aware question about a local audio file.",
         "inputSchema": {
             "type": "object",
@@ -38,8 +38,8 @@ TOOLS = [
         },
     },
     {
-        "name": "aear_live_start",
-        "description": "Start a local AEAR live ring-buffer/VAD session.",
+        "name": "hmm_live_start",
+        "description": "Start a local hmm live ring-buffer/VAD session.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -49,18 +49,45 @@ TOOLS = [
         },
     },
     {
-        "name": "aear_live_status",
-        "description": "Get local AEAR live session status.",
+        "name": "hmm_live_status",
+        "description": "Get local hmm live session status.",
         "inputSchema": {"type": "object", "required": ["session_id"], "properties": {"session_id": {"type": "string"}}},
     },
     {
-        "name": "aear_live_stop",
-        "description": "Stop a local AEAR live session and write its manifest.",
+        "name": "hmm_live_stop",
+        "description": "Stop a local hmm live session and write its manifest.",
         "inputSchema": {"type": "object", "required": ["session_id"], "properties": {"session_id": {"type": "string"}}},
+    },
+    {
+        "name": "aear_report",
+        "description": "Legacy alias for hmm_report.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {"path": {"type": "string"}, "profile": {"type": "string", "default": "default"}},
+        },
+    },
+    {
+        "name": "aear_transcribe",
+        "description": "Legacy alias for hmm_transcribe.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {"path": {"type": "string"}, "timestamps": {"enum": ["none", "sentence", "word"], "default": "sentence"}},
+        },
+    },
+    {
+        "name": "aear_qa",
+        "description": "Legacy alias for hmm_qa.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["path", "question"],
+            "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "thinking_budget": {"type": "integer"}},
+        },
     },
     {
         "name": "ear_report",
-        "description": "Legacy alias for aear_report.",
+        "description": "Legacy alias for hmm_report.",
         "inputSchema": {
             "type": "object",
             "required": ["path"],
@@ -69,7 +96,7 @@ TOOLS = [
     },
     {
         "name": "ear_transcribe",
-        "description": "Legacy alias for aear_transcribe.",
+        "description": "Legacy alias for hmm_transcribe.",
         "inputSchema": {
             "type": "object",
             "required": ["path"],
@@ -78,7 +105,7 @@ TOOLS = [
     },
     {
         "name": "ear_qa",
-        "description": "Legacy alias for aear_qa.",
+        "description": "Legacy alias for hmm_qa.",
         "inputSchema": {
             "type": "object",
             "required": ["path", "question"],
@@ -86,8 +113,13 @@ TOOLS = [
         },
     },
     {
+        "name": "hmm_process_metrics",
+        "description": "Read process metrics from the local hmm daemon.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "aear_process_metrics",
-        "description": "Read process metrics from the local AEAR daemon.",
+        "description": "Legacy alias for hmm_process_metrics.",
         "inputSchema": {"type": "object", "properties": {}},
     },
 ]
@@ -119,7 +151,7 @@ def handle(message: object) -> dict[str, Any] | None:
     is_notification = "id" not in message
     try:
         if method == "initialize":
-            result = {"protocolVersion": "2024-11-05", "serverInfo": {"name": "aear-local", "version": "0.1.0"}, "capabilities": {"tools": {}}}
+            result = {"protocolVersion": "2024-11-05", "serverInfo": {"name": "hmm-local", "version": "0.1.0"}, "capabilities": {"tools": {}}}
         elif method == "tools/list":
             result = {"tools": TOOLS}
         elif method == "tools/call":
@@ -145,28 +177,39 @@ def handle(message: object) -> dict[str, Any] | None:
 def call_tool(params: dict[str, Any]) -> dict[str, object]:
     name = params.get("name")
     arguments = params.get("arguments", {})
-    canonical = {"ear_report": "aear_report", "ear_transcribe": "aear_transcribe", "ear_qa": "aear_qa"}.get(str(name), name)
-    if canonical == "aear_report":
+    canonical = {
+        "aear_report": "hmm_report",
+        "ear_report": "hmm_report",
+        "aear_transcribe": "hmm_transcribe",
+        "ear_transcribe": "hmm_transcribe",
+        "aear_qa": "hmm_qa",
+        "ear_qa": "hmm_qa",
+        "aear_live_start": "hmm_live_start",
+        "aear_live_status": "hmm_live_status",
+        "aear_live_stop": "hmm_live_stop",
+        "aear_process_metrics": "hmm_process_metrics",
+    }.get(str(name), name)
+    if canonical == "hmm_report":
         return post_json(SERVER, "/report", {"path": _required(arguments, "path"), "profile": arguments.get("profile", "default")})
-    if canonical == "aear_transcribe":
+    if canonical == "hmm_transcribe":
         return post_json(SERVER, "/transcribe", {"path": _required(arguments, "path"), "timestamps": arguments.get("timestamps", "sentence")})
-    if canonical == "aear_qa":
+    if canonical == "hmm_qa":
         return post_json(
             SERVER,
             "/qa",
             {"path": _required(arguments, "path"), "question": _required(arguments, "question"), "thinking_budget": arguments.get("thinking_budget")},
         )
-    if canonical == "aear_live_start":
+    if canonical == "hmm_live_start":
         return post_json(
             SERVER,
             "/live/start",
             {"ring_seconds": arguments.get("ring_seconds", 60), "vad_threshold_dbfs": arguments.get("vad_threshold_dbfs", -45)},
         )
-    if canonical == "aear_live_status":
+    if canonical == "hmm_live_status":
         return post_json(SERVER, "/live/status", {"session_id": _required(arguments, "session_id")})
-    if canonical == "aear_live_stop":
+    if canonical == "hmm_live_stop":
         return post_json(SERVER, "/live/stop", {"session_id": _required(arguments, "session_id")})
-    if canonical == "aear_process_metrics":
+    if canonical == "hmm_process_metrics":
         return get_json(SERVER, "/metrics/process")
     raise ValueError(f"unknown tool: {name}")
 

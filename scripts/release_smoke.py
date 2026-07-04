@@ -8,6 +8,7 @@ import plistlib
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -137,8 +138,23 @@ def check_daemon(server: str, repo_root: Path, mutating: bool, result: CheckResu
     else:
         result.fail(f"unexpected generation history payload: {generation_history}")
 
+    check_daemon_security(server, result)
+
     if mutating:
         smoke_generation_prompt(server, repo_root, result)
+
+
+def check_daemon_security(server: str, result: CheckResult) -> None:
+    if not is_loopback_server(server):
+        result.warn("skipping loopback Origin/Host smoke check for non-loopback server URL")
+        return
+    evil_origin = expect_http_status(server, "/health", 403, headers={"origin": "http://evil.example"})
+    null_origin = expect_http_status(server, "/health", 403, headers={"origin": "null"})
+    evil_host = expect_http_status(server, "/health", 403, headers={"host": "evil.example"})
+    if evil_origin and null_origin and evil_host:
+        result.ok("loopback Origin/Host guard rejects cross-site and DNS-rebinding requests")
+    else:
+        result.fail("loopback Origin/Host guard did not reject all release-smoke probes")
 
 
 def smoke_generation_prompt(server: str, repo_root: Path, result: CheckResult) -> None:
@@ -248,15 +264,27 @@ def check_archive(archive_path: Path, result: CheckResult) -> None:
 
 
 def get_json(server: str, path: str) -> dict[str, Any]:
-    with urllib.request.urlopen(f"{server}{path}", timeout=15) as response:
+    request = urllib.request.Request(f"{server}{path}", headers=request_headers(), method="GET")
+    with urllib.request.urlopen(request, timeout=15) as response:
         return json.loads(response.read())
+
+
+def expect_http_status(server: str, path: str, expected: int, headers: dict[str, str] | None = None) -> bool:
+    request = urllib.request.Request(f"{server}{path}", headers=request_headers(headers), method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status == expected
+    except urllib.error.HTTPError as exc:
+        return exc.code == expected
+    except urllib.error.URLError:
+        return False
 
 
 def post_json(server: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
     request = urllib.request.Request(
         f"{server}{path}",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"content-type": "application/json"},
+        headers=request_headers({"content-type": "application/json"}),
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=20) as response:
@@ -265,6 +293,20 @@ def post_json(server: str, path: str, payload: dict[str, Any]) -> dict[str, Any]
 
 def safe_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-") or "generation"
+
+
+def is_loopback_server(server: str) -> bool:
+    parsed = urllib.parse.urlparse(server)
+    host = (parsed.hostname or "").lower()
+    return host in {"127.0.0.1", "::1", "localhost", "0.0.0.0"}
+
+
+def request_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    headers = dict(extra or {})
+    token = os.getenv("HMM_AUTH_TOKEN") or os.getenv("AEAR_AUTH_TOKEN")
+    if token:
+        headers["authorization"] = f"Bearer {token}"
+    return headers
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ struct SettingsView: View {
                 HStack {
                     Text(store.daemonOnline ? "Online" : "Offline")
                         .foregroundStyle(store.daemonOnline ? .green : .orange)
+                    Text(store.engineLabel)
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Button("Refresh") {
                         Task { await store.refresh() }
@@ -19,22 +21,26 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Global Hotkey") {
-                TextField("control+option+h", text: $store.shellHotkey)
-                    .textFieldStyle(.roundedBorder)
-
+            Section("Global Hotkeys") {
+                LabeledContent("Listen (capture system audio)") {
+                    TextField("control+option+l", text: $store.listenHotkey)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
+                LabeledContent("Show/hide floating listener") {
+                    TextField("control+option+h", text: $store.toggleHotkey)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
                 HStack {
                     Text(store.hotkeyStatus)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Register") {
-                        store.registerCaptureHotkey()
+                    Button("Apply") {
+                        store.registerHotkeys()
                     }
                 }
-
-                Text("No default global shortcut is installed. Use a modified key such as control+option+h, then register it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section("Launch") {
@@ -53,15 +59,11 @@ struct SettingsView: View {
                         store.setLaunchAtLogin(false)
                     }
                 }
-
-                Text("Registration uses macOS ServiceManagement for the main app bundle. Some builds may require System Settings approval.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
-            Section("Shell Limits") {
-                Label("Native system-output capture uses ScreenCaptureKit and needs Screen Recording permission.", systemImage: "speaker.wave.2")
-                Label("Quick capture requires an active daemon live session.", systemImage: "waveform")
+            Section {
+                Label("System-output capture uses ScreenCaptureKit and needs Screen Recording permission.", systemImage: "speaker.wave.2")
+                    .font(.caption)
             }
             .foregroundStyle(.secondary)
         }

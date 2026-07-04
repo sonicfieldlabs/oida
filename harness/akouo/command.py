@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from harness.akouo.routing import route_for_command, routing_plan
+from harness.akouo.routing import evidence_level_for_report, route_for_command, routing_plan
 from harness.claim_mapper import map_report_to_claims
 from harness.types import LISTENING_MODES, empty_mediations, empty_risks
 
@@ -38,7 +38,8 @@ def build_listening_output(
 def build_command_output(report: dict[str, Any], command: str = "/listen", question: str | None = None) -> dict[str, Any]:
     source = report.get("source") if isinstance(report.get("source"), dict) else {}
     object_listened_to = str(source.get("path") or "audio file")
-    plan = routing_plan(object_listened_to, command=command, evidence_level="mixed")
+    evidence_level = evidence_level_for_report(report)
+    plan = routing_plan(object_listened_to, command=command, evidence_level=evidence_level)
     claims = map_report_to_claims(report, claim_permissions=plan["claim_permissions"], question=question)
     route = route_for_command(command)
     outputs = [
@@ -50,7 +51,7 @@ def build_command_output(report: dict[str, Any], command: str = "/listen", quest
         )
         for mode in route.modes
     ]
-    skills_called = ["akouo-router", *route.modes]
+    skills_called = _skills_called_for_command(command, route.modes)
     return {
         "command": command,
         "object_listened_to": object_listened_to,
@@ -85,13 +86,30 @@ def build_harness_output(report: dict[str, Any], command: str = "/listen", mode:
         selected = [build_listening_output(object_listened_to, mode, claims, recommended_next_mode=output["recommended_next_mode"])]
 
     output["outputs"] = selected
-    output["skills_called"] = ["akouo-router", mode]
-    output["execution_order"] = ["akouo-router", mode]
+    output["skills_called"] = _skills_called_for_command(command, [mode])
+    output["execution_order"] = output["skills_called"]
     output["routing_plan"]["mode_chain"] = [
-        {"mode": mode, "role": "primary", "reason": f"{mode} selected explicitly from the AEAR harness UI."}
+        {"mode": mode, "role": "primary", "reason": f"{mode} selected explicitly from the hmm harness UI."}
     ]
     output["synthesis"] = f"{mode} selected from {command}; " + output["synthesis"]
     return output
+
+
+def _skills_called_for_command(command: str, modes: list[str]) -> list[str]:
+    skills = ["akouo-router", *modes]
+    if command in {"/reference", "/method"}:
+        skills.append("reference-layer")
+    return _dedupe(skills)
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
 
 
 def summarize_visible_claims(claims: dict[str, list[dict[str, str]]]) -> list[str]:
@@ -104,7 +122,7 @@ def summarize_visible_claims(claims: dict[str, list[dict[str, str]]]) -> list[st
 def synthesize_claims(claims: dict[str, list[dict[str, str]]], command: str) -> str:
     counts = {category: len(items) for category, items in claims.items()}
     return (
-        f"{command} produced a mixed MOSS + DSP listening result with "
+        f"{command} produced an AKOUO-disciplined listening result with "
         f"{counts.get('heard', 0)} heard, {counts.get('measured', 0)} measured, "
         f"{counts.get('inferred', 0)} inferred, {counts.get('interpreted', 0)} interpreted, "
         f"{counts.get('speculative', 0)} speculative, and {counts.get('undetermined', 0)} undetermined claims."

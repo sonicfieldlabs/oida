@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import soundfile as sf
@@ -23,6 +24,7 @@ from aear.source_routes import native_system_audio_route_manifest, normalize_sys
 from aear.sources import source_registry_dict
 from aear.system_audio import classify_browser_audio_device, is_loopback_device_label, system_audio_status
 from harness.akouo.command import build_harness_output
+from harness.akouo.routing import evidence_level_for_report
 
 
 class HmmFoundationTests(unittest.TestCase):
@@ -117,6 +119,19 @@ class HmmFoundationTests(unittest.TestCase):
         self.assertGreater(snapshot["meter"]["rms"], 0)
         self.assertEqual(snapshot["meter"]["basis"], "browser-uploaded-live-chunk-dsp")
 
+    def test_live_manager_evicts_old_stopped_sessions(self) -> None:
+        from aear.live import STOPPED_SESSIONS_KEEP
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"HMM_DATA_DIR": tmp}, clear=False):
+            manager = LiveManager()
+            session_ids = [manager.start()["session_id"] for _ in range(STOPPED_SESSIONS_KEEP + 4)]
+            for session_id in session_ids:
+                manager.stop(session_id)
+            stopped_kept = [session_id for session_id in session_ids if session_id in manager.sessions]
+
+        self.assertEqual(len(stopped_kept), STOPPED_SESSIONS_KEEP)
+        self.assertEqual(stopped_kept, session_ids[-STOPPED_SESSIONS_KEEP:])
+
     def test_listening_event_normalizes_report_and_akouo_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_tone(Path(tmp) / "tone.wav")
@@ -171,6 +186,36 @@ class HmmFoundationTests(unittest.TestCase):
         self.assertEqual(event["segment"]["metadata"]["raw_audio_policy"], "temp")
         self.assertEqual(event["source"]["details"]["source_route"]["capture_scope"], "display_mix")
         self.assertEqual(event["segment"]["metadata"]["source_route"]["model_input_policy"]["moss_audio"], "16_khz_mono")
+        self.assertEqual(event["raw_audio_policy"], "temp")
+
+    def test_listening_event_preserves_live_capture_segment_source_dict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = write_tone(Path(tmp) / "system-output.wav")
+            manager = LiveManager()
+            started = manager.start(
+                ring_seconds=2.0,
+                source_type="system_output",
+                source_label="BlackHole 2ch",
+                device_id="loopback-1",
+            )
+            manager.ingest_saved_upload(started["session_id"], {"path": str(source_path), "raw_path": str(source_path), "sha256": "a"})
+            capture = manager.capture_last(started["session_id"], seconds=0.5)
+            report_dict = report_to_dict(report(StubMossEngine(), str(capture["path"])))
+            command_output = build_harness_output(report_dict, command="/listen")
+            event = listening_event_dict(
+                report_dict,
+                command_output=command_output,
+                segment=capture["segment"],
+                route_preset_id="basic",
+                privacy_mode="ephemeral",
+                raw_audio_policy="temp",
+            )
+            Path(str(capture["path"])).unlink(missing_ok=True)
+
+        self.assertEqual(event["source"]["type"], "system_output")
+        self.assertIn("BlackHole", event["source"]["label"])
+        self.assertEqual(event["source"]["device_id"], "loopback-1")
+        self.assertEqual(event["segment"]["metadata"]["live_session_id"], started["session_id"])
         self.assertEqual(event["raw_audio_policy"], "temp")
 
     def test_native_system_audio_route_manifest_documents_display_mix(self) -> None:
@@ -231,6 +276,9 @@ class HmmFoundationTests(unittest.TestCase):
         self.assertEqual(exported["trace_count"], 1)
         self.assertEqual(trace["audioPolicy"]["rawAudioPolicy"], "external_ref")
         self.assertEqual(forgotten["forgotten"], trace["id"])
+        self.assertEqual(trace["earworm"]["version"], "0.1.0")
+        self.assertEqual(trace["earworm"]["session"]["app_id"], "hmm.akousmata")
+        self.assertEqual(trace["earworm"]["context_bundle"]["assets"][0]["asset_id"], trace["earworm"]["session"]["assets"][0]["asset_id"])
 
     def test_akousmata_memory_enriches_events_with_similarity_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -251,6 +299,46 @@ class HmmFoundationTests(unittest.TestCase):
 
         self.assertIn(trace["id"], enriched["memory"]["similar_trace_ids"])
         self.assertEqual(enriched["memory"]["similarity"][0]["basis"], "dsp_feature_similarity")
+
+    def test_akousmata_similarity_requires_multiple_shared_feature_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AkousmataStore(root=Path(tmp) / "akousmata")
+            event = {
+                "id": "evt_a",
+                "source": {"type": "file", "label": "a"},
+                "segment": {"data_ref": {"kind": "path", "uri": "a.wav"}},
+                "aggregate": {"title": "Short", "short_summary": "Short."},
+                "features": {"duration_s": 1.0},
+                "privacy_mode": "session",
+                "raw_audio_policy": "external_ref",
+            }
+            store.remember(event)
+            similar = store.similar_to_event({**event, "id": "evt_b", "features": {"duration_s": 1.0, "rmsDbfs": -12.0}})
+
+        self.assertEqual(similar, [])
+
+    def test_akousmata_similarity_cache_reflects_external_trace_updates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AkousmataStore(root=Path(tmp) / "akousmata")
+            event = {
+                "id": "evt_a",
+                "source": {"type": "file", "label": "a"},
+                "segment": {"data_ref": {"kind": "path", "uri": "a.wav"}},
+                "aggregate": {"title": "Low hum", "short_summary": "Low hum."},
+                "features": {"duration_s": 1.0, "rmsDbfs": -24.0, "spectralCentroidHz": 220.0},
+                "privacy_mode": "session",
+                "raw_audio_policy": "external_ref",
+            }
+            trace = store.remember(event)
+            self.assertEqual(store.list()[0]["title"], "Low hum")
+            trace_path = Path(tmp) / "akousmata" / "traces" / f"{trace['id']}.json"
+            payload = json.loads(trace_path.read_text(encoding="utf-8"))
+            payload["title"] = "Updated hum"
+            trace_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            listed = store.list()
+
+        self.assertEqual(listed[0]["title"], "Updated hum")
 
     def test_conversation_answers_from_event_and_memory_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -351,6 +439,36 @@ class HmmFoundationTests(unittest.TestCase):
         self.assertEqual(restored.config.default_route_preset, "signal")
         self.assertEqual(runtime.status()["state"]["active_live_session_id"], "live-1")
         self.assertTrue(runtime.status()["config"]["paused"])
+
+    def test_background_runtime_normalizes_invalid_config_updates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "background.json"
+            runtime = BackgroundRuntime(config_path=config_path)
+            runtime.update_config({
+                "default_capture_seconds": -5,
+                "default_route_preset": "not-a-route",
+                "floating_agent": {"size": "huge", "x": "nan"},
+                "recent_history": {"max_events": 999},
+                "upload_audio_retention": {"policy": "bad", "max_files": -1},
+            })
+            restored = BackgroundRuntime(config_path=config_path)
+
+        self.assertEqual(restored.config.default_capture_seconds, 10.0)
+        self.assertEqual(restored.config.default_route_preset, "basic")
+        self.assertEqual(restored.config.floating_agent["size"], "compact")
+        self.assertIsNone(restored.config.floating_agent["x"])
+        self.assertEqual(restored.config.recent_history["max_events"], 50)
+        self.assertEqual(restored.config.upload_audio_retention["policy"], "keep")
+
+    def test_akouo_evidence_level_reflects_unavailable_model(self) -> None:
+        report = {
+            "engine": {"profile": "mac-mps", "unavailable_reason": "no weights"},
+            "dsp": {"durationSeconds": 1.0, "sampleRate": 16000, "channelCount": 1, "features": {"rmsDbfs": -20.0}},
+            "caption": {"dense": "stub caption"},
+            "transcript": {"present": False},
+        }
+
+        self.assertEqual(evidence_level_for_report(report), "measured_signal")
 
     def test_background_runtime_rejects_actions_while_paused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

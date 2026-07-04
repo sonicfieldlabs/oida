@@ -8,7 +8,7 @@ from typing import Any
 
 
 def session_dir(base: str | Path, audio_path: str | Path) -> Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", Path(audio_path).stem).strip("-").lower() or "audio"
     path = Path(base) / "sessions" / f"{stamp}-{slug}"
     path.mkdir(parents=True, exist_ok=False)
@@ -32,7 +32,7 @@ def write_session(base: str | Path, audio_path: str | Path, report: dict[str, An
 def render_journal(audio_path: str | Path, report: dict[str, Any], command_output: dict[str, Any]) -> str:
     claims = command_output.get("claim_summary", {})
     lines = [
-        f"# AEAR Listening Journal - {Path(audio_path).name}",
+        f"# hmm Listening Journal - {Path(audio_path).name}",
         "",
         f"- Command: `{command_output.get('command', '/listen')}`",
         f"- Source: `{report.get('source', {}).get('path', audio_path)}`",
@@ -64,4 +64,3 @@ def append_lexicon_entry(path: str | Path, entry: dict[str, Any]) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with Path(path).open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-

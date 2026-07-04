@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
+
+_SEGMENT_PREFIX_RE = re.compile(r"^Segment \d+ \[[0-9.]+-[0-9.]+s\]:\s*")
 
 from aear.akouo_skills import RoutePreset, resolve_route_skill_ids, route_preset, skill_manifest
 from aear.contracts import (
     AkousmataLinks,
     AudioSegment,
+    AudioSourceDescriptor,
+    AudioTimeRange,
     ListeningAggregate,
     ListeningArtifact,
     ListeningEvent,
@@ -165,6 +170,7 @@ def _skill_structured_output(
     output: dict[str, Any],
 ) -> dict[str, Any]:
     skill = skill_manifest(skill_id)
+    routing = command_output.get("routing_plan") if isinstance(command_output.get("routing_plan"), dict) else {}
     return {
         "skill_id": skill.id,
         "listening_mode": skill.listening_mode,
@@ -172,6 +178,7 @@ def _skill_structured_output(
         "route_preset": preset.id,
         "akouo_command": preset.akouo_command,
         "akouo_output": output,
+        "evidence_level": routing.get("evidence_level"),
         "features": _features(report),
         "claim_summary": command_output.get("claim_summary") if isinstance(command_output.get("claim_summary"), dict) else {},
     }
@@ -221,12 +228,6 @@ def _aggregate(report: dict[str, Any], command_output: dict[str, Any], route_pre
 
 
 def _short_summary(report: dict[str, Any], command_output: dict[str, Any]) -> str:
-    outputs = command_output.get("outputs") if isinstance(command_output.get("outputs"), list) else []
-    for output in outputs:
-        if isinstance(output, dict):
-            what_appears = output.get("what_appears")
-            if isinstance(what_appears, list) and what_appears:
-                return str(what_appears[0])
     caption = report.get("caption") if isinstance(report.get("caption"), dict) else {}
     for key in ("brief", "dense"):
         value = caption.get(key)
@@ -237,6 +238,15 @@ def _short_summary(report: dict[str, Any], command_output: dict[str, Any]) -> st
         labels = [str(event.get("label")) for event in events[:3] if isinstance(event, dict) and event.get("label")]
         if labels:
             return "Heard events: " + ", ".join(labels)
+    signal_caption = _signal_interpretation(report).get("caption")
+    if isinstance(signal_caption, str) and signal_caption.strip():
+        return signal_caption.strip()
+    outputs = command_output.get("outputs") if isinstance(command_output.get("outputs"), list) else []
+    for output in outputs:
+        if isinstance(output, dict):
+            what_appears = output.get("what_appears")
+            if isinstance(what_appears, list) and what_appears:
+                return str(what_appears[0])
     return "No confident listening summary was produced."
 
 
@@ -251,7 +261,16 @@ def _summary_from_report(report: dict[str, Any]) -> str:
     transcript = report.get("transcript") if isinstance(report.get("transcript"), dict) else {}
     if transcript.get("present"):
         parts.append("Speech route produced transcript content.")
+    if not parts:
+        signal_caption = _signal_interpretation(report).get("caption")
+        if isinstance(signal_caption, str) and signal_caption.strip():
+            parts.append(signal_caption.strip())
     return " ".join(parts) or "Perception report contains DSP metadata and model uncertainty notes."
+
+
+def _signal_interpretation(report: dict[str, Any]) -> dict[str, Any]:
+    signal = report.get("signal_interpretation")
+    return signal if isinstance(signal, dict) else {}
 
 
 def _event_title(report: dict[str, Any], fallback: str) -> str:
@@ -260,8 +279,22 @@ def _event_title(report: dict[str, Any], fallback: str) -> str:
         if isinstance(event, dict) and event.get("label"):
             return _title(str(event["label"]))[:90]
     caption = report.get("caption") if isinstance(report.get("caption"), dict) else {}
-    text = caption.get("brief") or caption.get("dense") or fallback
-    return " ".join(str(text).split())[:90] or "Listening event"
+    text = caption.get("brief") or caption.get("dense")
+    if not text:
+        signal_title = _signal_interpretation(report).get("title")
+        if isinstance(signal_title, str) and signal_title.strip():
+            return signal_title.strip()[:90]
+    text = _SEGMENT_PREFIX_RE.sub("", str(text or fallback))
+    return _truncate_words(" ".join(text.split()), 88) or "Listening event"
+
+
+def _truncate_words(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if " " in cut:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip(",.;:") + "…"
 
 
 def _features(report: dict[str, Any]) -> dict[str, Any]:
@@ -285,6 +318,9 @@ def _primary_tags(report: dict[str, Any]) -> list[str]:
     for event in events[:4]:
         if isinstance(event, dict) and event.get("label"):
             tags.append(_slug(str(event["label"])))
+    classification = _signal_interpretation(report).get("classification")
+    if isinstance(classification, str) and classification and classification != "mixed-material":
+        tags.append(classification)
     if not tags:
         tags.append("listening-event")
     return _dedupe(tags)
@@ -373,8 +409,47 @@ def _segment_from_dict(segment: dict[str, Any]) -> AudioSegment:
     path = data_ref.get("uri")
     if not path:
         raise ValueError("segment dict must include data_ref.uri")
+    audio_path = Path(str(path))
+    source = _source_from_dict(segment.get("source"), audio_path)
+    time_range = _time_range_from_dict(segment.get("time_range"))
+    captured_at = segment.get("captured_at")
+    raw_sha256 = data_ref.get("sha256")
     return audio_segment_from_path(
-        Path(str(path)),
+        audio_path,
+        source=source,
         privacy_mode=str(segment.get("privacy_mode") or "session"),  # type: ignore[arg-type]
+        raw_sha256=str(raw_sha256) if raw_sha256 else None,
         ephemeral=bool(segment.get("ephemeral", False)),
+        user_initiated=bool(segment.get("user_initiated", True)),
+        captured_at=str(captured_at) if captured_at else None,
+        time_range=time_range,
+        metadata=dict(segment.get("metadata")) if isinstance(segment.get("metadata"), dict) else None,
     )
+
+
+def _source_from_dict(value: Any, path: Path) -> AudioSourceDescriptor | None:
+    if not isinstance(value, dict):
+        return None
+    source_type = str(value.get("type") or "file")
+    if source_type not in {"live_input", "system_output", "file", "buffer", "generated", "external_stream"}:
+        source_type = "file"
+    details = value.get("details") if isinstance(value.get("details"), dict) else {}
+    return AudioSourceDescriptor(
+        type=source_type,  # type: ignore[arg-type]
+        label=str(value.get("label") or path.name or "Audio file"),
+        device_id=str(value.get("device_id")) if value.get("device_id") else None,
+        platform=str(value.get("platform")) if value.get("platform") else None,
+        supported=bool(value.get("supported", True)),
+        status=str(value.get("status") or "ready"),
+        details={**details, "path": str(path.expanduser().resolve())},
+    )
+
+
+def _time_range_from_dict(value: Any) -> AudioTimeRange | None:
+    if not isinstance(value, dict):
+        return None
+    start = value.get("start_ms")
+    end = value.get("end_ms")
+    if isinstance(start, int) and isinstance(end, int):
+        return AudioTimeRange(start_ms=start, end_ms=end)
+    return None

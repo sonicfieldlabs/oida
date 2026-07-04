@@ -62,12 +62,15 @@ def sha256_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def load_audio(path: str | Path, target_sr: int | None = None, mono: bool = False) -> AudioData:
+def load_audio(path: str | Path, target_sr: int | None = None, mono: bool = False, max_seconds: float | None = None) -> AudioData:
     audio_path = Path(path)
+    frames = None
+    if isinstance(max_seconds, (int, float)) and max_seconds > 0:
+        frames = max(1, int(math.ceil(float(max_seconds) * _samplerate_hint(audio_path))))
     try:
-        samples, sample_rate = sf.read(str(audio_path), always_2d=True, dtype="float32")
+        samples, sample_rate = sf.read(str(audio_path), frames=frames, always_2d=True, dtype="float32")
     except Exception:
-        samples, sample_rate = _load_wave(audio_path)
+        samples, sample_rate = _load_wave(audio_path, max_frames=frames)
 
     if samples.ndim == 1:
         samples = samples[:, None]
@@ -84,12 +87,13 @@ def load_audio(path: str | Path, target_sr: int | None = None, mono: bool = Fals
     return AudioData(samples=samples, sample_rate=int(sample_rate), channels=channels, duration_s=duration_s)
 
 
-def _load_wave(path: Path) -> tuple[np.ndarray, int]:
+def _load_wave(path: Path, max_frames: int | None = None) -> tuple[np.ndarray, int]:
     with wave.open(str(path), "rb") as handle:
         channels = handle.getnchannels()
         sample_rate = handle.getframerate()
         sample_width = handle.getsampwidth()
-        frames = handle.readframes(handle.getnframes())
+        frame_count = min(handle.getnframes(), max_frames) if max_frames is not None else handle.getnframes()
+        frames = handle.readframes(frame_count)
 
     if sample_width == 1:
         raw = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
@@ -116,16 +120,44 @@ def _resample(samples: np.ndarray, source_sr: int, target_sr: int) -> np.ndarray
     return resample_poly(samples, up, down, axis=0).astype(np.float32)
 
 
+def _samplerate_hint(path: Path) -> int:
+    try:
+        info = sf.info(str(path))
+        if info.samplerate > 0:
+            return int(info.samplerate)
+    except Exception:
+        pass
+    try:
+        with wave.open(str(path), "rb") as handle:
+            return int(handle.getframerate())
+    except Exception:
+        return 48_000
+
+
 def inspect_path(path: str | Path) -> dict[str, object]:
-    audio = load_audio(path)
+    info = audio_info(path)
+    audio = load_audio(path, max_seconds=HEAVY_ANALYSIS_MAX_SECONDS)
     features = analyze_audio(audio)
     return {
         "path": str(Path(path).expanduser().resolve()),
-        "durationSeconds": audio.duration_s,
-        "sampleRate": audio.sample_rate,
-        "channelCount": audio.channels,
+        "durationSeconds": info["durationSeconds"] if info else audio.duration_s,
+        "sampleRate": info["sampleRate"] if info else audio.sample_rate,
+        "channelCount": info["channelCount"] if info else audio.channels,
         "sha256": sha256_file(path),
         "features": clean_dict(asdict(features)),
+    }
+
+
+def audio_info(path: str | Path) -> dict[str, object] | None:
+    try:
+        info = sf.info(str(path))
+    except Exception:
+        return None
+    duration = float(info.frames / info.samplerate) if info.samplerate > 0 and info.frames >= 0 else 0.0
+    return {
+        "durationSeconds": duration,
+        "sampleRate": int(info.samplerate),
+        "channelCount": int(info.channels),
     }
 
 

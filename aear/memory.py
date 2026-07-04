@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from aear.config import REPO_ROOT
+from aear.config import data_dir
 from aear.contracts import new_id, now_iso
 from aear.privacy import redact_event_audio_for_policy
+from aear.raw_audio import delete_upload_paths
 from aear.storage import write_json_atomic
 
 FEATURE_KEYS = [
@@ -31,11 +33,13 @@ FEATURE_KEYS = [
     "loudnessRangeLu",
     "stereoWidth",
 ]
+MIN_SIMILARITY_SHARED_FEATURES = 3
 
 
 @dataclass(frozen=True)
 class AkousmataStore:
-    root: Path = REPO_ROOT / "akousmata"
+    root: Path = field(default_factory=lambda: data_dir() / "akousmata")
+    _trace_cache: dict[str, tuple[int, int, dict[str, Any]]] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     @property
     def traces_dir(self) -> Path:
@@ -100,7 +104,10 @@ class AkousmataStore:
             "routeIds": list(_route_summaries(event)),
             "event": stored_event,
         }
-        write_json_atomic(self._path(trace_id), trace)
+        trace["earworm"] = _earworm_surface(trace, event)
+        trace_path = self._path(trace_id)
+        write_json_atomic(trace_path, trace)
+        self._cache_trace(trace_path, trace)
         return trace
 
     def list(
@@ -118,9 +125,8 @@ class AkousmataStore:
             return []
         traces = []
         for path in sorted(self.traces_dir.glob("*.json"), reverse=True):
-            try:
-                trace = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
+            trace = self._load_trace(path)
+            if trace is None:
                 continue
             if query and _terms(query) and not _matches(trace, query):
                 continue
@@ -141,14 +147,20 @@ class AkousmataStore:
         path = self._path(trace_id)
         if not path.exists():
             raise FileNotFoundError(f"unknown Akousmata trace: {trace_id}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        trace = self._load_trace(path)
+        if trace is None:
+            raise ValueError(f"invalid Akousmata trace JSON: {trace_id}")
+        return trace
 
     def forget(self, trace_id: str) -> dict[str, Any]:
         path = self._path(trace_id)
         if not path.exists():
             raise FileNotFoundError(f"unknown Akousmata trace: {trace_id}")
+        trace = self._load_trace(path) or {}
         path.unlink()
-        return {"forgotten": trace_id}
+        self._trace_cache.pop(_cache_key(path), None)
+        raw_audio_cleanup = _cleanup_trace_audio(trace)
+        return {"forgotten": trace_id, "raw_audio_cleanup": raw_audio_cleanup}
 
     def export_json(self, **filters: Any) -> dict[str, Any]:
         traces = self.list(**filters)
@@ -198,6 +210,34 @@ class AkousmataStore:
         safe = re.sub(r"[^A-Za-z0-9._-]+", "-", trace_id).strip("-") or "trace"
         return self.traces_dir / f"{safe}.json"
 
+    def _load_trace(self, path: Path) -> dict[str, Any] | None:
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return None
+        key = _cache_key(path)
+        cached = self._trace_cache.get(key)
+        if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+            return copy.deepcopy(cached[2])
+        try:
+            trace = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            self._trace_cache.pop(key, None)
+            return None
+        if not isinstance(trace, dict):
+            self._trace_cache.pop(key, None)
+            return None
+        self._trace_cache[key] = (stat.st_mtime_ns, stat.st_size, copy.deepcopy(trace))
+        return trace
+
+    def _cache_trace(self, path: Path, trace: dict[str, Any]) -> None:
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            self._trace_cache.pop(_cache_key(path), None)
+            return
+        self._trace_cache[_cache_key(path)] = (stat.st_mtime_ns, stat.st_size, copy.deepcopy(trace))
+
 
 def _normalize_privacy_mode(value: object) -> str:
     mode = str(value or "").strip().lower()
@@ -208,6 +248,255 @@ def _normalize_privacy_mode(value: object) -> str:
     if mode == "ephemeral":
         return "session"
     return "saved"
+
+
+def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    trace_id = str(trace.get("id") or new_id("trace"))
+    event_id = str(trace.get("listeningEventId") or event.get("id") or new_id("evt"))
+    session_id = f"earworm_{trace_id}"
+    asset_id = f"asset_{event_id}"
+    provenance_id = f"prov_{event_id}"
+    created_at = str(trace.get("createdAt") or now_iso())
+    segment = event.get("segment") if isinstance(event.get("segment"), dict) else {}
+    source = event.get("source") if isinstance(event.get("source"), dict) else {}
+    data_ref = segment.get("data_ref") if isinstance(segment.get("data_ref"), dict) else {}
+    features = event.get("features") if isinstance(event.get("features"), dict) else {}
+    duration_s = _duration_seconds(event, features)
+    asset_hash = data_ref.get("sha256") if isinstance(data_ref.get("sha256"), str) else None
+    audio_uri = data_ref.get("uri") if isinstance(data_ref.get("uri"), str) and trace.get("audioStored") else None
+    policy = _earworm_policy(trace)
+    provenance = {
+        "provenance_id": provenance_id,
+        "source_type": _earworm_source_type(str(source.get("type") or trace.get("sourceKind") or "unknown")),
+        "provider": "hmm",
+        "asset_hash": asset_hash,
+        "consent_status": _consent_status(event, trace),
+        "usage_constraints": _usage_constraints(event, trace),
+        "created_at": created_at,
+    }
+    asset = {
+        "asset_id": asset_id,
+        "type": "audio",
+        "uri": audio_uri,
+        "duration_seconds": duration_s,
+        "sample_rate": _int_or_none(features.get("sample_rate") or segment.get("sample_rate")),
+        "channels": _int_or_none(features.get("channels") or segment.get("channels")),
+        "provenance_id": provenance_id,
+    }
+    asset = {key: value for key, value in asset.items() if value is not None}
+    events = [
+        _earworm_event(
+            session_id,
+            "signal.packet.ingested",
+            created_at,
+            "system",
+            {
+                "packet_id": f"packet_{event_id}",
+                "signal_type": "audio",
+                "asset_ref": asset_id,
+                "segment_id": segment.get("id"),
+                "time_range": {"start": 0, "end": duration_s or 0, "unit": "seconds"},
+                "context_refs": [event_id],
+                "provenance_id": provenance_id,
+                "tags": trace.get("tags") if isinstance(trace.get("tags"), list) else [],
+                "source": source,
+                "raw_audio_policy": trace.get("rawAudioPolicy"),
+            },
+            reversible=False,
+            provenance_id=provenance_id,
+        ),
+        _earworm_event(
+            session_id,
+            "analysis.frame",
+            created_at,
+            "agent",
+            {
+                "frame_id": f"analysis_{event_id}",
+                "asset_ref": asset_id,
+                "time_range": {"start": 0, "end": duration_s or 0, "unit": "seconds"},
+                "features": features,
+                "claim_summary": _claim_summary_from_event(event),
+                "routes": event.get("routes") if isinstance(event.get("routes"), list) else [],
+            },
+            reversible=False,
+            provenance_id=provenance_id,
+        ),
+        _earworm_event(
+            session_id,
+            "agent.action.applied",
+            created_at,
+            "agent",
+            {
+                "action_id": f"remember_{trace_id}",
+                "action": "akousmata.remember",
+                "trace_id": trace_id,
+                "listening_event_id": event_id,
+                "retention_policy": trace.get("retentionPolicy"),
+                "audio_policy": trace.get("audioPolicy"),
+            },
+            reversible=True,
+            parent_event_ids=[f"analysis_{event_id}"],
+            provenance_id=provenance_id,
+        ),
+    ]
+    session = {
+        "session_id": session_id,
+        "app_id": "hmm.akousmata",
+        "created_at": created_at,
+        "policy": policy,
+        "assets": [asset],
+        "events": events,
+        "provenance": [provenance],
+        "views": {
+            "current_state": {
+                "trace_id": trace_id,
+                "listening_event_id": event_id,
+                "title": trace.get("title"),
+                "summary": (trace.get("summaries") if isinstance(trace.get("summaries"), dict) else {}).get("short"),
+            },
+            "summaries": [
+                {
+                    "kind": "akousmata_trace",
+                    "trace_id": trace_id,
+                    "title": trace.get("title"),
+                    "route_ids": trace.get("routeIds") if isinstance(trace.get("routeIds"), list) else [],
+                }
+            ],
+        },
+        "indexes": {"by_time": True, "by_asset": True, "by_node": True, "by_text": True},
+    }
+    context_bundle = {
+        "session_id": session_id,
+        "selector": {"asset_id": asset_id, "summarization": "agent_safe"},
+        "events": events,
+        "assets": [asset],
+        "provenance": [provenance],
+        "summaries": session["views"]["summaries"],
+    }
+    return {
+        "protocol": "earworm",
+        "version": "0.1.0",
+        "akousmata_surface": ["remember", "list", "search", "similarity", "export", "forget"],
+        "session": session,
+        "context_bundle": context_bundle,
+    }
+
+
+def _earworm_event(
+    session_id: str,
+    event_type: str,
+    wall_clock: str,
+    actor: str,
+    payload: dict[str, Any],
+    *,
+    reversible: bool,
+    parent_event_ids: list[str] | None = None,
+    provenance_id: str | None = None,
+) -> dict[str, Any]:
+    event_id = str(payload.get("frame_id") or payload.get("packet_id") or payload.get("action_id") or new_id("ew"))
+    event = {
+        "event_id": event_id,
+        "session_id": session_id,
+        "type": event_type,
+        "time": {"wall_clock": wall_clock},
+        "source": {"actor": actor, "node_id": "hmm"},
+        "payload": payload,
+        "reversible": reversible,
+        "parent_event_ids": parent_event_ids or [],
+    }
+    if provenance_id:
+        event["provenance_id"] = provenance_id
+    event["event_hash"] = _stable_hash(event)
+    return event
+
+
+def _earworm_policy(trace: dict[str, Any]) -> dict[str, Any]:
+    raw_audio_policy = str(trace.get("rawAudioPolicy") or "")
+    privacy_mode = str(trace.get("privacyMode") or "")
+    mode = "ephemeral" if raw_audio_policy == "temp" or privacy_mode == "incognito" else "project_lifetime"
+    return {
+        "mode": mode,
+        "local_only": True,
+        "redaction": {
+            "sensitive_fields": ["event.segment.data_ref.uri", "event.source.details.path"],
+            "agent_safe_omissions": ["raw_audio_bytes", "direct_personal_identifiers"],
+        },
+    }
+
+
+def _duration_seconds(event: dict[str, Any], features: dict[str, Any]) -> float | None:
+    value = features.get("duration_s")
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    segment = event.get("segment") if isinstance(event.get("segment"), dict) else {}
+    duration_ms = segment.get("duration_ms")
+    if isinstance(duration_ms, (int, float)):
+        return max(0.0, float(duration_ms) / 1000.0)
+    return None
+
+
+def _earworm_source_type(source_type: str) -> str:
+    if source_type in {"live_input", "system_output", "file", "buffer"}:
+        return "recorded"
+    if source_type == "generated":
+        return "generated"
+    if source_type == "external_stream":
+        return "imported"
+    return "unknown"
+
+
+def _consent_status(event: dict[str, Any], trace: dict[str, Any]) -> str:
+    consent = event.get("consent_status") or trace.get("consentStatus")
+    if str(consent) in {"owned", "licensed", "public_domain", "unknown", "restricted"}:
+        return str(consent)
+    if trace.get("privacyMode") == "incognito":
+        return "restricted"
+    return "unknown"
+
+
+def _usage_constraints(event: dict[str, Any], trace: dict[str, Any]) -> list[str]:
+    constraints: list[str] = ["local_only", "no_training_without_consent"]
+    privacy_mode = str(trace.get("privacyMode") or event.get("privacy_mode") or "")
+    if privacy_mode == "incognito":
+        constraints.append("do_not_retain")
+    if trace.get("rawAudioPolicy") == "temp":
+        constraints.append("raw_audio_not_retained")
+    return _dedupe(constraints)
+
+
+def _claim_summary_from_event(event: dict[str, Any]) -> dict[str, Any]:
+    routes = event.get("routes") if isinstance(event.get("routes"), list) else []
+    for route in routes:
+        if not isinstance(route, dict):
+            continue
+        structured = route.get("structured") if isinstance(route.get("structured"), dict) else {}
+        claims = structured.get("claim_summary")
+        if isinstance(claims, dict):
+            return claims
+    return {}
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return int(value)
+    return None
+
+
+def _stable_hash(value: dict[str, Any]) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _cleanup_trace_audio(trace: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(trace, dict) or trace.get("audioStored") is not True:
+        return None
+    audio_ref = trace.get("audioRef") if isinstance(trace.get("audioRef"), dict) else {}
+    uri = audio_ref.get("uri")
+    if not isinstance(uri, str) or not uri:
+        return None
+    return delete_upload_paths([uri])
 
 
 def _route_summaries(event: dict[str, Any]) -> dict[str, str]:
@@ -262,15 +551,22 @@ def _normalize_feature(key: str, value: Any) -> float | None:
 def _cosine_similarity(a: dict[str, float], b: Any) -> float:
     if not isinstance(b, dict):
         return 0.0
-    keys = sorted(set(a) & {key for key, value in b.items() if isinstance(value, (int, float))})
-    if not keys:
+    b_numeric = {key: float(value) for key, value in b.items() if isinstance(value, (int, float)) and math.isfinite(float(value))}
+    shared = set(a) & set(b_numeric)
+    keys = sorted(set(a) | set(b_numeric))
+    if not keys or len(shared) < MIN_SIMILARITY_SHARED_FEATURES:
         return 0.0
-    dot = sum(a[key] * float(b[key]) for key in keys)
-    norm_a = math.sqrt(sum(a[key] ** 2 for key in keys))
-    norm_b = math.sqrt(sum(float(b[key]) ** 2 for key in keys))
+    dot = sum(a.get(key, 0.0) * b_numeric.get(key, 0.0) for key in keys)
+    norm_a = math.sqrt(sum(a.get(key, 0.0) ** 2 for key in keys))
+    norm_b = math.sqrt(sum(b_numeric.get(key, 0.0) ** 2 for key in keys))
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    return dot / (norm_a * norm_b)
+    overlap_weight = len(shared) / len(keys)
+    return (dot / (norm_a * norm_b)) * overlap_weight
+
+
+def _cache_key(path: Path) -> str:
+    return str(path.expanduser().resolve())
 
 
 def _trace_preview(trace: dict[str, Any]) -> dict[str, Any]:

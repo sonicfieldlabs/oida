@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
+import re
 
 import soundfile as sf
 
@@ -69,7 +71,10 @@ def dedupe_events(events: list[dict[str, object]], iou_threshold: float = 0.5) -
         duplicate = False
         for existing in kept:
             existing_label = str(existing.get("label") or "").lower()
-            if label and existing_label and label == existing_label and time_iou(event, existing) >= iou_threshold:
+            labels_match = label and existing_label and (
+                label == existing_label or SequenceMatcher(a=_norm_label(label), b=_norm_label(existing_label)).ratio() >= 0.86
+            )
+            if labels_match and time_iou(event, existing) >= iou_threshold:
                 duplicate = True
                 break
         if not duplicate:
@@ -77,26 +82,51 @@ def dedupe_events(events: list[dict[str, object]], iou_threshold: float = 0.5) -
     return kept
 
 
+def _norm_label(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
 def chunks_as_dicts(chunks: list[Chunk]) -> list[dict[str, object]]:
     return [asdict(chunk) for chunk in chunks]
 
 
 def write_chunk_audio(path: str | Path, chunk: Chunk, output_dir: str | Path) -> Path:
-    audio = load_audio(path)
+    audio = _read_chunk_audio(path, chunk)
     return _write_chunk_from_audio(audio, chunk, output_dir)
 
 
 def write_chunk_audios(path: str | Path, chunks: list[Chunk], output_dir: str | Path) -> list[Path]:
-    audio = load_audio(path)
-    return [_write_chunk_from_audio(audio, chunk, output_dir) for chunk in chunks]
+    return [write_chunk_audio(path, chunk, output_dir) for chunk in chunks]
 
 
 def _write_chunk_from_audio(audio: AudioData, chunk: Chunk, output_dir: str | Path) -> Path:
-    start = max(0, int(round(chunk.t0 * audio.sample_rate)))
-    end = min(audio.samples.shape[0], int(round(chunk.t1 * audio.sample_rate)))
     output_path = Path(output_dir) / f"chunk-{chunk.i:04d}.wav"
-    sf.write(output_path, audio.samples[start:end], audio.sample_rate)
+    sf.write(output_path, audio.samples, audio.sample_rate)
     return output_path
+
+
+def _read_chunk_audio(path: str | Path, chunk: Chunk) -> AudioData:
+    try:
+        with sf.SoundFile(str(path)) as handle:
+            sample_rate = int(handle.samplerate)
+            start = max(0, int(round(chunk.t0 * sample_rate)))
+            end = min(len(handle), int(round(chunk.t1 * sample_rate)))
+            handle.seek(start)
+            samples = handle.read(max(0, end - start), always_2d=True, dtype="float32")
+            channels = int(samples.shape[1]) if samples.ndim == 2 else 1
+            duration_s = float(samples.shape[0] / sample_rate) if sample_rate else 0.0
+            return AudioData(samples=samples, sample_rate=sample_rate, channels=channels, duration_s=duration_s)
+    except Exception:
+        source = load_audio(path)
+        start = max(0, int(round(chunk.t0 * source.sample_rate)))
+        end = min(source.samples.shape[0], int(round(chunk.t1 * source.sample_rate)))
+        samples = source.samples[start:end]
+        return AudioData(
+            samples=samples,
+            sample_rate=source.sample_rate,
+            channels=source.channels,
+            duration_s=float(samples.shape[0] / source.sample_rate) if source.sample_rate else 0.0,
+        )
 
 
 def audio_duration(path: str | Path) -> float:

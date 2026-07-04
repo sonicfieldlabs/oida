@@ -19,18 +19,15 @@ class StubMossEngine(MossEngine):
         settings: GenerationSettings,
         thinking_budget: int | None = None,
     ) -> EngineResult:
-        name = Path(audio_path).name
+        # The stub never fabricates perception text. Empty output keeps captions,
+        # events, and hypotheses clean so the DSP signal listener supplies the
+        # summary and the evidence level honestly stays at measured_signal.
+        Path(audio_path)  # keep signature parity; path validity is the caller's concern
         lowered = prompt.lower()
-        if "transcribe" in lowered:
-            text = ""
-        elif "sound event" in lowered or "distinct sound event" in lowered:
-            text = ""
-        elif "speaker" in lowered:
-            text = "present: false\nsummary: unavailable because stub engine did not decode audio"
-        elif "music" in lowered:
-            text = "present: false\nsummary: unavailable because stub engine did not decode audio"
+        if "speaker" in lowered or "music" in lowered:
+            text = "present: false"
         else:
-            text = f"Stub engine did not listen to {name}. Configure MOSS-Audio to produce perception evidence."
+            text = ""
         return EngineResult(
             text=text,
             model="stub/no-audio-model",

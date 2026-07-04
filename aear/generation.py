@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from aear.config import REPO_ROOT
+from aear.config import data_dir
 from aear.contracts import new_id, now_iso
 from aear.privacy import redact_event_audio_for_policy
 from aear.storage import write_json_atomic
@@ -14,7 +14,7 @@ from aear.storage import write_json_atomic
 
 @dataclass(frozen=True)
 class GenerationStore:
-    root: Path = REPO_ROOT / "generations"
+    root: Path = field(default_factory=lambda: data_dir() / "generations")
 
     @property
     def records_dir(self) -> Path:

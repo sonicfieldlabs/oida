@@ -10,44 +10,40 @@ struct HmmMacOSApp: App {
         WindowGroup("hmm", id: "main") {
             ContentView()
                 .environmentObject(store)
-                .frame(minWidth: 720, minHeight: 520)
+                .frame(minWidth: 760, minHeight: 560)
                 .task {
-                    store.registerConfiguredHotkeyIfNeeded()
-                    store.startPolling()
-                    await store.refresh()
+                    await store.bootstrap()
                 }
         }
         .commands {
             CommandMenu("hmm") {
-                Button("Capture Buffer") {
-                    Task { await store.capture() }
+                Button(store.isListening ? "Listening…" : "Listen Now") {
+                    Task { await store.listenNow() }
                 }
                 .keyboardShortcut("l", modifiers: [.command, .option])
+                .disabled(store.isListening)
+
+                Button("Show/Hide Floating Listener") {
+                    store.toggleFloatingListener()
+                }
+                .keyboardShortcut("h", modifiers: [.command, .option])
 
                 Button(store.isPaused ? "Resume Listening" : "Pause Listening") {
                     Task { await store.togglePause() }
                 }
                 .keyboardShortcut("p", modifiers: [.command, .option])
 
-                Button("Open Dashboard") {
+                Button("Open Dashboard in Browser") {
                     store.openDashboard()
                 }
                 .keyboardShortcut("d", modifiers: [.command, .option])
             }
         }
 
-        Window("Spectral Listener", id: "floating-agent") {
-            FloatingSpectralView()
-                .environmentObject(store)
-                .frame(width: 320, height: 180)
-        }
-        .windowResizability(.contentSize)
-        .defaultSize(width: 320, height: 180)
-
         Settings {
             SettingsView()
                 .environmentObject(store)
-                .frame(width: 460)
+                .frame(width: 480)
                 .padding()
         }
 

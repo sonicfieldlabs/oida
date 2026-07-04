@@ -20,6 +20,27 @@ ListeningMode = Literal[
 ]
 
 
+AKOUO_CONTRACT_VERSION = "v0.5"
+AKOUO_PUBLIC_COMMANDS = [
+    "/listen",
+    "/full-ear",
+    "/study",
+    "/tech",
+    "/reference",
+    "/litany",
+    "/fiction",
+    "/forensic",
+    "/transduce",
+    "/one-sound-many-ears",
+    "/voice",
+    "/audiovision",
+    "/access",
+    "/field",
+    "/method",
+    "/route",
+]
+
+
 @dataclass(frozen=True)
 class ListeningSkillManifest:
     id: str
@@ -43,6 +64,10 @@ class RoutePreset:
     skill_ids: list[str]
     akouo_command: str
     direct_moss_modes: list[str] = field(default_factory=list)
+    # Which MOSS perception passes this route runs (subset of
+    # transcribe/events/caption/speech/music). Fewer passes = faster listen;
+    # DSP always runs. Empty list = DSP-only route.
+    moss_passes: list[str] = field(default_factory=lambda: ["caption"])
     enabled_by_default: bool = True
 
 
@@ -110,7 +135,7 @@ ROUTE_PRESET_SCHEMA: dict[str, Any] = {
     "$id": "https://sonic-field.local/hmm/akouo-route-preset.schema.json",
     "title": "AKOUO Route Preset",
     "type": "object",
-    "required": ["id", "name", "description", "skill_ids", "akouo_command", "direct_moss_modes", "enabled_by_default"],
+    "required": ["id", "name", "description", "skill_ids", "akouo_command", "direct_moss_modes", "moss_passes", "enabled_by_default"],
     "properties": {
         "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
         "name": {"type": "string", "minLength": 1},
@@ -118,6 +143,10 @@ ROUTE_PRESET_SCHEMA: dict[str, Any] = {
         "skill_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
         "akouo_command": {"type": "string", "pattern": "^/"},
         "direct_moss_modes": {"type": "array", "items": {"type": "string"}},
+        "moss_passes": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["transcribe", "events", "caption", "speech", "music"]},
+        },
         "enabled_by_default": {"type": "boolean"},
     },
     "additionalProperties": False,
@@ -247,10 +276,11 @@ PRESETS: list[RoutePreset] = [
     RoutePreset(
         id="basic",
         name="Basic",
-        description="Broad first-pass interpretation with signal facts and AKOÚŌ uncertainty discipline.",
+        description="Fast first pass: one MOSS caption plus DSP signal facts under AKOÚŌ uncertainty discipline.",
         skill_ids=["basic-listener", "spectral-cartographer", "signal-health"],
         akouo_command="/listen",
         direct_moss_modes=["environment"],
+        moss_passes=["caption"],
     ),
     RoutePreset(
         id="environment",
@@ -259,14 +289,16 @@ PRESETS: list[RoutePreset] = [
         skill_ids=["basic-listener", "soundscape-ecology", "material-gesture", "spectral-cartographer"],
         akouo_command="/field",
         direct_moss_modes=["environment", "soundscape"],
+        moss_passes=["caption", "events"],
     ),
     RoutePreset(
         id="signal",
         name="Signal",
-        description="Technical diagnostics with measured DSP facts first.",
+        description="Technical diagnostics with measured DSP facts only; no model passes.",
         skill_ids=["signal-health", "spectral-cartographer"],
         akouo_command="/tech",
         direct_moss_modes=["sonic_data"],
+        moss_passes=[],
     ),
     RoutePreset(
         id="music",
@@ -275,6 +307,7 @@ PRESETS: list[RoutePreset] = [
         skill_ids=["musicological-listener", "spectral-cartographer", "signal-health"],
         akouo_command="/listen",
         direct_moss_modes=["music"],
+        moss_passes=["music", "caption"],
     ),
     RoutePreset(
         id="speech",
@@ -283,7 +316,7 @@ PRESETS: list[RoutePreset] = [
         skill_ids=["speech-route", "signal-health"],
         akouo_command="/voice",
         direct_moss_modes=["transcribe"],
-        enabled_by_default=False,
+        moss_passes=["transcribe", "speech"],
     ),
     RoutePreset(
         id="memory",
@@ -292,7 +325,16 @@ PRESETS: list[RoutePreset] = [
         skill_ids=["basic-listener", "comparative-memory", "spectral-cartographer"],
         akouo_command="/listen",
         direct_moss_modes=["environment"],
-        enabled_by_default=False,
+        moss_passes=["caption"],
+    ),
+    RoutePreset(
+        id="deep",
+        name="Deep",
+        description="Full perception report: every MOSS pass (transcript, events, caption, speech, music) plus DSP.",
+        skill_ids=["basic-listener", "spectral-cartographer", "signal-health", "material-gesture", "soundscape-ecology"],
+        akouo_command="/full-ear",
+        direct_moss_modes=["environment", "soundscape"],
+        moss_passes=["transcribe", "events", "caption", "speech", "music"],
     ),
     RoutePreset(
         id="extended-spectrum",
@@ -301,6 +343,7 @@ PRESETS: list[RoutePreset] = [
         skill_ids=["signal-health", "spectral-cartographer", "extended-spectrum-caution"],
         akouo_command="/tech",
         direct_moss_modes=["sonic_data"],
+        moss_passes=[],
         enabled_by_default=False,
     ),
     RoutePreset(
@@ -310,6 +353,7 @@ PRESETS: list[RoutePreset] = [
         skill_ids=["basic-listener", "material-gesture", "generative-bridge"],
         akouo_command="/listen",
         direct_moss_modes=["environment"],
+        moss_passes=["caption", "events"],
         enabled_by_default=False,
     ),
 ]
@@ -374,14 +418,21 @@ def validate_akouo_manifest() -> list[str]:
             errors.append(f"preset {preset.id} references unknown skill(s): {', '.join(missing)}")
         if not preset.akouo_command.startswith("/"):
             errors.append(f"preset {preset.id} has invalid AKOUO command: {preset.akouo_command}")
+        if preset.akouo_command not in AKOUO_PUBLIC_COMMANDS:
+            errors.append(f"preset {preset.id} uses a command outside AKOUO {AKOUO_CONTRACT_VERSION}: {preset.akouo_command}")
+        invalid_passes = [name for name in preset.moss_passes if name not in {"transcribe", "events", "caption", "speech", "music"}]
+        if invalid_passes:
+            errors.append(f"preset {preset.id} has invalid MOSS pass(es): {', '.join(invalid_passes)}")
     return errors
 
 
 def akouo_manifest() -> dict[str, Any]:
     errors = validate_akouo_manifest()
     return {
-        "version": "0.1",
+        "version": "0.5-hmm.1",
+        "akouo_contract_version": AKOUO_CONTRACT_VERSION,
         "schema_version": "0.1",
+        "public_commands": AKOUO_PUBLIC_COMMANDS,
         "schemas": {
             "skill_manifest": SKILL_MANIFEST_SCHEMA,
             "route_preset": ROUTE_PRESET_SCHEMA,

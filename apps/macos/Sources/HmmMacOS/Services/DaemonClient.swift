@@ -33,6 +33,12 @@ struct DaemonClient {
         }
     }
 
+    private var authToken: String? {
+        let environment = ProcessInfo.processInfo.environment
+        let token = environment["HMM_AUTH_TOKEN"] ?? environment["AEAR_AUTH_TOKEN"]
+        return token?.isEmpty == false ? token : nil
+    }
+
     func health() async throws -> HealthResponse {
         try await get("/health")
     }
@@ -144,6 +150,18 @@ struct DaemonClient {
         try await get("/native/system-audio/temp")
     }
 
+    func claimCaptureRequest(id: String) async throws -> CaptureRequestClaimResponse {
+        try await post("/background/capture-request/claim", payload: CaptureRequestClaimPayload(id: id))
+    }
+
+    func listenEvent(path: String, routePreset: String) async throws -> ListenEventResponse {
+        try await post("/listen-event", payload: ListenEventPayload(path: path, routePreset: routePreset))
+    }
+
+    func akouoSkills() async throws -> AkouoSkillsResponse {
+        try await get("/akouo/skills")
+    }
+
     func cleanupNativeSystemAudioTemp(deleteAll: Bool = true, dryRun: Bool = false) async throws -> NativeSystemAudioCleanupResponse {
         let payload = NativeSystemAudioCleanupPayload(deleteAll: deleteAll, dryRun: dryRun)
         return try await post("/native/system-audio/cleanup", payload: payload)
@@ -152,6 +170,7 @@ struct DaemonClient {
     private func get<T: Decodable>(_ path: String) async throws -> T {
         var request = URLRequest(url: try endpoint(path))
         request.httpMethod = "GET"
+        applyAuth(to: &request)
         return try await send(request)
     }
 
@@ -160,7 +179,13 @@ struct DaemonClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONEncoder().encode(payload)
+        applyAuth(to: &request)
         return try await send(request)
+    }
+
+    private func applyAuth(to request: inout URLRequest) {
+        guard let authToken else { return }
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "authorization")
     }
 
     private func send<T: Decodable>(_ request: URLRequest) async throws -> T {

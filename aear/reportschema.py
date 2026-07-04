@@ -162,6 +162,8 @@ class PerceptionReport(JsonModel):
     qa: list[QaItem] = Field(default_factory=list)
     model_uncertainty_notes: list[str] = Field(default_factory=list)
     forbidden_topics_triggered: list[str] = Field(default_factory=list)
+    signal_interpretation: dict[str, Any] | None = None
+    moss_passes: list[str] = Field(default_factory=list)
 
 
 def dump_model(model: Any) -> dict[str, Any]:

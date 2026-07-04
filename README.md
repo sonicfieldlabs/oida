@@ -50,16 +50,19 @@ New user-facing commands and UI copy use lowercase `hmm`.
 
 ## Quick Start
 
+Prerequisites: Python 3.12+, `uv`, and `ffmpeg` for non-WAV uploads or browser
+recordings.
+
 Install dependencies:
 
 ```bash
-uv sync
+uv sync --extra dev
 ```
 
-Run the daemon in development mode with the local stub engine:
+Run the daemon (MOSS-Audio on Apple Silicon is the default profile):
 
 ```bash
-uv run hmm --profile stub --host 127.0.0.1 --port 8765
+uv run hmm --host 127.0.0.1 --port 8765  # add --profile stub for a model-free dev run
 ```
 
 Open the dashboard:
@@ -71,9 +74,10 @@ http://127.0.0.1:8765
 Generate a normalized listening event:
 
 ```bash
+uv run python -c "import numpy as np, soundfile as sf; t=np.arange(16000)/16000; sf.write('/tmp/hmm-tone.wav',(0.15*np.sin(2*np.pi*440*t)).astype('float32'),16000)"
 curl -s http://127.0.0.1:8765/listen-event \
   -H 'content-type: application/json' \
-  -d '{"path":"MOSS-Audio/test/test_en.mp3","route_preset":"basic"}'
+  -d '{"path":"/tmp/hmm-tone.wav","route_preset":"basic"}'
 ```
 
 Run a routed local session and write `sessions/<stamp>-<slug>/`:
@@ -112,8 +116,8 @@ apps/macos/script/build_and_run.sh
 
 The shell stages `apps/macos/dist/hmm.app`, adds a menu bar extra, opens the
 dashboard, triggers background quick capture, and exposes an optional global
-hotkey in Settings. If the daemon is offline, the shell can start a local
-development daemon with `uv run hmm --profile stub`. Launch at login is
+hotkey in Settings. If the daemon is offline, the shell starts one automatically with the
+`mac-mps` profile. Launch at login is
 available in Settings and is never enabled automatically.
 
 The shell also includes an explicit native system-output signal tap. It uses
@@ -126,6 +130,13 @@ captures are listed at `/native/system-audio/temp` and can be removed through
 Native source-route profiles are exposed at `/native/system-audio/routes`; the
 current route is `display_mix`, meaning the selected display's system mix with
 the hmm process excluded.
+
+Raw browser uploads and live chunks are stored under the configured hmm data
+directory, not the source checkout. Inspect them with `/raw-audio/status` and
+delete them with `/raw-audio/wipe`; the dashboard exposes this as Wipe raw
+audio. Recordings written by older builds into the checkout's `uploads/` are
+reported under the status `legacy_*` fields and deleted when the wipe request
+sets `include_legacy` (the dashboard button does).
 
 Package a local unsigned app archive:
 
@@ -153,10 +164,10 @@ Existing listening events can be rerun through a different preset with
 new audio. Rerun responses include a conservative route comparison over route
 ids, summary changes, warnings, deterministic DSP deltas, and applied comparison
 filters. The daemon also keeps a bounded recent-result list at
-`/background/history`, persists derived event JSON to
-`sessions/recent-results.json`, and excludes incognito events from that durable
-history by default. Pinned recent results are persisted separately from the
-rolling recent list, and `/background/history/export`, `/background/history/pin`,
+`/background/history`, persists derived event JSON under the configured hmm data
+directory, and excludes incognito events from that durable history by default.
+Pinned recent results are persisted separately from the rolling recent list, and
+`/background/history/export`, `/background/history/pin`,
 `/background/history/batch-pin`, `/background/history/archive`, and
 `/background/history/clear` expose derived-history export, pin/unpin, batch
 pinning, archive-to-file, and explicit clear controls without copying raw audio.
@@ -236,7 +247,8 @@ left for the desktop app-shell phase.
 Run tests that do not require downloaded model weights:
 
 ```bash
-python3 -m unittest discover -s tests
+uv run python -m unittest discover -s tests
+uv run pytest
 ```
 
 ## Real MOSS-Audio Profile
@@ -269,6 +281,12 @@ and sets `audio_input_mask = input_ids == processor.audio_token_id`.
 `AEAR_MOSS_RESIDENT=single` hot-swaps Instruct and Thinking instead of keeping
 both 4B models resident.
 
+`hmm` will not silently download model code or weights. If the local `weights/`
+paths are absent, the `mac-mps` profile falls back to the stub engine unless
+`AEAR_REQUIRE_MODEL=1` is set, and Hugging Face hub lookup is refused unless
+`HMM_ALLOW_HF_HUB=1` or `AEAR_ALLOW_HF_HUB=1` is set. `HF_HUB_OFFLINE=1` always
+keeps hub lookup disabled.
+
 ## CUDA/SGLang Profile
 
 Start the official MOSS-Audio SGLang fork separately, then point `hmm` at it:
@@ -283,12 +301,21 @@ Thinking budgets are forwarded through `custom_params.thinking_budget`.
 ## Privacy Defaults
 
 `hmm` is local-first. The daemon binds to `127.0.0.1` by default and does not
-upload audio. Background-style buffers are ephemeral by product policy, but the
-current browser live path still writes temporary chunks to local `uploads/`
-because browser `MediaRecorder` sends encoded files to the daemon. Quick live
-captures are labeled with `raw_audio_policy: temp`. Native system-output temp
-captures use a separate retention policy under `native_temp_audio_retention`
-and cleanup only targets files matching the native capture naming pattern.
+upload audio. If you bind to `0.0.0.0` or `::`, the daemon refuses to start
+unless `HMM_AUTH_TOKEN` or `AEAR_AUTH_TOKEN` is set; clients then send
+`Authorization: Bearer <token>`.
+
+Persistent local data defaults to `~/Library/Application Support/hmm` on macOS,
+or `$XDG_DATA_HOME/hmm` / `~/.local/share/hmm` elsewhere. Override it with
+`HMM_DATA_DIR` or `AEAR_DATA_DIR`.
+
+Background-style buffers are ephemeral by product policy, but browser live
+capture still writes temporary chunks to the data-dir `uploads/` because
+`MediaRecorder` sends encoded files to the daemon. Quick live captures are
+labeled with `raw_audio_policy: temp`. Native system-output temp captures use a
+separate retention policy under `native_temp_audio_retention`, raw uploads use
+`upload_audio_retention`, and `/raw-audio/wipe` removes all upload/live-buffer
+raw audio on request.
 
 Akousmata memory is explicit: events are saved only when the user calls
 `/memory/remember` or uses the dashboard remember action. File-based listening

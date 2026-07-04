@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class ShellStore: ObservableObject {
@@ -46,24 +48,55 @@ final class ShellStore: ObservableObject {
     @Published var nativeSystemAudioChannelCount: Int?
     @Published var nativeSystemAudioUpdatedAt: Date?
     @Published var nativeSystemAudioRoute: NativeSystemAudioRoutePayload?
-    @Published var shellHotkey: String {
+    @Published var listenHotkey: String {
         didSet {
-            UserDefaults.standard.set(shellHotkey, forKey: Defaults.captureHotkey)
+            UserDefaults.standard.set(listenHotkey, forKey: Defaults.captureHotkey)
+        }
+    }
+    @Published var toggleHotkey: String {
+        didSet {
+            UserDefaults.standard.set(toggleHotkey, forKey: Defaults.toggleHotkey)
         }
     }
     @Published var hotkeyStatus = "No global hotkey"
+    @Published var isListening = false
+    @Published var micLevel: Double = 0
+    @Published var presets: [RoutePresetModel] = []
+    @Published var selectedSource: String {
+        didSet {
+            UserDefaults.standard.set(selectedSource, forKey: Defaults.listenSource)
+        }
+    }
+    @Published var selectedPreset: String {
+        didSet {
+            UserDefaults.standard.set(selectedPreset, forKey: Defaults.routePreset)
+        }
+    }
 
     private var client: DaemonClient
     private let supervisor = DaemonSupervisor()
     private let systemAudioTap = SystemAudioTapManager()
-    private var hasRegisteredConfiguredHotkey = false
+    private let micTap = MicTapManager()
     private var pollingTask: Task<Void, Never>?
+    private var listenTask: Task<Void, Never>?
+    private var micTapStartedAt: Date?
+    private var floatingPanel: FloatingPanelController?
+    private var hasBootstrapped = false
+    private var claimedCaptureRequestIds: Set<String> = []
 
     init() {
         let url = UserDefaults.standard.string(forKey: Defaults.daemonBaseURL) ?? "http://127.0.0.1:8765"
         daemonBaseURL = url
-        shellHotkey = UserDefaults.standard.string(forKey: Defaults.captureHotkey) ?? ""
+        listenHotkey = UserDefaults.standard.string(forKey: Defaults.captureHotkey) ?? "control+option+l"
+        toggleHotkey = UserDefaults.standard.string(forKey: Defaults.toggleHotkey) ?? "control+option+h"
+        selectedSource = UserDefaults.standard.string(forKey: Defaults.listenSource) ?? "system"
+        selectedPreset = UserDefaults.standard.string(forKey: Defaults.routePreset) ?? "basic"
         client = DaemonClient(baseURLString: url)
+        micTap.onLevel = { [weak self] level in
+            Task { @MainActor in
+                self?.micLevel = level
+            }
+        }
         supervisor.onLogLine = { [weak self] line in
             self?.appendDaemonLog(line)
         }
@@ -89,6 +122,29 @@ final class ShellStore: ObservableObject {
 
     var daemonOnline: Bool {
         health?.ok == true
+    }
+
+    var engineState: String {
+        health?.engine?.state ?? "unknown"
+    }
+
+    var engineLabel: String {
+        switch engineState {
+        case "ready": return "MOSS ready"
+        case "warming": return "MOSS warming…"
+        case "cold": return "MOSS cold"
+        case "degraded": return "MOSS unavailable"
+        case "stub": return "DSP only"
+        default: return health?.engine?.profile ?? "engine"
+        }
+    }
+
+    var floatingStatusText: String {
+        if !daemonOnline { return "daemon offline" }
+        if isListening { return "listening…" }
+        if engineState == "warming" { return "warming the ear" }
+        if nativeSystemAudioActive { return "hearing the system" }
+        return engineState == "ready" ? "idle · ready" : "idle · \(engineLabel.lowercased())"
     }
 
     var statusLabel: String {
@@ -195,6 +251,35 @@ final class ShellStore: ObservableObject {
         return liveSignal?.source?.label ?? "No live source"
     }
 
+    /// One-time app startup: hotkeys, polling, daemon supervision, system tap,
+    /// and the floating listener. Everything converges on one daemon instance.
+    func bootstrap() async {
+        guard !hasBootstrapped else { return }
+        hasBootstrapped = true
+        registerHotkeys()
+        startPolling()
+        await refresh()
+        if !daemonOnline {
+            await startDaemon()
+        }
+        if !nativeSystemAudioActive {
+            await startNativeSystemAudioTap()
+        }
+        await loadPresets()
+        showFloatingListener()
+    }
+
+    func loadPresets() async {
+        guard let manifest = try? await client.akouoSkills() else { return }
+        let loaded = (manifest.routePresets ?? []).filter { $0.enabledByDefault != false }
+        if !loaded.isEmpty {
+            presets = loaded
+            if !loaded.contains(where: { $0.id == selectedPreset }) {
+                selectedPreset = loaded.first?.id ?? "basic"
+            }
+        }
+    }
+
     func startPolling() {
         guard pollingTask == nil else { return }
         pollingTask = Task { @MainActor [weak self] in
@@ -224,6 +309,7 @@ final class ShellStore: ObservableObject {
             managedDaemonRunning = supervisor.isManagedRunning
             launchAtLoginStatus = LaunchAtLoginManager.statusLabel
             errorMessage = nil
+            await claimPendingCaptureRequestIfAny(status.state.captureRequest)
         } catch {
             health = nil
             background = nil
@@ -235,6 +321,144 @@ final class ShellStore: ObservableObject {
             managedDaemonRunning = supervisor.isManagedRunning
             launchAtLoginStatus = LaunchAtLoginManager.statusLabel
         }
+    }
+
+    /// The web dashboard (or any surface) can file a system-capture request;
+    /// this native shell is the only process that can actually hear the
+    /// system output, so it claims and performs the capture.
+    private func claimPendingCaptureRequestIfAny(_ request: CaptureRequestModel?) async {
+        guard let request, !isListening, !claimedCaptureRequestIds.contains(request.id) else { return }
+        claimedCaptureRequestIds.insert(request.id)
+        if claimedCaptureRequestIds.count > 32 {
+            claimedCaptureRequestIds.removeAll()
+            claimedCaptureRequestIds.insert(request.id)
+        }
+        guard let claim = try? await client.claimCaptureRequest(id: request.id), claim.claimed else { return }
+        let seconds = request.seconds
+        let preset = request.routePreset
+        Task { @MainActor [weak self] in
+            await self?.listenNow(seconds: seconds, preset: preset, source: "system")
+        }
+    }
+
+    /// The one listen gesture, source-aware and cancellable. Used by the
+    /// floating listener, the global hotkey, and dashboard capture requests.
+    /// System/mic wait for the ring buffer to fill; Stop cancels the wait.
+    func listenNow(seconds: Double? = nil, preset: String? = nil, source: String? = nil) async {
+        guard !isListening else { return }
+        isListening = true
+        listenTask = Task { @MainActor [weak self] in
+            await self?.performListen(seconds: seconds, preset: preset, source: source ?? self?.selectedSource ?? "system")
+        }
+        await listenTask?.value
+        listenTask = nil
+        isListening = false
+    }
+
+    func stopListening() {
+        listenTask?.cancel()
+    }
+
+    private func performListen(seconds: Double?, preset: String?, source: String) async {
+        let captureSeconds = seconds ?? defaultCaptureSeconds
+        let routePreset = preset ?? selectedPreset
+        switch source {
+        case "mic":
+            await listenFromMic(captureSeconds: captureSeconds, preset: routePreset)
+        case "file":
+            await listenFromFile(preset: routePreset)
+        default:
+            await listenFromSystem(captureSeconds: captureSeconds, preset: routePreset)
+        }
+    }
+
+    private func listenFromSystem(captureSeconds: Double, preset: String?) async {
+        if !nativeSystemAudioActive {
+            await startNativeSystemAudioTap()
+            guard nativeSystemAudioActive else { return }
+        }
+        let buffered = bufferedSeconds()
+        if buffered < captureSeconds {
+            let missing = captureSeconds - buffered
+            guard (try? await Task.sleep(nanoseconds: UInt64(max(0, missing) * 1_000_000_000))) != nil else { return }
+        }
+        guard !Task.isCancelled else { return }
+        await analyzeNativeSystemAudio(seconds: captureSeconds, preset: preset)
+    }
+
+    private func listenFromMic(captureSeconds: Double, preset: String?) async {
+        if !micTap.isCapturing {
+            do {
+                try micTap.start()
+                micTapStartedAt = Date()
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
+        let buffered = micTapStartedAt.map { min(30, Date().timeIntervalSince($0)) } ?? 0
+        if buffered < captureSeconds {
+            let missing = captureSeconds - buffered
+            guard (try? await Task.sleep(nanoseconds: UInt64(max(0, missing) * 1_000_000_000))) != nil else { return }
+        }
+        guard !Task.isCancelled else { return }
+        do {
+            let output = try micTap.writeRecentAudio(seconds: captureSeconds)
+            let response = try await client.listenEvent(path: output.path, routePreset: preset ?? defaultRoutePreset)
+            latestRouteComparison = nil
+            latestEvent = response.listeningEvent ?? latestEvent
+            resetConversation()
+            applyBackgroundStatus(response.background)
+            errorMessage = nil
+            await refresh()
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func listenFromFile(preset: String?) async {
+        let panel = NSOpenPanel()
+        panel.title = "Choose audio to listen to"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if #available(macOS 13.0, *) {
+            panel.allowedContentTypes = [.audio, .movie]
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let response = try await client.listenEvent(path: url.path, routePreset: preset ?? defaultRoutePreset)
+            latestRouteComparison = nil
+            latestEvent = response.listeningEvent ?? latestEvent
+            resetConversation()
+            applyBackgroundStatus(response.background)
+            errorMessage = nil
+            await refresh()
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func stopMicTap() {
+        micTap.stop()
+        micTapStartedAt = nil
+        micLevel = 0
+    }
+
+    private func bufferedSeconds() -> Double {
+        nativeSystemAudioUpdatedAt == nil ? 0 : ringBufferedSecondsEstimate
+    }
+
+    // The tap keeps up to 30 s; after the first snapshot we assume the ring is
+    // filling in real time from tap start.
+    private var tapStartedAt: Date?
+    private var ringBufferedSecondsEstimate: Double {
+        guard let tapStartedAt else { return 0 }
+        return min(30, Date().timeIntervalSince(tapStartedAt))
     }
 
     func startDaemon() async {
@@ -276,10 +500,14 @@ final class ShellStore: ObservableObject {
 
     func startNativeSystemAudioTap() async {
         await systemAudioTap.start()
+        if nativeSystemAudioState == .capturing, tapStartedAt == nil {
+            tapStartedAt = Date()
+        }
     }
 
     func stopNativeSystemAudioTap() async {
         await systemAudioTap.stop()
+        tapStartedAt = nil
         nativeSystemAudioBands = []
         nativeSystemAudioRMS = 0
         nativeSystemAudioPeak = 0
@@ -289,26 +517,21 @@ final class ShellStore: ObservableObject {
         nativeSystemAudioRoute = nil
     }
 
-    func analyzeNativeSystemAudio(remember: Bool = false) async {
+    func analyzeNativeSystemAudio(remember: Bool = false, seconds: Double? = nil, preset: String? = nil) async {
         guard !isAnalyzingNativeSystemAudio else { return }
         guard nativeSystemAudioActive else {
             errorMessage = "Start the native system audio tap before analyzing system output."
             return
         }
-        guard let root = findHmmRepositoryRoot() else {
-            errorMessage = "Could not locate the hmm repository root for temporary audio storage."
-            return
-        }
-
         isAnalyzingNativeSystemAudio = true
         defer { isAnalyzingNativeSystemAudio = false }
         do {
-            let capture = try systemAudioTap.writeRecentAudio(seconds: defaultCaptureSeconds, repositoryRoot: root)
+            let capture = try systemAudioTap.writeRecentAudio(seconds: seconds ?? defaultCaptureSeconds)
             latestNativeSystemAudioTempPath = capture.path.path
             let response = try await client.analyzeNativeSystemAudio(
                 path: capture.path.path,
                 durationSeconds: capture.durationSeconds,
-                routePreset: defaultRoutePreset,
+                routePreset: preset ?? defaultRoutePreset,
                 remember: remember,
                 sourceRoute: capture.sourceRoute
             )
@@ -587,35 +810,69 @@ final class ShellStore: ObservableObject {
         }
     }
 
-    func registerConfiguredHotkeyIfNeeded() {
-        guard !hasRegisteredConfiguredHotkey else { return }
-        hasRegisteredConfiguredHotkey = true
-        guard !shellHotkey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            hotkeyStatus = "No global hotkey"
-            return
-        }
-        registerCaptureHotkey()
+    // MARK: - Floating listener panel
+
+    func toggleFloatingListener() {
+        ensureFloatingPanel().toggle()
     }
 
-    func registerCaptureHotkey() {
-        let bindingText = shellHotkey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !bindingText.isEmpty else {
-            GlobalHotkeyManager.shared.unregister()
-            hotkeyStatus = "No global hotkey"
+    func showFloatingListener() {
+        ensureFloatingPanel().show()
+    }
+
+    private func ensureFloatingPanel() -> FloatingPanelController {
+        if let floatingPanel {
+            return floatingPanel
+        }
+        let controller = FloatingPanelController { [weak self] in
+            let view = FloatingListenerView().environmentObject(self ?? ShellStore())
+            return NSHostingView(rootView: view)
+        }
+        floatingPanel = controller
+        return controller
+    }
+
+    func openControlCenter() {
+        NSApp.activate(ignoringOtherApps: true)
+        for window in NSApp.windows where window.identifier?.rawValue.contains("main") == true {
+            window.makeKeyAndOrderFront(nil)
             return
         }
-        switch GlobalHotkeyManager.shared.register(bindingText: bindingText, action: { [weak self] in
+        NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Hotkeys
+
+    private enum HotkeyID {
+        static let listen: UInt32 = 1
+        static let toggle: UInt32 = 2
+    }
+
+    func registerHotkeys() {
+        var parts: [String] = []
+        switch GlobalHotkeyManager.shared.register(id: HotkeyID.listen, bindingText: listenHotkey, action: { [weak self] in
             Task { @MainActor in
-                await self?.capture()
+                await self?.listenNow()
             }
         }) {
         case .registered(let display):
-            hotkeyStatus = "Registered \(display)"
+            parts.append("listen \(display)")
         case .invalid(let reason):
-            hotkeyStatus = reason
+            parts.append("listen: \(reason)")
         case .failed(let status):
-            hotkeyStatus = "Hotkey failed: \(status)"
+            parts.append("listen failed (\(status))")
         }
+        switch GlobalHotkeyManager.shared.register(id: HotkeyID.toggle, bindingText: toggleHotkey, action: { [weak self] in
+            self?.toggleFloatingListener()
+        }) {
+        case .registered(let display):
+            parts.append("panel \(display)")
+        case .invalid(let reason):
+            parts.append("panel: \(reason)")
+        case .failed(let status):
+            parts.append("panel failed (\(status))")
+        }
+        hotkeyStatus = parts.joined(separator: " · ")
     }
 
     private func mutateBackground(_ operation: () async throws -> BackgroundStatusResponse) async {
@@ -690,4 +947,7 @@ final class ShellStore: ObservableObject {
 private enum Defaults {
     static let daemonBaseURL = "hmm.daemonBaseURL"
     static let captureHotkey = "hmm.captureHotkey"
+    static let toggleHotkey = "hmm.toggleHotkey"
+    static let listenSource = "hmm.listenSource"
+    static let routePreset = "hmm.routePreset"
 }

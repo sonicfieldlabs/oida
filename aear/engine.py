@@ -17,7 +17,7 @@ def build_engine(config: AearConfig) -> MossEngine:
         if config.require_model:
             return engine
         return FallbackEngine(primary=engine, fallback=StubMossEngine("mac-mps profile configured but MOSS runtime is not ready"))
-    raise ValueError(f"unknown AEAR engine profile: {config.profile}")
+    raise ValueError(f"unknown hmm engine profile: {config.profile}")
 
 
 class FallbackEngine(MossEngine):
@@ -41,3 +41,11 @@ class FallbackEngine(MossEngine):
                 unavailable_reason=str(exc),
             )
 
+    def prewarm(self, model_kind: str = "instruct") -> None:
+        self.primary.prewarm(model_kind)
+
+    def runtime_status(self) -> dict[str, object]:
+        return self.primary.runtime_status()
+
+    def set_model(self, model_kind: str, model_id: str) -> None:
+        self.primary.set_model(model_kind, model_id)

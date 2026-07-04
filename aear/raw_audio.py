@@ -4,65 +4,80 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from aear.config import uploads_dir
+from aear.config import REPO_ROOT, uploads_dir
 
-NATIVE_SYSTEM_AUDIO_TEMP_PATTERN = "*-hmm-native-system-output-*s.wav"
-NATIVE_TEMP_RETENTION_POLICIES = {"keep", "delete_after_session", "delete_after_days"}
+UPLOAD_AUDIO_RETENTION_POLICIES = {"keep", "delete_after_session", "delete_after_days"}
 
 
-def default_native_temp_audio_retention() -> dict[str, Any]:
+def legacy_uploads_dir() -> Path | None:
+    """Pre-data-dir uploads/ location inside the source checkout, when distinct.
+
+    Older daemon builds wrote raw uploads and live chunks to ``<repo>/uploads``.
+    Those recordings must stay reachable by the wipe endpoint, but they are only
+    swept when a caller explicitly asks (``include_legacy``) so that routine
+    cleanup never touches the checkout implicitly.
+    """
+    legacy = (REPO_ROOT / "uploads").resolve()
+    try:
+        current = uploads_dir().resolve()
+    except OSError:
+        return None
+    if legacy == current or not legacy.is_dir():
+        return None
+    return legacy
+
+
+def default_upload_audio_retention() -> dict[str, Any]:
     return {
-        "policy": "delete_after_session",
-        "delete_after_days": 1.0,
-        "max_files": 24,
-        "delete_after_analysis": False,
+        "policy": "keep",
+        "delete_after_days": 7.0,
+        "max_files": 200,
     }
 
 
-def normalize_native_temp_audio_retention(value: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    base = default_native_temp_audio_retention()
+def normalize_upload_audio_retention(value: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    base = default_upload_audio_retention()
     incoming = value if isinstance(value, Mapping) else {}
-
     policy = str(incoming.get("policy") or base["policy"])
-    if policy not in NATIVE_TEMP_RETENTION_POLICIES:
+    if policy not in UPLOAD_AUDIO_RETENTION_POLICIES:
         policy = str(base["policy"])
-
     return {
         "policy": policy,
         "delete_after_days": _positive_float(incoming.get("delete_after_days"), base["delete_after_days"]),
         "max_files": _positive_int(incoming.get("max_files"), base["max_files"]),
-        "delete_after_analysis": bool(incoming.get("delete_after_analysis", base["delete_after_analysis"])),
     }
 
 
-def native_temp_audio_directory() -> Path:
-    return uploads_dir()
-
-
-def native_system_audio_temp_status(
+def upload_audio_status(
     retention: Mapping[str, Any] | None = None,
     *,
     directory: Path | None = None,
 ) -> dict[str, Any]:
-    files = native_system_audio_temp_files(directory=directory)
+    root = (directory or uploads_dir()).resolve()
+    files = upload_audio_files(directory=root)
+    legacy_root = legacy_uploads_dir() if directory is None else None
+    legacy_files = upload_audio_files(directory=legacy_root) if legacy_root else []
     return {
-        "raw_audio_policy": "temp",
-        "directory": str((directory or native_temp_audio_directory()).resolve()),
-        "pattern": NATIVE_SYSTEM_AUDIO_TEMP_PATTERN,
-        "retention": normalize_native_temp_audio_retention(retention),
+        "raw_audio_policy": "local_uploads",
+        "directory": str(root),
+        "retention": normalize_upload_audio_retention(retention),
         "file_count": len(files),
         "bytes": sum(int(item["bytes"]) for item in files),
         "files": files,
+        "legacy_directory": str(legacy_root) if legacy_root else None,
+        "legacy_file_count": len(legacy_files),
+        "legacy_bytes": sum(int(item["bytes"]) for item in legacy_files),
+        "legacy_files": legacy_files,
     }
 
 
-def native_system_audio_temp_files(*, directory: Path | None = None) -> list[dict[str, Any]]:
-    root = (directory or native_temp_audio_directory()).resolve()
+def upload_audio_files(*, directory: Path | None = None) -> list[dict[str, Any]]:
+    root = (directory or uploads_dir()).resolve()
     if not root.exists():
         return []
     now = datetime.now(timezone.utc).timestamp()
     files: list[dict[str, Any]] = []
-    for path in root.glob(NATIVE_SYSTEM_AUDIO_TEMP_PATTERN):
+    for path in root.iterdir():
         if not path.is_file():
             continue
         try:
@@ -83,7 +98,7 @@ def native_system_audio_temp_files(*, directory: Path | None = None) -> list[dic
     return sorted(files, key=lambda item: float(item["modified_epoch"]), reverse=True)
 
 
-def cleanup_native_system_audio_temp_files(
+def cleanup_upload_audio_files(
     retention: Mapping[str, Any] | None = None,
     *,
     directory: Path | None = None,
@@ -92,11 +107,19 @@ def cleanup_native_system_audio_temp_files(
     max_age_hours: float | None = None,
     max_files: int | None = None,
     delete_paths: Iterable[str | Path] | None = None,
+    include_legacy: bool = False,
 ) -> dict[str, Any]:
-    root = (directory or native_temp_audio_directory()).resolve()
+    root = (directory or uploads_dir()).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    policy = normalize_native_temp_audio_retention(retention)
-    files = native_system_audio_temp_files(directory=root)
+    policy = normalize_upload_audio_retention(retention)
+    files = upload_audio_files(directory=root)
+    legacy_root = legacy_uploads_dir() if (include_legacy and directory is None) else None
+    if legacy_root:
+        files = sorted(
+            files + upload_audio_files(directory=legacy_root),
+            key=lambda item: float(item["modified_epoch"]),
+            reverse=True,
+        )
     by_path = {Path(str(item["path"])).resolve(): item for item in files}
     selected: dict[Path, dict[str, Any]] = {}
 
@@ -105,7 +128,10 @@ def cleanup_native_system_audio_temp_files(
 
     if delete_paths:
         for candidate in delete_paths:
-            path = Path(candidate).expanduser().resolve()
+            try:
+                path = Path(candidate).expanduser().resolve()
+            except OSError:
+                continue
             if path in by_path:
                 selected[path] = by_path[path]
 
@@ -141,11 +167,11 @@ def cleanup_native_system_audio_temp_files(
         except OSError as exc:
             errors.append({"path": str(path), "error": str(exc)})
 
-    status = native_system_audio_temp_status(policy, directory=root)
+    status = upload_audio_status(policy, directory=root if directory is not None else None)
     return {
-        "raw_audio_policy": "temp",
+        "raw_audio_policy": "local_uploads",
         "directory": str(root),
-        "pattern": NATIVE_SYSTEM_AUDIO_TEMP_PATTERN,
+        "legacy_directory": str(legacy_root) if legacy_root else None,
         "retention": policy,
         "dry_run": dry_run,
         "files_before": len(files),
@@ -158,36 +184,22 @@ def cleanup_native_system_audio_temp_files(
     }
 
 
-def apply_native_temp_audio_retention_after_analysis(
-    retention: Mapping[str, Any] | None,
-    analyzed_path: str | Path,
-) -> dict[str, Any]:
-    policy = normalize_native_temp_audio_retention(retention)
-    delete_paths: list[str | Path] = []
-    if policy["delete_after_analysis"]:
-        delete_paths.append(analyzed_path)
-    return cleanup_native_system_audio_temp_files(policy, delete_paths=delete_paths)
-
-
-def finalize_native_temp_audio_session(
+def finalize_upload_audio_session(
     retention: Mapping[str, Any] | None = None,
     *,
     directory: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Apply session-end retention.
-
-    The default ``delete_after_session`` policy removes all native system-audio temp
-    captures when the daemon session ends (wired into the FastAPI shutdown handler);
-    other policies fall back to their normal age/count cleanup. Without this the
-    ``delete_after_session`` default was a no-op and raw temp WAVs persisted until the
-    file-count cap evicted them.
-    """
-    policy = normalize_native_temp_audio_retention(retention)
+    policy = normalize_upload_audio_retention(retention)
     delete_all = policy["policy"] == "delete_after_session"
-    return cleanup_native_system_audio_temp_files(
-        policy, directory=directory, delete_all=delete_all, dry_run=dry_run
-    )
+    return cleanup_upload_audio_files(policy, directory=directory, delete_all=delete_all, dry_run=dry_run)
+
+
+def delete_upload_paths(paths: Iterable[str | Path]) -> dict[str, Any]:
+    # Explicitly referenced paths (e.g. a forgotten trace's stored audio) may
+    # predate the platform data dir, so the legacy checkout uploads/ is a valid
+    # deletion root here; only the exact requested paths are ever selected.
+    return cleanup_upload_audio_files(delete_paths=paths, include_legacy=True)
 
 
 def _public_file_item(item: Mapping[str, Any]) -> dict[str, Any]:

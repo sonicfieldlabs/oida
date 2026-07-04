@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from aear.config import REPO_ROOT
+from aear.config import data_dir
 from aear.contracts import new_id, now_iso
+from aear.akouo_skills import route_preset
 from aear.native_temp_audio import default_native_temp_audio_retention, normalize_native_temp_audio_retention
+from aear.raw_audio import default_upload_audio_retention, normalize_upload_audio_retention
 from aear.storage import write_json_atomic
 
 
@@ -48,6 +52,7 @@ class BackgroundConfig:
         }
     )
     native_temp_audio_retention: dict[str, Any] = field(default_factory=default_native_temp_audio_retention)
+    upload_audio_retention: dict[str, Any] = field(default_factory=default_upload_audio_retention)
     recent_history: dict[str, Any] = field(
         default_factory=lambda: {
             "enabled": True,
@@ -69,6 +74,10 @@ class BackgroundState:
     latest_event: dict[str, Any] | None = None
     recent_events: list[dict[str, Any]] = field(default_factory=list)
     pinned_events: list[dict[str, Any]] = field(default_factory=list)
+    # A pending system-audio capture request. Any surface (web dashboard) may
+    # file one; the native shell polls status, claims it, performs the tap
+    # capture, and analyzes. This is how one daemon state drives all surfaces.
+    capture_request: dict[str, Any] | None = None
 
 
 class BackgroundRuntime:
@@ -81,7 +90,7 @@ class BackgroundRuntime:
         archive_dir: str | Path | None = None,
     ) -> None:
         self._lock = threading.RLock()
-        self.config_path = Path(config_path) if config_path else REPO_ROOT / "settings" / "background.json"
+        self.config_path = Path(config_path) if config_path else data_dir() / "settings" / "background.json"
         self.history_path = Path(history_path) if history_path else self._default_history_path(config_path)
         self.archive_dir = Path(archive_dir) if archive_dir else self._default_history_archive_dir(config_path)
         self.config = self._load_config()
@@ -97,11 +106,16 @@ class BackgroundRuntime:
 
     @_synchronized
     def status(self) -> dict[str, Any]:
+        state = asdict(self.state)
+        live_request = self._live_capture_request()
+        state["capture_request"] = (
+            {key: value for key, value in live_request.items() if key != "requested_monotonic"} if live_request else None
+        )
         return {
             "version": "0.1",
             "mode": "background-runtime",
             "config": asdict(self.config),
-            "state": asdict(self.state),
+            "state": state,
             "capabilities": {
                 "daemon_background_runtime": True,
                 "quick_capture_api": True,
@@ -117,6 +131,7 @@ class BackgroundRuntime:
                 "native_system_audio_signal_tap": True,
                 "native_system_audio_temp_analysis": True,
                 "native_temp_audio_cleanup": True,
+                "raw_audio_wipe_api": True,
                 "recent_result_history": True,
                 "durable_recent_history": True,
                 "pinned_recent_results": True,
@@ -139,7 +154,7 @@ class BackgroundRuntime:
         for key, value in updates.items():
             if key not in data:
                 continue
-            if key in {"floating_agent", "hotkeys", "native_temp_audio_retention", "recent_history"} and isinstance(value, dict):
+            if key in {"floating_agent", "hotkeys", "native_temp_audio_retention", "upload_audio_retention", "recent_history"} and isinstance(value, dict):
                 if key == "floating_agent":
                     merged = dict(data["floating_agent"])
                     for setting, setting_value in value.items():
@@ -157,14 +172,17 @@ class BackgroundRuntime:
                         merged = dict(data["native_temp_audio_retention"])
                         merged.update(value)
                         data[key] = normalize_native_temp_audio_retention(merged)
+                    elif key == "upload_audio_retention":
+                        merged = dict(data["upload_audio_retention"])
+                        merged.update(value)
+                        data[key] = normalize_upload_audio_retention(merged)
                     else:
                         merged = dict(data["recent_history"])
                         merged.update(value)
                         data[key] = normalize_recent_history_config(merged)
             else:
                 data[key] = value
-        data["native_temp_audio_retention"] = normalize_native_temp_audio_retention(data.get("native_temp_audio_retention"))
-        data["recent_history"] = normalize_recent_history_config(data.get("recent_history"))
+        data = normalize_background_config_data(data)
         self.config = BackgroundConfig(**data)
         self._write_config()
         self.state.recent_events = self.state.recent_events[: self._recent_limit()]
@@ -200,6 +218,43 @@ class BackgroundRuntime:
         else:
             self.state.status = "idle"
         self.state.updated_at = now_iso()
+
+    CAPTURE_REQUEST_TTL_SECONDS = 30.0
+
+    @_synchronized
+    def request_capture(self, seconds: float | None = None, route_preset: str | None = None) -> dict[str, Any]:
+        request = {
+            "id": f"capreq-{uuid4().hex[:10]}",
+            "seconds": float(seconds) if isinstance(seconds, (int, float)) and seconds and seconds > 0 else self.config.default_capture_seconds,
+            "route_preset": route_preset or self.config.default_route_preset,
+            "requested_at": now_iso(),
+            "requested_monotonic": time.monotonic(),
+            "status": "pending",
+        }
+        self.state.capture_request = request
+        self.state.updated_at = now_iso()
+        return {key: value for key, value in request.items() if key != "requested_monotonic"}
+
+    @_synchronized
+    def claim_capture_request(self, request_id: str | None = None) -> dict[str, Any] | None:
+        request = self._live_capture_request()
+        if request is None:
+            return None
+        if request_id and request.get("id") != request_id:
+            return None
+        self.state.capture_request = None
+        self.state.updated_at = now_iso()
+        return {key: value for key, value in request.items() if key != "requested_monotonic"}
+
+    def _live_capture_request(self) -> dict[str, Any] | None:
+        request = self.state.capture_request
+        if not isinstance(request, dict):
+            return None
+        requested = request.get("requested_monotonic")
+        if isinstance(requested, (int, float)) and (time.monotonic() - requested) > self.CAPTURE_REQUEST_TTL_SECONDS:
+            self.state.capture_request = None
+            return None
+        return request
 
     @_synchronized
     def begin_action(self, action: str) -> str:
@@ -472,9 +527,7 @@ class BackgroundRuntime:
             return BackgroundConfig()
         if not isinstance(data, dict):
             return BackgroundConfig()
-        valid = {key: data[key] for key in BackgroundConfig.__dataclass_fields__ if key in data}
-        valid["native_temp_audio_retention"] = normalize_native_temp_audio_retention(valid.get("native_temp_audio_retention"))
-        valid["recent_history"] = normalize_recent_history_config(valid.get("recent_history"))
+        valid = normalize_background_config_data({key: data[key] for key in BackgroundConfig.__dataclass_fields__ if key in data})
         try:
             return BackgroundConfig(**valid)
         except TypeError:
@@ -563,12 +616,12 @@ class BackgroundRuntime:
     def _default_history_path(self, config_path: str | Path | None) -> Path:
         if config_path:
             return Path(config_path).with_name("recent-results.json")
-        return REPO_ROOT / "sessions" / "recent-results.json"
+        return data_dir() / "sessions" / "recent-results.json"
 
     def _default_history_archive_dir(self, config_path: str | Path | None) -> Path:
         if config_path:
             return Path(config_path).with_name("history-archives")
-        return REPO_ROOT / "exports" / "history"
+        return data_dir() / "exports" / "history"
 
 
 def normalize_recent_history_config(value: Any) -> dict[str, Any]:
@@ -597,6 +650,97 @@ def normalize_recent_history_config(value: Any) -> dict[str, Any]:
     normalized["persist"] = bool(normalized["persist"])
     normalized["include_incognito"] = bool(normalized["include_incognito"])
     return normalized
+
+
+def normalize_background_config_data(value: dict[str, Any]) -> dict[str, Any]:
+    default = asdict(BackgroundConfig())
+    data = dict(default)
+    for key in default:
+        if key in value:
+            data[key] = value[key]
+
+    for key in ("enabled", "paused", "launch_at_login", "show_floating_agent", "incognito", "save_events_by_default"):
+        data[key] = bool(data.get(key))
+
+    data["floating_agent"] = normalize_floating_agent_config(data.get("floating_agent"))
+    data["default_capture_seconds"] = _bounded_float(data.get("default_capture_seconds"), 10.0, 0.25, 600.0)
+    data["default_route_preset"] = _valid_route_preset(data.get("default_route_preset"), "basic")
+    data["hotkeys"] = normalize_hotkeys_config(data.get("hotkeys"))
+    data["native_temp_audio_retention"] = normalize_native_temp_audio_retention(data.get("native_temp_audio_retention"))
+    data["upload_audio_retention"] = normalize_upload_audio_retention(data.get("upload_audio_retention"))
+    data["recent_history"] = normalize_recent_history_config(data.get("recent_history"))
+    return data
+
+
+def normalize_floating_agent_config(value: Any) -> dict[str, Any]:
+    default = {
+        "visible": True,
+        "size": "compact",
+        "pinned": True,
+        "x": None,
+        "y": None,
+        "reduced_motion": False,
+    }
+    if not isinstance(value, dict):
+        return default
+    data = dict(default)
+    for key in data:
+        if key in value:
+            data[key] = value[key]
+    data["visible"] = bool(data["visible"])
+    data["size"] = "medium" if data.get("size") == "medium" else "compact"
+    data["pinned"] = bool(data["pinned"])
+    data["reduced_motion"] = bool(data["reduced_motion"])
+    data["x"] = _optional_finite_float(data.get("x"))
+    data["y"] = _optional_finite_float(data.get("y"))
+    return data
+
+
+def normalize_hotkeys_config(value: Any) -> dict[str, str | None]:
+    default: dict[str, str | None] = {
+        "capture_last_buffer": None,
+        "hold_to_listen": None,
+        "open_dashboard": None,
+    }
+    if not isinstance(value, dict):
+        return default
+    normalized = dict(default)
+    for key in normalized:
+        binding = value.get(key)
+        text = str(binding).strip() if binding else ""
+        normalized[key] = text[:80] if text else None
+    return normalized
+
+
+def _valid_route_preset(value: Any, fallback: str) -> str:
+    candidate = str(value or fallback).strip() or fallback
+    try:
+        route_preset(candidate)
+    except ValueError:
+        return fallback
+    return candidate
+
+
+def _bounded_float(value: Any, fallback: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if parsed < minimum or parsed > maximum:
+        return fallback
+    return parsed
+
+
+def _optional_finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in {float("inf"), float("-inf")}:
+        return None
+    return parsed
 
 
 def _unique_event_ids(event_ids: list[str]) -> list[str]:

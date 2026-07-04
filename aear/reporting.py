@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from aear import __version__
@@ -9,7 +10,8 @@ from aear.chunker import Chunk, chunks_as_dicts, dedupe_events, offset_event, pl
 from aear.dsp import inspect_path
 from aear.engine_base import EngineResult, MossEngine
 from aear.parsers import parse_events, parse_music_bpm, parse_speech, parse_transcript
-from aear.recipes import get_recipe
+from aear.recipes import GenerationSettings, get_recipe
+from aear.signal_listener import signal_reading_dict
 from aear.reportschema import (
     Caption,
     ChunkInfo,
@@ -72,6 +74,35 @@ TRANSCRIPTION_TASKS = {
     "sentence": "transcribe_sentence",
     "word": "transcribe_word",
 }
+
+DEGENERATE_NOTE = (
+    "MOSS output failed a text sanity check (likely long-input decode instability); "
+    "the pass was discarded. Chunked reruns on shorter segments are more stable."
+)
+
+
+def looks_degenerate(text: str | None) -> bool:
+    """Detect token-soup output (mixed-script garbage from unstable decoding).
+
+    Legitimate captions are overwhelmingly ASCII English; a transcript may
+    legitimately be non-English, so this guard is only applied to caption /
+    analysis prose, never to transcripts.
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    if len(stripped) < 48:
+        return False
+    if "�" in stripped:
+        return True
+    ascii_wordish = sum(1 for ch in stripped if ch.isascii() and (ch.isalnum() or ch in " .,;:'\"!?()-"))
+    return (ascii_wordish / len(stripped)) < 0.72
+
+
+def _guard_prose(text: str | None) -> tuple[str | None, str | None]:
+    if looks_degenerate(text):
+        return None, DEGENERATE_NOTE
+    return text, None
 
 CAPTION_DETAILS = {"brief", "dense"}
 
@@ -165,10 +196,12 @@ def direct_analysis(engine: MossEngine, path: str, mode: str = "environment", th
         raise ValueError(f"unknown direct MOSS analysis mode: {mode}")
     recipe = get_recipe(mode)
     result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
+    analysis_text, sanity_note = _guard_prose(result.text)
     analysis = {
         "mode": mode,
         "path": str(Path(path).expanduser().resolve()),
-        "analysis": result.text,
+        "analysis": analysis_text or "",
+        **({"sanity_note": sanity_note} if sanity_note else {}),
         "source_role": "moss_audio_direct",
         "claim_note": "Direct MOSS-Audio output is perception evidence. AKOUO claim mapping must still decide category, confidence, and basis.",
         "limitations": [
@@ -183,13 +216,32 @@ def qa(engine: MossEngine, path: str, question: str, thinking_budget: int | None
     context_block = f"\nConversation context:\n{context.strip()}\n" if context and context.strip() else ""
     recipe = get_recipe("qa", question=question, context_block=context_block)
     result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
-    return QaItem(question=question, answer=result.text, reasoning_trace=result.reasoning_trace, thinking_budget=thinking_budget), result
+    answer, sanity_note = _guard_prose(result.text)
+    return QaItem(question=question, answer=answer or (sanity_note or ""), reasoning_trace=result.reasoning_trace, thinking_budget=thinking_budget), result
 
 
 def think(engine: MossEngine, path: str, instruction: str, thinking_budget: int | None = None) -> tuple[QaItem, EngineResult]:
     recipe = get_recipe("think", instruction=instruction)
     result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
     return QaItem(question=instruction, answer=result.text, reasoning_trace=result.reasoning_trace, thinking_budget=thinking_budget), result
+
+
+ALL_MOSS_PASSES = ("transcribe", "events", "caption", "speech", "music")
+
+
+def _dsp_only_engine_result(engine: MossEngine) -> EngineResult:
+    settings = GenerationSettings(model_kind="instruct", temperature=0.0, top_p=1.0, top_k=50, max_new_tokens=0)
+    return EngineResult(text="", model="dsp-only", profile=engine.profile, settings=settings, wall_ms=0)
+
+
+def _normalize_passes(passes: list[str] | tuple[str, ...] | None) -> list[str]:
+    if passes is None:
+        return list(ALL_MOSS_PASSES)
+    unknown = [name for name in passes if name not in ALL_MOSS_PASSES]
+    if unknown:
+        valid = ", ".join(ALL_MOSS_PASSES)
+        raise ValueError(f"unknown MOSS pass(es): {', '.join(unknown)}. Valid passes: {valid}")
+    return [name for name in ALL_MOSS_PASSES if name in set(passes)]
 
 
 def report(
@@ -199,30 +251,70 @@ def report(
     *,
     chunk_seconds: float = 600.0,
     overlap_seconds: float = 15.0,
+    passes: list[str] | tuple[str, ...] | None = None,
 ) -> PerceptionReport:
     if not Path(path).expanduser().exists():
         raise ValueError(f"audio path does not exist: {path}")
+    selected = _normalize_passes(passes)
     dsp = inspect_path(path)
     features = dsp.get("features", {})
+    signal_interpretation = signal_reading_dict(dsp)
     chunks = plan_chunks(path, chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds)
     if len(chunks) > 1:
-        return chunked_report(engine, path, dsp, chunks, profile=profile)
+        return chunked_report(engine, path, dsp, chunks, profile=profile, passes=selected, signal_interpretation=signal_interpretation)
     chunk_dicts = chunks_as_dicts(chunks)
-    transcript_obj, transcript_result = transcribe(engine, path, timestamps="sentence")
-    events_obj, events_result = events(engine, path, features if isinstance(features, dict) else {})
-    caption_obj, caption_result = caption(engine, path, detail="dense")
-    speech_obj, speech_result = speech(engine, path)
-    music_obj, music_result = music(engine, path, _float_or_none(features.get("bpmCandidate")) if isinstance(features, dict) else None)
-    engine_results = [transcript_result, events_result, caption_result, speech_result, music_result]
-    uncertainty = []
+    engine_results: list[EngineResult] = []
+    sanity_notes: list[str] = []
+
+    transcript_obj: Transcript = Transcript()
+    if "transcribe" in selected:
+        transcript_obj, transcript_result = transcribe(engine, path, timestamps="sentence")
+        engine_results.append(transcript_result)
+    events_obj: list[Event] = []
+    if "events" in selected:
+        events_obj, events_result = events(engine, path, features if isinstance(features, dict) else {})
+        engine_results.append(events_result)
+    caption_obj = Caption()
+    if "caption" in selected:
+        caption_obj, caption_result = caption(engine, path, detail="dense")
+        engine_results.append(caption_result)
+        dense, dense_note = _guard_prose(caption_obj.dense)
+        brief, brief_note = _guard_prose(caption_obj.brief)
+        caption_obj = Caption(brief=brief, dense=dense)
+        for note in (dense_note, brief_note):
+            if note and note not in sanity_notes:
+                sanity_notes.append(note)
+    speech_obj = Speech()
+    if "speech" in selected:
+        speech_obj, speech_result = speech(engine, path)
+        engine_results.append(speech_result)
+    music_obj = Music()
+    if "music" in selected:
+        music_obj, music_result = music(engine, path, _float_or_none(features.get("bpmCandidate")) if isinstance(features, dict) else None)
+        engine_results.append(music_result)
+        description, music_note = _guard_prose(music_obj.description)
+        if music_note:
+            music_obj = Music(
+                present=False,
+                description=None,
+                tempo_feel=None,
+                dsp_bpm_candidate=music_obj.dsp_bpm_candidate,
+                moss_bpm_candidate=None,
+                notes=[*music_obj.notes, music_note],
+            )
+            if music_note not in sanity_notes:
+                sanity_notes.append(music_note)
+
+    uncertainty = list(sanity_notes)
     for result in engine_results:
         if result.unavailable_reason and result.unavailable_reason not in uncertainty:
             uncertainty.append(result.unavailable_reason)
+    aggregated = aggregate_engine_results(engine_results) if engine_results else _dsp_only_engine_result(engine)
     forbidden = _scan_forbidden_topics(caption_obj.dense or caption_obj.brief, events_obj, speech_obj, music_obj)
     return PerceptionReport(
         version="0.1",
         source=source_info(path, dsp),
-        engine=make_engine_info(aggregate_engine_results(engine_results), chunk_dicts),
+        engine=make_engine_info(aggregated, chunk_dicts),
         dsp=dsp,
         transcript=transcript_obj,
         events=events_obj,
@@ -232,71 +324,112 @@ def report(
         qa=[],
         model_uncertainty_notes=uncertainty,
         forbidden_topics_triggered=forbidden,
+        signal_interpretation=signal_interpretation,
+        moss_passes=selected,
     )
 
 
-def chunked_report(engine: MossEngine, path: str, dsp: dict[str, object], chunks: list[Chunk], profile: str = "default") -> PerceptionReport:
+def chunked_report(
+    engine: MossEngine,
+    path: str,
+    dsp: dict[str, object],
+    chunks: list[Chunk],
+    profile: str = "default",
+    *,
+    passes: list[str] | tuple[str, ...] | None = None,
+    signal_interpretation: dict[str, object] | None = None,
+) -> PerceptionReport:
+    selected = _normalize_passes(passes)
+    if signal_interpretation is None:
+        signal_interpretation = signal_reading_dict(dsp)
     features = dsp.get("features", {})
     transcript_segments: list[TranscriptSegment] = []
     all_events: list[dict[str, object]] = []
     caption_lines: list[str] = []
     engine_results: list[EngineResult] = []
-    speech_obj = None
-    music_obj = None
+    sanity_notes: list[str] = []
+    speech_obj: Speech | None = None
+    music_obj: Music | None = None
 
     with tempfile.TemporaryDirectory(prefix="aear-chunks-") as temp_dir:
         chunk_paths = write_chunk_audios(path, chunks, temp_dir)
         for chunk, chunk_path in zip(chunks, chunk_paths):
-            transcript_obj, transcript_result = transcribe(engine, str(chunk_path), timestamps="sentence")
-            events_obj, events_result = events(engine, str(chunk_path))
-            caption_obj, caption_result = caption(engine, str(chunk_path), detail="dense")
-            engine_results.extend([transcript_result, events_result, caption_result])
-
-            for segment in transcript_obj.segments:
-                transcript_segments.append(
-                    TranscriptSegment(
-                        t0=_offset_time(segment.t0, chunk.t0),
-                        t1=_offset_time(segment.t1, chunk.t0),
-                        text=segment.text,
-                        confidence=segment.confidence,
+            if "transcribe" in selected:
+                transcript_obj, transcript_result = transcribe(engine, str(chunk_path), timestamps="sentence")
+                engine_results.append(transcript_result)
+                for segment in transcript_obj.segments:
+                    transcript_segments.append(
+                        TranscriptSegment(
+                            t0=_offset_time(segment.t0, chunk.t0),
+                            t1=_offset_time(segment.t1, chunk.t0),
+                            text=segment.text,
+                            confidence=segment.confidence,
+                        )
                     )
+
+            if "events" in selected:
+                events_obj, events_result = events(engine, str(chunk_path))
+                engine_results.append(events_result)
+                for event in events_obj:
+                    shifted = offset_event(dump_model(event), chunk.t0)
+                    all_events.append(shifted)
+
+            if "caption" in selected:
+                caption_obj, caption_result = caption(engine, str(chunk_path), detail="dense")
+                engine_results.append(caption_result)
+                caption_text, caption_note = _guard_prose(caption_obj.dense or caption_obj.brief)
+                if caption_note and caption_note not in sanity_notes:
+                    sanity_notes.append(caption_note)
+                if caption_text:
+                    caption_lines.append(f"Segment {chunk.i} [{chunk.t0:.2f}-{chunk.t1:.2f}s]: {caption_text}")
+
+        if "speech" in selected:
+            speech_obj, speech_result = speech(engine, str(chunk_paths[0]))
+            speech_obj.notes.append("Long-audio report: speech dimensions were evaluated on the first chunk only.")
+            engine_results.append(speech_result)
+        if "music" in selected:
+            music_obj, music_result = music(engine, str(chunk_paths[0]), _float_or_none(features.get("bpmCandidate")) if isinstance(features, dict) else None)
+            music_obj.notes.append("Long-audio report: music interpretation was evaluated on the first chunk only; DSP metrics cover the source file.")
+            engine_results.append(music_result)
+            description, music_note = _guard_prose(music_obj.description)
+            if music_note:
+                music_obj = Music(
+                    present=False,
+                    description=None,
+                    tempo_feel=None,
+                    dsp_bpm_candidate=music_obj.dsp_bpm_candidate,
+                    moss_bpm_candidate=None,
+                    notes=[*music_obj.notes, music_note],
                 )
-
-            for event in events_obj:
-                shifted = offset_event(dump_model(event), chunk.t0)
-                all_events.append(shifted)
-
-            caption_text = caption_obj.dense or caption_obj.brief
-            if caption_text:
-                caption_lines.append(f"Segment {chunk.i} [{chunk.t0:.2f}-{chunk.t1:.2f}s]: {caption_text}")
-
-        speech_obj, speech_result = speech(engine, str(chunk_paths[0]))
-        music_obj, music_result = music(engine, str(chunk_paths[0]), _float_or_none(features.get("bpmCandidate")) if isinstance(features, dict) else None)
-        speech_obj.notes.append("Long-audio report: speech dimensions were evaluated on the first chunk only.")
-        music_obj.notes.append("Long-audio report: music interpretation was evaluated on the first chunk only; DSP metrics cover the source file.")
-        engine_results.extend([speech_result, music_result])
+                if music_note not in sanity_notes:
+                    sanity_notes.append(music_note)
 
     event_dicts = dedupe_events(all_events)
     events_obj = [Event.model_validate(item) for item in event_dicts]
+    transcript_segments = dedupe_transcript_segments(transcript_segments)
     if isinstance(features, dict):
         events_obj = corroborate_events(events_obj, features)
 
-    uncertainty: list[str] = []
+    uncertainty: list[str] = list(sanity_notes)
     for result in engine_results:
         if result.unavailable_reason and result.unavailable_reason not in uncertainty:
             uncertainty.append(result.unavailable_reason)
 
+    aggregated = aggregate_engine_results(engine_results) if engine_results else _dsp_only_engine_result(engine)
     forbidden = _scan_forbidden_topics("\n".join(caption_lines), events_obj, speech_obj, music_obj)
+    transcript_notes: list[str] = []
+    if "transcribe" in selected and not transcript_segments:
+        transcript_notes.append("No transcript segments were produced from chunked inference.")
     return PerceptionReport(
         version="0.1",
         source=source_info(path, dsp),
-        engine=make_engine_info(aggregate_engine_results(engine_results), chunks_as_dicts(chunks)),
+        engine=make_engine_info(aggregated, chunks_as_dicts(chunks)),
         dsp=dsp,
         transcript=Transcript(
             present=bool(transcript_segments),
             language=None,
             segments=transcript_segments,
-            notes=[] if transcript_segments else ["No transcript segments were produced from chunked inference."],
+            notes=transcript_notes,
         ),
         events=events_obj,
         caption=Caption(brief=None, dense="\n".join(caption_lines) if caption_lines else None),
@@ -305,6 +438,8 @@ def chunked_report(engine: MossEngine, path: str, dsp: dict[str, object], chunks
         qa=[],
         model_uncertainty_notes=uncertainty,
         forbidden_topics_triggered=forbidden,
+        signal_interpretation=signal_interpretation,
+        moss_passes=selected,
     )
 
 
@@ -328,6 +463,35 @@ def aggregate_engine_results(results: list[EngineResult]) -> EngineResult:
         wall_ms=wall_ms or None,
         unavailable_reason="; ".join(unavailable) if unavailable else None,
     )
+
+
+def dedupe_transcript_segments(segments: list[TranscriptSegment], iou_threshold: float = 0.3) -> list[TranscriptSegment]:
+    kept: list[TranscriptSegment] = []
+    for segment in sorted(segments, key=lambda item: float(item.t0 or 0.0)):
+        text = _norm_transcript(segment.text)
+        duplicate = False
+        for existing in kept:
+            existing_text = _norm_transcript(existing.text)
+            if text and existing_text and SequenceMatcher(a=text, b=existing_text).ratio() >= 0.9 and _segment_iou(segment, existing) >= iou_threshold:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(segment)
+    return kept
+
+
+def _segment_iou(a: TranscriptSegment, b: TranscriptSegment) -> float:
+    if a.t0 is None or a.t1 is None or b.t0 is None or b.t1 is None:
+        return 0.0
+    left = max(float(a.t0), float(b.t0))
+    right = min(float(a.t1), float(b.t1))
+    inter = max(0.0, right - left)
+    union = max(float(a.t1), float(b.t1)) - min(float(a.t0), float(b.t0))
+    return inter / union if union > 0 else 0.0
+
+
+def _norm_transcript(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
 
 def forbidden_topics_for_text(text: str) -> list[str]:

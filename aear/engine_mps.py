@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 import time
@@ -9,6 +10,8 @@ from aear.config import AearConfig
 from aear.engine_base import EngineResult, EngineUnavailable, MossEngine
 from aear.recipes import GenerationSettings
 
+LOGGER = logging.getLogger(__name__)
+
 
 class MpsMossEngine(MossEngine):
     profile = "mac-mps"
@@ -17,6 +20,7 @@ class MpsMossEngine(MossEngine):
         self.config = config
         self._models: dict[str, object] = {}
         self._processors: dict[str, object] = {}
+        self._model_overrides: dict[str, str] = {}
         self._lock = threading.Lock()
         if config.moss_audio_repo:
             src = config.moss_audio_repo
@@ -33,7 +37,18 @@ class MpsMossEngine(MossEngine):
         return "cpu"
 
     def _model_id(self, settings: GenerationSettings) -> str:
-        return self.config.thinking_model if settings.model_kind == "thinking" else self.config.instruct_model
+        return self.model_id_for_kind("thinking" if settings.model_kind == "thinking" else "instruct")
+
+    def model_id_for_kind(self, model_kind: str) -> str:
+        override = self._model_overrides.get(model_kind)
+        if override:
+            return override
+        return self.config.thinking_model if model_kind == "thinking" else self.config.instruct_model
+
+    def set_model(self, model_kind: str, model_id: str) -> None:
+        if model_kind not in {"instruct", "thinking"}:
+            raise ValueError(f"unknown model kind: {model_kind}")
+        self._model_overrides[model_kind] = model_id
 
     def _load_pair(self, model_id: str) -> tuple[object, object]:
         if model_id in self._models:
@@ -51,6 +66,7 @@ class MpsMossEngine(MossEngine):
         if self.config.resident_mode == "single":
             self._clear_loaded_models(except_model=None)
 
+        self._assert_model_loading_allowed(model_id)
         model = MossAudioModel.from_pretrained(
             model_id,
             trust_remote_code=True,
@@ -66,6 +82,44 @@ class MpsMossEngine(MossEngine):
         self._models[model_id] = model
         self._processors[model_id] = processor
         return model, processor
+
+    def _assert_model_loading_allowed(self, model_id: str) -> None:
+        path = Path(model_id).expanduser()
+        if path.exists():
+            return
+        if path.is_absolute() or model_id.startswith((".", "~")):
+            raise EngineUnavailable(f"MOSS-Audio local model path is not available: {path}")
+        if self.config.hf_hub_offline:
+            raise EngineUnavailable("HF_HUB_OFFLINE is set; refusing Hugging Face model lookup.")
+        if not self.config.allow_hf_hub:
+            raise EngineUnavailable(
+                "Hugging Face model lookup is disabled by default. Download weights into ./weights or set HMM_ALLOW_HF_HUB=1."
+            )
+        LOGGER.warning(
+            "Hugging Face hub lookup explicitly enabled; '%s' may be downloaded from the network with trust_remote_code=True.",
+            model_id,
+        )
+
+    def prewarm(self, model_kind: str = "instruct") -> None:
+        model_id = self.model_id_for_kind(model_kind)
+        with self._lock:
+            self._load_pair(model_id)
+
+    def runtime_status(self) -> dict[str, object]:
+        device = None
+        try:
+            device = self._device()
+        except Exception:
+            pass
+        return {
+            "profile": self.profile,
+            "loaded_models": [Path(model_id).name for model_id in self._models],
+            "device": device,
+            "assignments": {
+                "instruct": Path(self.model_id_for_kind("instruct")).name,
+                "thinking": Path(self.model_id_for_kind("thinking")).name,
+            },
+        }
 
     def _clear_loaded_models(self, except_model: str | None) -> None:
         if except_model is not None and set(self._models) == {except_model}:
@@ -133,7 +187,7 @@ class MpsMossEngine(MossEngine):
                     **inputs,
                     **generation_kwargs,
                 )
-            text = processor.decode(out[0, inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+            text = _safe_decode(processor, out[0, inputs["input_ids"].shape[1] :])
             wall_ms = round((time.perf_counter() - start) * 1000)
         reasoning_trace, answer = split_reasoning(text)
         return EngineResult(
@@ -144,6 +198,24 @@ class MpsMossEngine(MossEngine):
             reasoning_trace=reasoning_trace,
             wall_ms=wall_ms,
         )
+
+
+def _safe_decode(processor, token_ids) -> str:
+    """Decode generated ids, tolerating ids outside the text vocabulary.
+
+    On some inputs MOSS emits audio/special ids the base tokenizer cannot map;
+    convert_ids_to_tokens then yields None entries and the plain decode joins
+    them into a TypeError. Filter those out instead of failing the listen.
+    """
+    try:
+        return processor.decode(token_ids, skip_special_tokens=True)
+    except TypeError:
+        tokenizer = getattr(processor, "_base_tokenizer", None) or getattr(processor, "tokenizer", None)
+        if tokenizer is None:
+            raise
+        ids = token_ids.tolist() if hasattr(token_ids, "tolist") else list(token_ids)
+        tokens = tokenizer.convert_ids_to_tokens(ids, skip_special_tokens=True)
+        return tokenizer.convert_tokens_to_string([token for token in tokens if isinstance(token, str)]).strip()
 
 
 def split_reasoning(text: str) -> tuple[str | None, str]:

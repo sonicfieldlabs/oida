@@ -95,11 +95,11 @@ The shell uses these daemon endpoints:
 The daemon remains the source of truth for live-session state, default capture
 duration, route preset, incognito status, memory policy, latest event, and
 bounded recent-result history. Recent history is derived event JSON persisted at
-`sessions/recent-results.json`; it does not copy raw audio and skips incognito
-events by default. Pinned recent results are kept in a separate bounded list, and
-history export returns derived JSON that the shell copies to the macOS clipboard.
-History archive writes a timestamped derived JSON file under the daemon's archive
-directory and copies that path to the clipboard.
+the configured data-dir `sessions/recent-results.json`; it does not copy raw
+audio and skips incognito events by default. Pinned recent results are kept in a
+separate bounded list, and history export returns derived JSON that the shell
+copies to the macOS clipboard. History archive writes a timestamped derived JSON
+file under the daemon's archive directory and copies that path to the clipboard.
 Event conversation uses `/conversation/ask`; the shell sends the current
 structured listening event and receives a derived-data answer with known facts,
 hypotheses, evidence, uncertainty notes, and optional Akousmata memory context.
@@ -145,8 +145,8 @@ The tap continuously feeds only visual and status meters:
 - capture/error state.
 
 When the user chooses Analyze System Audio, the shell writes a bounded mono WAV
-from its in-memory ring to `uploads/` and sends that local path to
-`/native/system-audio/analyze`. The resulting listening event uses:
+from its in-memory ring to the configured data-dir `uploads/` and sends that
+local path to `/native/system-audio/analyze`. The resulting listening event uses:
 
 - source type: `system_output`
 - privacy mode: `ephemeral`

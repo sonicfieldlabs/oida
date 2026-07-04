@@ -23,7 +23,7 @@ struct NativeSystemAudioCapture {
 enum SystemAudioTapCaptureError: LocalizedError {
     case notCapturing
     case emptyBuffer
-    case repositoryRootMissing
+    case dataDirectoryUnavailable
     case unsupportedFormat
 
     var errorDescription: String? {
@@ -32,8 +32,8 @@ enum SystemAudioTapCaptureError: LocalizedError {
             return "Start the native system audio tap before analyzing system output."
         case .emptyBuffer:
             return "The native system audio buffer is empty."
-        case .repositoryRootMissing:
-            return "Could not locate the hmm repository root for temporary audio storage."
+        case .dataDirectoryUnavailable:
+            return "Could not prepare the hmm data directory for temporary audio storage."
         case .unsupportedFormat:
             return "The native system audio buffer format is not writable."
         }
@@ -123,9 +123,8 @@ final class SystemAudioTapManager: NSObject {
         onStateChange?(.stopped)
     }
 
-    func writeRecentAudio(seconds: Double, repositoryRoot: URL?) throws -> NativeSystemAudioCapture {
+    func writeRecentAudio(seconds: Double, audioDirectory: URL = hmmAudioDirectory()) throws -> NativeSystemAudioCapture {
         guard isCapturing else { throw SystemAudioTapCaptureError.notCapturing }
-        guard let repositoryRoot else { throw SystemAudioTapCaptureError.repositoryRootMissing }
         let sourceRoute = currentSourceRoute ?? fallbackDisplayMixRoute()
         let requestedSeconds = max(0.25, min(seconds, ringMaxSeconds))
         let snapshot: (samples: [Float], sampleRate: Double) = captureQueue.sync {
@@ -137,10 +136,13 @@ final class SystemAudioTapManager: NSObject {
         }
         guard !snapshot.samples.isEmpty else { throw SystemAudioTapCaptureError.emptyBuffer }
 
-        let uploads = repositoryRoot.appendingPathComponent("uploads", isDirectory: true)
-        try FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+        } catch {
+            throw SystemAudioTapCaptureError.dataDirectoryUnavailable
+        }
         let fileName = "\(timestampForFilename())-hmm-native-system-output-\(Int(round(requestedSeconds)))s.wav"
-        let output = uploads.appendingPathComponent(fileName)
+        let output = audioDirectory.appendingPathComponent(fileName)
         try writeMonoFloatWav(samples: snapshot.samples, sampleRate: snapshot.sampleRate, output: output)
         return NativeSystemAudioCapture(
             path: output,

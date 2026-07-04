@@ -86,6 +86,7 @@ def map_report_to_claims(
     model_name = str(report.get("engine", {}).get("model") or "MOSS-Audio")
 
     _map_dsp(report, claims)
+    _map_signal_interpretation(report, claims)
     _map_transcript(report, claims, model_name)
     _map_events(report, claims, model_name)
     _map_caption(report, claims, model_name)
@@ -151,6 +152,27 @@ def _map_dsp(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) ->
         parts = ", ".join(f"{key} {float(value) * 100:.0f}%" for key, value in band_energy.items() if isinstance(value, (int, float)))
         if parts:
             _add(claims, "measured", f"Band energy distribution is approx {parts}.", "medium", basis)
+
+
+def _map_signal_interpretation(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
+    """Deterministic signal-listener deductions. These are logical inferences from
+    measured features (never cultural readings), so they belong in `inferred`."""
+    signal = report.get("signal_interpretation") if isinstance(report.get("signal_interpretation"), dict) else {}
+    if not signal:
+        return
+    for hypothesis in signal.get("hypotheses", []):
+        if not isinstance(hypothesis, dict) or not hypothesis.get("statement"):
+            continue
+        _add(
+            claims,
+            "inferred",
+            str(hypothesis["statement"]),
+            str(hypothesis.get("confidence") or "low"),
+            str(hypothesis.get("basis") or "hmm signal listener over measured DSP features"),
+        )
+    for caution in signal.get("cautions", []):
+        if isinstance(caution, str) and caution.strip():
+            _add(claims, "measured", caution.strip(), "medium", "hmm signal listener capture-chain check")
 
 
 def _map_transcript(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:

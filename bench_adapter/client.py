@@ -12,11 +12,11 @@ def build_direct_benchmark_payload(
     command_output: dict[str, object],
     model_id: str,
     blind_object_name: str | None = None,
-    agent_id: str = "aear-local",
+    agent_id: str = "hmm-local",
 ) -> dict[str, object]:
     return {
         "agentId": agent_id,
-        "agentType": "local-aear",
+        "agentType": "local-hmm",
         "provider": "local",
         "modelId": model_id,
         "modality": "audio",

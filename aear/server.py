@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
+import json
+import logging
 import re
+import secrets
 import subprocess
+import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +19,7 @@ import jsonschema
 
 try:
     from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel, Field
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised only without deps
@@ -26,7 +32,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised only without 
 else:
     FASTAPI_IMPORT_ERROR = None
 
-from aear.config import load_config
+from aear.config import REPO_ROOT, load_config, uploads_dir
 from aear.acoustic_system import acoustic_system_manifest
 from aear.akouo_skills import akouo_manifest, route_preset
 from aear.background import BackgroundRuntime
@@ -44,22 +50,90 @@ from aear.native_temp_audio import (
     finalize_native_temp_audio_session,
     native_system_audio_temp_status,
 )
+from aear.raw_audio import (
+    cleanup_upload_audio_files,
+    finalize_upload_audio_session,
+    upload_audio_status,
+)
 from aear.reporting import caption, direct_analysis, events, forbidden_topics_for_text, music, qa, report, report_to_dict, speech, think, transcribe
 from aear.reportschema import dump_model
 from aear.route_comparison import compare_route_events
+from aear.sonicfield import SonicFieldBridge, terms_from_event
 from aear.source_routes import native_system_audio_route_manifest, normalize_system_audio_source_route, system_audio_source_label
 from aear.sources import source_registry_dict
 from aear.system_audio import system_audio_status_dict
 from harness.akouo.command import build_harness_output
 from harness.akouo.loader import AkouoLoader
-from harness.akouo.routing import available_harness_controls, routing_plan
+from harness.akouo.routing import available_harness_controls, evidence_level_for_path, routing_plan
 
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GiB cap on a single upload/ingest body
 _LOOPBACK_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+LOGGER = logging.getLogger(__name__)
 
 
 class _UploadTooLargeError(Exception):
     pass
+
+
+def _chunk_overlap(config) -> float:
+    return 15.0 if config.moss_chunk_seconds >= 300 else 5.0
+
+
+class EventBroadcaster:
+    """Minimal SSE fan-out so every surface (dashboard, mac app, floating
+    listener) mirrors one daemon state without polling storms. Sync endpoint
+    handlers run in worker threads, so publish() hops onto the event loop."""
+
+    def __init__(self) -> None:
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._clients: set[asyncio.Queue] = set()
+        self._lock = threading.Lock()
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+
+    def publish(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
+        message = {"type": event_type, "at": datetime.now(timezone.utc).isoformat()}
+        if payload is not None:
+            message["data"] = payload
+        try:
+            data = f"data: {json.dumps(message, default=str)}\n\n"
+        except (TypeError, ValueError):
+            return
+        loop = self._loop
+        if loop is None:
+            return
+        with self._lock:
+            clients = list(self._clients)
+        for client in clients:
+            try:
+                loop.call_soon_threadsafe(self._offer, client, data)
+            except RuntimeError:
+                return
+
+    @staticmethod
+    def _offer(client: asyncio.Queue, data: str) -> None:
+        try:
+            client.put_nowait(data)
+        except asyncio.QueueFull:
+            pass
+
+    async def stream(self):
+        client: asyncio.Queue = asyncio.Queue(maxsize=256)
+        with self._lock:
+            self._clients.add(client)
+        try:
+            yield "retry: 2000\n\n"
+            while True:
+                try:
+                    item = await asyncio.wait_for(client.get(), timeout=25.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield item
+        finally:
+            with self._lock:
+                self._clients.discard(client)
 
 
 def _hostname_only(value: str) -> str:
@@ -250,6 +324,70 @@ class NativeSystemAudioCleanupRequest(BaseModel):  # type: ignore[misc,valid-typ
     max_files: int | None = None
 
 
+class RawAudioWipeRequest(BaseModel):  # type: ignore[misc,valid-type]
+    delete_all: bool = True
+    dry_run: bool = False
+    max_age_hours: float | None = None
+    max_files: int | None = None
+    include_legacy: bool = False
+
+
+class SonicFieldExploreRequest(BaseModel):  # type: ignore[misc,valid-type]
+    event: dict[str, object] | None = None
+    query: str | None = None
+    limit_per_surface: int = 5
+
+
+class CaptureRequestBody(BaseModel):  # type: ignore[misc,valid-type]
+    seconds: float | None = None
+    route_preset: str | None = None
+
+
+class CaptureRequestClaimBody(BaseModel):  # type: ignore[misc,valid-type]
+    id: str | None = None
+
+
+class EngineModelBody(BaseModel):  # type: ignore[misc,valid-type]
+    model_kind: str = "instruct"
+    model: str
+
+
+class SonicFieldRevealRequest(BaseModel):  # type: ignore[misc,valid-type]
+    path: str
+
+
+def scan_moss_models(weights_dir: Path) -> list[dict[str, object]]:
+    """List locally available MOSS checkpoints (weights/<name> with a config.json)."""
+    models: list[dict[str, object]] = []
+    if not weights_dir.exists():
+        return models
+    for candidate in sorted(weights_dir.iterdir()):
+        if not candidate.is_dir() or not (candidate / "config.json").exists():
+            continue
+        size_bytes = 0
+        for file in candidate.glob("*.safetensors"):
+            try:
+                size_bytes += file.stat().st_size
+            except OSError:
+                continue
+        kind_hint = "thinking" if "thinking" in candidate.name.lower() else "instruct"
+        description = (
+            "Reasoning listener: slower, thinks before answering. Best for QA, music analysis, and deep routes."
+            if kind_hint == "thinking"
+            else "Perception listener: fast captions, transcripts, and event timelines. The default ear."
+        )
+        models.append(
+            {
+                "name": candidate.name,
+                "path": str(candidate),
+                "size_gb": round(size_bytes / 1_073_741_824, 2) if size_bytes else None,
+                "kind_hint": kind_hint,
+                "description": description,
+            }
+        )
+    return models
+
+
 def create_app(profile: str | None = None, host: str | None = None, port: int | None = None) -> Any:
     if FastAPI is None:
         raise RuntimeError("FastAPI dependencies are not installed; run `uv sync` first") from FASTAPI_IMPORT_ERROR
@@ -261,13 +399,73 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     background = BackgroundRuntime()
     conversations = ConversationStore()
     generations = GenerationStore()
+    broadcaster = EventBroadcaster()
+    sonicfield = SonicFieldBridge(config.sonicfield_root)
+    try:
+        uploads_dir().mkdir(parents=True, exist_ok=True)
+    except OSError:
+        LOGGER.warning("could not create audio dir %s", uploads_dir())
+
+    engine_monitor: dict[str, Any] = {
+        "state": "stub" if config.profile == "stub" else ("remote" if config.profile == "cuda-server" else "cold"),
+        "detail": "stub profile produces no model perception; DSP still listens" if config.profile == "stub" else None,
+        "warmed_ms": None,
+    }
+    weights_root = REPO_ROOT / "weights"
+    available_models = scan_moss_models(weights_root)
+
+    def engine_status() -> dict[str, Any]:
+        runtime = engine.runtime_status()
+        if config.profile == "mac-mps" and runtime.get("loaded_models"):
+            engine_monitor["state"] = "ready"
+        assignments = runtime.get("assignments") or {}
+        return {
+            "profile": config.profile,
+            "state": engine_monitor["state"],
+            "detail": engine_monitor["detail"],
+            "warmed_ms": engine_monitor["warmed_ms"],
+            "loaded_models": runtime.get("loaded_models", []),
+            "device": runtime.get("device"),
+            "prewarm": config.prewarm,
+            "chunk_seconds": config.moss_chunk_seconds,
+            "instruct_model": assignments.get("instruct") or (Path(config.instruct_model).name if config.instruct_model else None),
+            "thinking_model": assignments.get("thinking") or (Path(config.thinking_model).name if config.thinking_model else None),
+            "available_models": available_models,
+        }
+
+    def _prewarm_engine(model_kind: str = "instruct") -> None:
+        engine_monitor["state"] = "warming"
+        engine_monitor["detail"] = None
+        broadcaster.publish("engine", engine_status())
+        started = time.perf_counter()
+        try:
+            engine.prewarm(model_kind)
+            engine_monitor["state"] = "ready"
+            engine_monitor["warmed_ms"] = round((time.perf_counter() - started) * 1000)
+        except Exception as exc:
+            engine_monitor["state"] = "degraded"
+            engine_monitor["detail"] = str(exc)
+        broadcaster.publish("engine", engine_status())
+
+    def start_prewarm(model_kind: str = "instruct") -> bool:
+        if config.profile != "mac-mps" or engine_monitor["state"] == "warming":
+            return False
+        threading.Thread(target=_prewarm_engine, args=(model_kind,), name="hmm-moss-prewarm", daemon=True).start()
+        return True
 
     @asynccontextmanager
     async def lifespan(_app: Any):
+        broadcaster.bind_loop(asyncio.get_running_loop())
+        if config.prewarm:
+            start_prewarm()
         yield
         # Honor the default delete_after_session native-temp retention policy on shutdown.
         try:
             finalize_native_temp_audio_session(background.config.native_temp_audio_retention)
+        except Exception:
+            pass
+        try:
+            finalize_upload_audio_session(background.config.upload_audio_retention)
         except Exception:
             pass
 
@@ -276,15 +474,31 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     wildcard_bind = str(config.host) in {"0.0.0.0", "::", ""}
+    if wildcard_bind and not config.auth_token:
+        raise RuntimeError(
+            "Refusing to bind hmm on a wildcard host without HMM_AUTH_TOKEN or AEAR_AUTH_TOKEN. "
+            "Use 127.0.0.1 for tokenless local operation."
+        )
+    if wildcard_bind:
+        LOGGER.warning("hmm is bound to %s; bearer-token auth is required and loopback Host protection is relaxed.", config.host)
     allowed_hostnames = set(_LOOPBACK_HOSTNAMES)
     if config.host:
         allowed_hostnames.add(str(config.host).strip().lower())
 
     @app.middleware("http")
     async def _loopback_guard(request: Request, call_next: Any) -> Any:
-        # This daemon is unauthenticated and reachable by any local process or web page.
-        # Refuse non-loopback Host headers (DNS-rebinding) and cross-origin browser
-        # requests (CSRF) unless the operator explicitly bound a non-loopback address.
+        if config.auth_token:
+            auth_header = request.headers.get("authorization", "")
+            scheme, _, token = auth_header.partition(" ")
+            # Compare as bytes: str compare_digest raises TypeError on non-ASCII
+            # input, which would turn a malformed header into a 500 instead of 401.
+            if scheme.lower() != "bearer" or not secrets.compare_digest(
+                token.encode("utf-8", "surrogateescape"), config.auth_token.encode("utf-8", "surrogateescape")
+            ):
+                return JSONResponse(status_code=401, content={"detail": "valid bearer token required"})
+        # In localhost mode, refuse non-loopback Host headers (DNS-rebinding) and
+        # cross-origin browser requests (CSRF). Wildcard/LAN mode is allowed only
+        # when bearer-token auth is configured above.
         if not wildcard_bind:
             host_header = request.headers.get("host", "")
             if host_header and _hostname_only(host_header) not in allowed_hostnames:
@@ -309,7 +523,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     ) -> dict[str, object]:
         preset = route_preset(preset_id)
         path = str(capture["path"])
-        perception = report(engine, path, "hmm-live-capture")
+        broadcaster.publish("listen_started", {"path": path, "route_preset": preset.id, "source": "live-capture"})
+        perception = report(engine, path, "hmm-live-capture", passes=preset.moss_passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
         perception_dict = report_to_dict(perception)
         command_output = build_harness_output(perception_dict, command=preset.akouo_command)
         event = listening_event_dict(
@@ -323,6 +538,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             raw_audio_policy="temp",
         )
         event = memory.enrich_event(event)
+        broadcaster.publish("listen_completed", {"listening_event": event, "route_preset": preset.id})
         return {
             **capture,
             "listening_event": event,
@@ -332,7 +548,87 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
     @app.get("/health")
     def health() -> dict[str, object]:
-        return {"ok": True, "name": "hmm", "legacy_name": "aear", "profile": config.profile, "host": config.host, "port": config.port}
+        return {
+            "ok": True,
+            "name": "hmm",
+            "legacy_name": "aear",
+            "profile": config.profile,
+            "host": config.host,
+            "port": config.port,
+            "data_dir": str(config.data_dir),
+            "audio_dir": str(config.audio_dir),
+            "auth_required": bool(config.auth_token),
+            "allow_hf_hub": config.allow_hf_hub,
+            "hf_hub_offline": config.hf_hub_offline,
+            "engine": engine_status(),
+            "sonicfield": {"available": sonicfield.available, "root": str(sonicfield.root) if sonicfield.root else None},
+        }
+
+    @app.get("/engine/status")
+    def engine_status_endpoint() -> dict[str, object]:
+        return engine_status()
+
+    @app.post("/engine/warm")
+    def engine_warm_endpoint() -> dict[str, object]:
+        started = start_prewarm()
+        return {"started": started, **engine_status()}
+
+    @app.post("/engine/model")
+    def engine_model_endpoint(req: EngineModelBody) -> dict[str, object]:
+        kind = req.model_kind.strip().lower()
+        if kind not in {"instruct", "thinking"}:
+            raise HTTPException(status_code=400, detail="model_kind must be instruct or thinking")
+        selected = next((item for item in available_models if item["name"] == req.model or item["path"] == req.model), None)
+        if selected is None:
+            valid = ", ".join(str(item["name"]) for item in available_models) or "none found in weights/"
+            raise HTTPException(status_code=400, detail=f"unknown MOSS model: {req.model}. Available: {valid}")
+        try:
+            engine.set_model(kind, str(selected["path"]))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        started = start_prewarm(kind)
+        status = engine_status()
+        broadcaster.publish("engine", status)
+        return {"assigned": {kind: selected["name"]}, "warming": started, **status}
+
+    @app.get("/events/stream")
+    async def events_stream_endpoint() -> Any:
+        return StreamingResponse(
+            broadcaster.stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.get("/sonicfield/status")
+    def sonicfield_status_endpoint() -> dict[str, object]:
+        return sonicfield.status()
+
+    @app.post("/sonicfield/explore")
+    def sonicfield_explore_endpoint(req: SonicFieldExploreRequest) -> dict[str, object]:
+        try:
+            terms = terms_from_event(req.event, extra_query=req.query)
+            if not terms:
+                raise ValueError("provide a listening event or a query to explore the Sonic Field")
+            limit = max(1, min(int(req.limit_per_surface), 12))
+            result = sonicfield.explore(terms, limit_per_surface=limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {**result, "status": sonicfield.status()}
+
+    @app.post("/sonicfield/reveal")
+    def sonicfield_reveal_endpoint(req: SonicFieldRevealRequest) -> dict[str, object]:
+        if not sonicfield.available or sonicfield.root is None:
+            raise HTTPException(status_code=400, detail="Sonic Field root is not available")
+        target = Path(req.path).expanduser().resolve()
+        if not str(target).startswith(str(sonicfield.root)):
+            raise HTTPException(status_code=400, detail="path is outside the Sonic Field root")
+        if not target.exists():
+            raise HTTPException(status_code=404, detail="path does not exist")
+        try:
+            subprocess.run(["open", "-R", str(target)], check=False, timeout=5)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(status_code=500, detail=f"could not reveal path: {exc}") from exc
+        return {"revealed": str(target)}
 
     @app.get("/")
     def root() -> FileResponse:
@@ -348,7 +644,14 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "docs": "/docs",
             "health": "/health",
             "endpoints": [
+                "/engine/status",
+                "/engine/warm",
+                "/events/stream",
+                "/sonicfield/status",
+                "/sonicfield/explore",
+                "/sonicfield/reveal",
                 "/upload",
+                "/sample-tone",
                 "/transcribe",
                 "/events",
                 "/caption",
@@ -373,6 +676,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "/native/system-audio/routes",
                 "/native/system-audio/temp",
                 "/native/system-audio/cleanup",
+                "/raw-audio/status",
+                "/raw-audio/wipe",
                 "/listen-event",
                 "/listen-event/rerun",
                 "/akouo/modes",
@@ -411,10 +716,19 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "name": "hmm",
             "description": "Local open listening agent built from the hmm daemon and AKOUO harness.",
             "profile": config.profile,
+            "data_dir": str(config.data_dir),
             "sources": source_registry_dict(),
             "system_audio": system_audio_status_dict(),
             "background": background.status(),
             "akouo": akouo_manifest(),
+            "raw_audio": upload_audio_status(background.config.upload_audio_retention),
+            "model_policy": {
+                "allow_hf_hub": config.allow_hf_hub,
+                "hf_hub_offline": config.hf_hub_offline,
+                "instruct_model": config.instruct_model,
+                "thinking_model": config.thinking_model,
+                "note": "Hub model IDs are refused unless HMM_ALLOW_HF_HUB or AEAR_ALLOW_HF_HUB is set and HF_HUB_OFFLINE is not enabled.",
+            },
             "privacy_defaults": {
                 "raw_audio_policy": "external_ref_for_files_temp_for_live_captures",
                 "memory_save_by_default": False,
@@ -436,6 +750,26 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     @app.get("/background/status")
     def background_status_endpoint() -> dict[str, object]:
         return background.status()
+
+    @app.post("/background/capture-request")
+    def background_capture_request_endpoint(req: CaptureRequestBody) -> dict[str, object]:
+        request = background.request_capture(seconds=req.seconds, route_preset=req.route_preset)
+        broadcaster.publish("capture_requested", request)
+        return {"capture_request": request, "background": background.status()}
+
+    @app.post("/background/capture-request/claim")
+    def background_capture_request_claim_endpoint(req: CaptureRequestClaimBody) -> dict[str, object]:
+        request = background.claim_capture_request(req.id)
+        if request:
+            broadcaster.publish("capture_claimed", request)
+        return {"capture_request": request, "claimed": bool(request)}
+
+    @app.post("/background/capture-request/cancel")
+    def background_capture_request_cancel_endpoint(req: CaptureRequestClaimBody) -> dict[str, object]:
+        request = background.claim_capture_request(req.id)
+        if request:
+            broadcaster.publish("capture_cancelled", request)
+        return {"cancelled": bool(request), "capture_request": request}
 
     @app.get("/background/history")
     def background_history_endpoint(
@@ -531,41 +865,61 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         saved = save_upload(file)
         return saved
 
+    @app.get("/sample-tone")
+    def sample_tone_endpoint() -> dict[str, object]:
+        path = sample_tone_path(config.data_dir)
+        return {"path": str(path), "sample": True, "raw_audio_policy": "generated_local_fixture"}
+
     @app.post("/transcribe")
     def transcribe_endpoint(req: TranscribeRequest) -> dict[str, object]:
         try:
-            result, engine_result = transcribe(engine, req.path, req.timestamps)
+            path = _require_existing_path(req.path)
+            result, engine_result = transcribe(engine, str(path), req.timestamps)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"transcript": dump_model(result), "engine": dump_model(engine_result)}
 
     @app.post("/events")
     def events_endpoint(req: PathRequest) -> dict[str, object]:
-        result, engine_result = events(engine, req.path)
+        try:
+            path = _require_existing_path(req.path)
+            result, engine_result = events(engine, str(path))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"events": dump_model(result), "engine": dump_model(engine_result)}
 
     @app.post("/caption")
     def caption_endpoint(req: CaptionRequest) -> dict[str, object]:
         try:
-            result, engine_result = caption(engine, req.path, req.detail)
+            path = _require_existing_path(req.path)
+            result, engine_result = caption(engine, str(path), req.detail)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"caption": dump_model(result), "engine": dump_model(engine_result)}
 
     @app.post("/speech")
     def speech_endpoint(req: PathRequest) -> dict[str, object]:
-        result, engine_result = speech(engine, req.path)
+        try:
+            path = _require_existing_path(req.path)
+            result, engine_result = speech(engine, str(path))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"speech": dump_model(result), "engine": dump_model(engine_result)}
 
     @app.post("/music")
     def music_endpoint(req: PathRequest) -> dict[str, object]:
-        result, engine_result = music(engine, req.path)
+        try:
+            path = _require_existing_path(req.path)
+            result, engine_result = music(engine, str(path))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"music": dump_model(result), "engine": dump_model(engine_result)}
 
     @app.post("/moss-analysis")
     def moss_analysis_endpoint(req: MossAnalysisRequest) -> dict[str, object]:
         try:
-            result, engine_result = direct_analysis(engine, req.path, req.mode, req.thinking_budget)
+            path = _require_existing_path(req.path)
+            result, engine_result = direct_analysis(engine, str(path), req.mode, req.thinking_budget)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"analysis": result, "engine": dump_model(engine_result)}
@@ -574,7 +928,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     def listen_event_endpoint(req: ListenEventRequest) -> dict[str, object]:
         try:
             preset = route_preset(req.route_preset)
-            perception = report(engine, req.path, "hmm")
+            broadcaster.publish("listen_started", {"path": req.path, "route_preset": preset.id, "source": "file"})
+            perception = report(engine, req.path, "hmm", passes=preset.moss_passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
             perception_dict = report_to_dict(perception)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
             event = listening_event_dict(
@@ -588,7 +943,9 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             )
             event = memory.enrich_event(event)
             background.finish_action(event)
+            broadcaster.publish("listen_completed", {"listening_event": event, "route_preset": preset.id})
         except ValueError as exc:
+            broadcaster.publish("listen_failed", {"detail": str(exc)})
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"listening_event": event, "perception_report": perception_dict, "command_output": command_output, "background": background.status()}
 
@@ -603,7 +960,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 privacy_mode=req.privacy_mode,
                 raw_audio_policy=req.raw_audio_policy,
             )
-            perception = report(engine, str(path), f"hmm-route-rerun-{preset.id}")
+            perception = report(engine, str(path), f"hmm-route-rerun-{preset.id}", passes=preset.moss_passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
             perception_dict = report_to_dict(perception)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
             event = listening_event_dict(
@@ -683,7 +1040,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                     "claim_limits": source_route.get("claim_limits"),
                 },
             )
-            perception = report(engine, str(path), "hmm-native-system-audio")
+            broadcaster.publish("listen_started", {"path": str(path), "route_preset": preset.id, "source": "system-audio"})
+            perception = report(engine, str(path), "hmm-native-system-audio", passes=preset.moss_passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
             perception_dict = report_to_dict(perception)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
             event = listening_event_dict(
@@ -702,6 +1060,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 trace = memory.remember(event, tags=["native-system-audio"])
                 event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
             background.finish_action(event)
+            broadcaster.publish("listen_completed", {"listening_event": event, "route_preset": preset.id})
             retention_cleanup = apply_native_temp_audio_retention_after_analysis(
                 background.config.native_temp_audio_retention,
                 path,
@@ -742,6 +1101,22 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         )
         return {**cleanup, "background": background.status()}
 
+    @app.get("/raw-audio/status")
+    def raw_audio_status_endpoint() -> dict[str, object]:
+        return upload_audio_status(background.config.upload_audio_retention)
+
+    @app.post("/raw-audio/wipe")
+    def raw_audio_wipe_endpoint(req: RawAudioWipeRequest) -> dict[str, object]:
+        cleanup = cleanup_upload_audio_files(
+            background.config.upload_audio_retention,
+            delete_all=req.delete_all,
+            dry_run=req.dry_run,
+            max_age_hours=req.max_age_hours,
+            max_files=req.max_files,
+            include_legacy=req.include_legacy,
+        )
+        return {**cleanup, "background": background.status()}
+
     @app.get("/acoustic-system")
     def acoustic_system_endpoint() -> dict[str, object]:
         return acoustic_system_manifest()
@@ -772,7 +1147,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     @app.post("/akouo/route")
     def akouo_route_endpoint(req: AkouoHarnessRequest) -> dict[str, object]:
         try:
-            return routing_plan(req.path, command=req.command, evidence_level="mixed")
+            return routing_plan(req.path, command=req.command, evidence_level=evidence_level_for_path(req.path))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1019,7 +1394,11 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         forbidden = forbidden_topics_for_text(req.question)
         if forbidden:
             return {"qa": {"question": req.question, "answer": "", "reasoning_trace": None, "thinking_budget": req.thinking_budget}, "forbidden_topics_triggered": forbidden}
-        result, engine_result = qa(engine, req.path, req.question, req.thinking_budget, context=req.context)
+        try:
+            path = _require_existing_path(req.path)
+            result, engine_result = qa(engine, str(path), req.question, req.thinking_budget, context=req.context)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"qa": dump_model(result), "engine": dump_model(engine_result), "forbidden_topics_triggered": []}
 
     @app.post("/think")
@@ -1027,7 +1406,11 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         forbidden = forbidden_topics_for_text(req.instruction)
         if forbidden:
             return {"qa": {"question": req.instruction, "answer": "", "reasoning_trace": None, "thinking_budget": req.thinking_budget}, "forbidden_topics_triggered": forbidden}
-        result, engine_result = think(engine, req.path, req.instruction, req.thinking_budget)
+        try:
+            path = _require_existing_path(req.path)
+            result, engine_result = think(engine, str(path), req.instruction, req.thinking_budget)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"qa": dump_model(result), "engine": dump_model(engine_result), "forbidden_topics_triggered": []}
 
     @app.post("/report")
@@ -1109,11 +1492,11 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
 
 def save_upload(file: UploadFile) -> dict[str, object]:
-    uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
+    upload_root = uploads_dir()
+    upload_root.mkdir(parents=True, exist_ok=True)
     original = sanitize_filename(file.filename or "recording.webm")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    raw_path = uploads_dir / f"{stamp}-{original}"
+    raw_path = upload_root / f"{stamp}-{original}"
     try:
         total = 0
         with raw_path.open("wb") as handle:
@@ -1145,6 +1528,21 @@ def save_upload(file: UploadFile) -> dict[str, object]:
         "processing": upload_processing_info(raw_path, normalized_path),
         "sha256": sha256_file(normalized_path),
     }
+
+
+def sample_tone_path(root: Path) -> Path:
+    path = root / "samples" / "hmm-tone.wav"
+    if path.exists():
+        return path
+    import numpy as np
+    import soundfile as sf
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sample_rate = 16_000
+    t = np.arange(sample_rate, dtype=np.float32) / sample_rate
+    samples = (0.15 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+    sf.write(path, samples, sample_rate)
+    return path
 
 
 def normalize_audio(path: Path) -> tuple[Path, str | None]:
@@ -1202,6 +1600,15 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _require_existing_path(path: str | Path) -> Path:
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.exists():
+        raise ValueError(f"audio path does not exist: {resolved}")
+    if not resolved.is_file():
+        raise ValueError(f"audio path is not a file: {resolved}")
+    return resolved
 
 
 def _rerun_segment(
