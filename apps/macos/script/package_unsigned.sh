@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="hmm"
-EXECUTABLE_NAME="hmm-macos"
-BUNDLE_ID="org.sonicfield.hmm"
+APP_NAME="oida"
+EXECUTABLE_NAME="oida-macos"
+BUNDLE_ID="org.sonicfield.oida"
 MIN_SYSTEM_VERSION="13.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -47,7 +47,7 @@ cat >"$INFO_PLIST" <<PLIST
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>hmm analyzes audio you explicitly capture; microphone access is only used for on-device listening.</string>
+  <string>oida analyzes audio you explicitly capture; microphone access is only used for on-device listening.</string>
 </dict>
 </plist>
 PLIST

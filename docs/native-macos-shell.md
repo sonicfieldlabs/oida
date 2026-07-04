@@ -1,6 +1,6 @@
 # Native macOS Shell
 
-`apps/macos` contains the first native app-shell target for `hmm`. It is a
+`apps/macos` contains the first native app-shell target for `oida`. It is a
 SwiftPM macOS app that wraps the existing localhost daemon instead of replacing
 it.
 
@@ -9,7 +9,7 @@ it.
 ```text
 apps/macos/
   Package.swift
-  Sources/HmmMacOS/
+  Sources/OidaMacOS/
     App/        SwiftUI entry point and AppKit launch delegate
     Models/     Minimal Codable daemon response models
     Services/   HTTP daemon client, shared shell store, daemon supervisor,
@@ -22,7 +22,7 @@ apps/macos/
 The app assumes the daemon is already running, usually:
 
 ```bash
-uv run hmm --profile stub --host 127.0.0.1 --port 8765
+uv run oida --profile stub --host 127.0.0.1 --port 8765
 ```
 
 Then build and launch the native shell:
@@ -31,7 +31,7 @@ Then build and launch the native shell:
 apps/macos/script/build_and_run.sh
 ```
 
-The script builds with SwiftPM, stages `apps/macos/dist/hmm.app`, and launches
+The script builds with SwiftPM, stages `apps/macos/dist/oida.app`, and launches
 the app bundle with `/usr/bin/open -n`.
 
 Create a local unsigned archive:
@@ -40,7 +40,7 @@ Create a local unsigned archive:
 apps/macos/script/package_unsigned.sh
 ```
 
-This writes `apps/macos/dist/hmm-macos-unsigned.zip`. It is a local development
+This writes `apps/macos/dist/oida-macos-unsigned.zip`. It is a local development
 package, not a notarized distribution build.
 
 Release-readiness validation is documented in `docs/release-readiness.md`. With
@@ -56,7 +56,7 @@ packages, and smoke-checks the daemon contract plus the unsigned archive.
 - Native floating spectral listener window with floating window level.
 - Settings window for daemon URL and optional global hotkey binding.
 - Global hotkey registration scaffold using Carbon `RegisterEventHotKey`.
-- Daemon supervisor controls that can start a local `uv run hmm --profile stub`
+- Daemon supervisor controls that can start a local `uv run oida --profile stub`
   process when the daemon is offline, then stop only that managed process.
 - Live signal polling from the daemon's `/live/signal/{session_id}` endpoint.
 - User-controlled launch-at-login registration through
@@ -113,7 +113,7 @@ The shell can start the daemon for local development by locating the repository
 root and running:
 
 ```bash
-uv run hmm --profile stub --host 127.0.0.1 --port 8765
+uv run oida --profile stub --host 127.0.0.1 --port 8765
 ```
 
 It appends common development paths to `PATH` so a GUI-launched app can still

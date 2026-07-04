@@ -1,6 +1,6 @@
 # Contributing
 
-`hmm` is a local-first listening agent. Changes should preserve four contracts:
+`oida` is a local-first listening agent. Changes should preserve four contracts:
 
 - Raw audio never leaves the operator machine by default.
 - Raw audio retention and deletion paths stay explicit and testable.

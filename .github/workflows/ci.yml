@@ -27,10 +27,10 @@ jobs:
           uv run pytest -q
 
       - name: Compile Python modules
-        run: uv run python -m compileall -q aear harness bench_adapter scripts tests
+        run: uv run python -m compileall -q oida harness bench_adapter scripts tests
 
       - name: Check dashboard JavaScript
-        run: node --check aear/static/app.js
+        run: node --check oida/static/app.js
 
       - name: Build macOS shell
         working-directory: apps/macos

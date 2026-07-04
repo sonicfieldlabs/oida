@@ -4,9 +4,9 @@ import os
 import sys
 from pathlib import Path
 
-from aear.config import load_config
-from aear.engine import build_engine
-from aear.recipes import get_recipe
+from oida.config import load_config
+from oida.engine import build_engine
+from oida.recipes import get_recipe
 
 
 def main() -> None:

@@ -110,7 +110,7 @@ def map_report_to_claims(
 def _map_dsp(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
     dsp = report.get("dsp") if isinstance(report.get("dsp"), dict) else {}
     features = dsp.get("features") if isinstance(dsp.get("features"), dict) else {}
-    basis = "hmm DSP module, AKOUO audioAdapter parity port"
+    basis = "oida DSP module, AKOUO audioAdapter parity port"
     duration = dsp.get("durationSeconds")
     sample_rate = dsp.get("sampleRate")
     channels = dsp.get("channelCount")
@@ -168,11 +168,11 @@ def _map_signal_interpretation(report: dict[str, Any], claims: dict[str, list[di
             "inferred",
             str(hypothesis["statement"]),
             str(hypothesis.get("confidence") or "low"),
-            str(hypothesis.get("basis") or "hmm signal listener over measured DSP features"),
+            str(hypothesis.get("basis") or "oida signal listener over measured DSP features"),
         )
     for caution in signal.get("cautions", []):
         if isinstance(caution, str) and caution.strip():
-            _add(claims, "measured", caution.strip(), "medium", "hmm signal listener capture-chain check")
+            _add(claims, "measured", caution.strip(), "medium", "oida signal listener capture-chain check")
 
 
 def _map_transcript(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
@@ -304,10 +304,10 @@ def _map_music(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], 
 def _map_uncertainty(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
     for note in report.get("model_uncertainty_notes", []):
         if isinstance(note, str) and note.strip():
-            _add(claims, "undetermined", note.strip(), "undetermined", "hmm model uncertainty note")
+            _add(claims, "undetermined", note.strip(), "undetermined", "oida model uncertainty note")
     for note in report.get("forbidden_topics_triggered", []):
         if isinstance(note, str) and note.strip():
-            _add(claims, "undetermined", note.strip(), "undetermined", "hmm forbidden topic guard")
+            _add(claims, "undetermined", note.strip(), "undetermined", "oida forbidden topic guard")
 
 
 def _map_forbidden_query(question: str | None, claims: dict[str, list[dict[str, str]]]) -> None:

@@ -1,13 +1,15 @@
-# hmm
+# oída
 
-`hmm` is a local listening agent for machine ears. It listens to audio files,
+`oida` is a local listening agent for machine ears. It listens to audio files,
 browser microphone input, and captured live buffers, routes sound through
 MOSS-Audio and AKOÚŌ listening paths, extracts measured signal features, and
 normalizes results into listening events that can be saved as Akousmata memory.
 
-This repository was previously named AEAR. The Python package still uses
-`aear` internally for compatibility, and the legacy `aear` CLI remains available.
-New user-facing commands and UI copy use lowercase `hmm`.
+This project was previously named **AEAR**, then **hmm**; it is now **oída**.
+The Python package and primary CLI are `oida`; the `hmm` and `aear` commands
+remain available as backward-compatible aliases, and `OIDA_*` environment
+variables are read first with `HMM_*`/`AEAR_*` honored as fallbacks. UI copy
+uses the accented display name **oída**.
 
 ## What Is Implemented
 
@@ -21,7 +23,7 @@ New user-facing commands and UI copy use lowercase `hmm`.
   silence/clipping, zero-crossing, centroid/rolloff/flatness, band energy,
   onsets/BPM candidate, and stereo correlation/width/balance.
 - Canonical `AudioSegment`, `AudioSourceDescriptor`, and `ListeningEvent`
-  contracts for `hmm` workflows.
+  contracts for `oida` workflows.
 - Source registry for live input, file input, captured buffers, and explicit
   system-output fallback status.
 - Live local ring buffer with quick "capture last N seconds" extraction.
@@ -62,7 +64,7 @@ uv sync --extra dev
 Run the daemon (MOSS-Audio on Apple Silicon is the default profile):
 
 ```bash
-uv run hmm --host 127.0.0.1 --port 8765  # add --profile stub for a model-free dev run
+uv run oida --host 127.0.0.1 --port 8765  # add --profile stub for a model-free dev run
 ```
 
 Open the dashboard:
@@ -74,33 +76,33 @@ http://127.0.0.1:8765
 Generate a normalized listening event:
 
 ```bash
-uv run python -c "import numpy as np, soundfile as sf; t=np.arange(16000)/16000; sf.write('/tmp/hmm-tone.wav',(0.15*np.sin(2*np.pi*440*t)).astype('float32'),16000)"
+uv run python -c "import numpy as np, soundfile as sf; t=np.arange(16000)/16000; sf.write('/tmp/oida-tone.wav',(0.15*np.sin(2*np.pi*440*t)).astype('float32'),16000)"
 curl -s http://127.0.0.1:8765/listen-event \
   -H 'content-type: application/json' \
-  -d '{"path":"/tmp/hmm-tone.wav","route_preset":"basic"}'
+  -d '{"path":"/tmp/oida-tone.wav","route_preset":"basic"}'
 ```
 
 Run a routed local session and write `sessions/<stamp>-<slug>/`:
 
 ```bash
-uv run hmm listen path/to/clip.wav --command /listen --server http://127.0.0.1:8765
+uv run oida listen path/to/clip.wav --command /listen --server http://127.0.0.1:8765
 ```
 
 Start and inspect a local live ring-buffer session:
 
 ```bash
-uv run hmm live --start
-uv run hmm live --status <session_id>
-uv run hmm live --stop <session_id>
+uv run oida live --start
+uv run oida live --status <session_id>
+uv run oida live --stop <session_id>
 ```
 
 Control the background runtime:
 
 ```bash
-uv run hmm background status
-uv run hmm background pause
-uv run hmm background resume
-uv run hmm background capture --seconds 10 --route-preset basic
+uv run oida background status
+uv run oida background pause
+uv run oida background resume
+uv run oida background capture --seconds 10 --route-preset basic
 ```
 
 The background runtime is daemon-side in this phase. It can keep state, track the
@@ -114,7 +116,7 @@ Run the native macOS shell:
 apps/macos/script/build_and_run.sh
 ```
 
-The shell stages `apps/macos/dist/hmm.app`, adds a menu bar extra, opens the
+The shell stages `apps/macos/dist/oida.app`, adds a menu bar extra, opens the
 dashboard, triggers background quick capture, and exposes an optional global
 hotkey in Settings. If the daemon is offline, the shell starts one automatically with the
 `mac-mps` profile. Launch at login is
@@ -129,9 +131,9 @@ captures are listed at `/native/system-audio/temp` and can be removed through
 `/native/system-audio/cleanup`; the macOS shell exposes this as Clean Temp.
 Native source-route profiles are exposed at `/native/system-audio/routes`; the
 current route is `display_mix`, meaning the selected display's system mix with
-the hmm process excluded.
+the oida process excluded.
 
-Raw browser uploads and live chunks are stored under the configured hmm data
+Raw browser uploads and live chunks are stored under the configured oida data
 directory, not the source checkout. Inspect them with `/raw-audio/status` and
 delete them with `/raw-audio/wipe`; the dashboard exposes this as Wipe raw
 audio. Recordings written by older builds into the checkout's `uploads/` are
@@ -164,7 +166,7 @@ Existing listening events can be rerun through a different preset with
 new audio. Rerun responses include a conservative route comparison over route
 ids, summary changes, warnings, deterministic DSP deltas, and applied comparison
 filters. The daemon also keeps a bounded recent-result list at
-`/background/history`, persists derived event JSON under the configured hmm data
+`/background/history`, persists derived event JSON under the configured oida data
 directory, and excludes incognito events from that durable history by default.
 Pinned recent results are persisted separately from the rolling recent list, and
 `/background/history/export`, `/background/history/pin`,
@@ -201,10 +203,10 @@ DSP feature similarity when embeddings are not available.
 Dashboard controls cover remember, forget, search, open, and export. CLI access:
 
 ```bash
-uv run hmm memory list
-uv run hmm memory search "machine hum"
-uv run hmm memory export
-uv run hmm memory forget <trace_id>
+uv run oida memory list
+uv run oida memory search "machine hum"
+uv run oida memory export
+uv run oida memory forget <trace_id>
 ```
 
 See `docs/akousmata-memory.md`.
@@ -229,7 +231,7 @@ the daemon, native system-output signal meters, and memory-match state.
 ## System Audio In This Phase
 
 The current dashboard runs in the browser, so it cannot directly capture macOS
-system output. `hmm` supports system audio now through a visible loopback-device
+system output. `oida` supports system audio now through a visible loopback-device
 workflow:
 
 1. Install or enable a virtual loopback input such as BlackHole, Loopback, or
@@ -259,7 +261,7 @@ The `mac-mps` adapter expects the official MOSS-Audio repository classes:
 - `MossAudioProcessor`
 - `load_audio`
 
-The local setup script sets these environment variables before starting `hmm`:
+The local setup script sets these environment variables before starting `oida`:
 
 ```bash
 export AEAR_MOSS_AUDIO_REPO="$PWD/MOSS-Audio"
@@ -281,7 +283,7 @@ and sets `audio_input_mask = input_ids == processor.audio_token_id`.
 `AEAR_MOSS_RESIDENT=single` hot-swaps Instruct and Thinking instead of keeping
 both 4B models resident.
 
-`hmm` will not silently download model code or weights. If the local `weights/`
+`oida` will not silently download model code or weights. If the local `weights/`
 paths are absent, the `mac-mps` profile falls back to the stub engine unless
 `AEAR_REQUIRE_MODEL=1` is set, and Hugging Face hub lookup is refused unless
 `HMM_ALLOW_HF_HUB=1` or `AEAR_ALLOW_HF_HUB=1` is set. `HF_HUB_OFFLINE=1` always
@@ -289,24 +291,24 @@ keeps hub lookup disabled.
 
 ## CUDA/SGLang Profile
 
-Start the official MOSS-Audio SGLang fork separately, then point `hmm` at it:
+Start the official MOSS-Audio SGLang fork separately, then point `oida` at it:
 
 ```bash
 export AEAR_SGLANG_BASE_URL=http://127.0.0.1:30000
-uv run hmm --profile cuda-server
+uv run oida --profile cuda-server
 ```
 
 Thinking budgets are forwarded through `custom_params.thinking_budget`.
 
 ## Privacy Defaults
 
-`hmm` is local-first. The daemon binds to `127.0.0.1` by default and does not
+`oida` is local-first. The daemon binds to `127.0.0.1` by default and does not
 upload audio. If you bind to `0.0.0.0` or `::`, the daemon refuses to start
 unless `HMM_AUTH_TOKEN` or `AEAR_AUTH_TOKEN` is set; clients then send
 `Authorization: Bearer <token>`.
 
-Persistent local data defaults to `~/Library/Application Support/hmm` on macOS,
-or `$XDG_DATA_HOME/hmm` / `~/.local/share/hmm` elsewhere. Override it with
+Persistent local data defaults to `~/Library/Application Support/oida` on macOS,
+or `$XDG_DATA_HOME/oida` / `~/.local/share/oida` elsewhere. Override it with
 `HMM_DATA_DIR` or `AEAR_DATA_DIR`.
 
 Background-style buffers are ephemeral by product policy, but browser live

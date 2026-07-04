@@ -9,7 +9,7 @@ import numpy as np
 import soundfile as sf
 from fastapi.testclient import TestClient
 
-from aear.server import create_app
+from oida.server import create_app
 
 
 def _client() -> TestClient:
@@ -29,7 +29,7 @@ class ServerSecurityTests(unittest.TestCase):
     def test_health_reports_hmm(self) -> None:
         response = _client().get("/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["name"], "hmm")
+        self.assertEqual(response.json()["name"], "oida")
 
     def test_cross_origin_request_is_refused(self) -> None:
         response = _client().get("/health", headers={"origin": "http://evil.example"})
@@ -113,7 +113,7 @@ class ServerSecurityTests(unittest.TestCase):
             legacy_dir.mkdir(parents=True)
             legacy_file = legacy_dir / "june-recording.wav"
             legacy_file.write_bytes(b"raw")
-            with patch("aear.raw_audio.legacy_uploads_dir", return_value=legacy_dir):
+            with patch("oida.raw_audio.legacy_uploads_dir", return_value=legacy_dir):
                 client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
                 status = client.get("/raw-audio/status").json()
                 default_wipe = client.post("/raw-audio/wipe", json={"delete_all": True}).json()

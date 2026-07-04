@@ -89,7 +89,7 @@ def build_harness_output(report: dict[str, Any], command: str = "/listen", mode:
     output["skills_called"] = _skills_called_for_command(command, [mode])
     output["execution_order"] = output["skills_called"]
     output["routing_plan"]["mode_chain"] = [
-        {"mode": mode, "role": "primary", "reason": f"{mode} selected explicitly from the hmm harness UI."}
+        {"mode": mode, "role": "primary", "reason": f"{mode} selected explicitly from the oida harness UI."}
     ]
     output["synthesis"] = f"{mode} selected from {command}; " + output["synthesis"]
     return output

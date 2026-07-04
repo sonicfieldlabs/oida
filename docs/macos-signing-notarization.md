@@ -9,15 +9,15 @@ certificate, hardened runtime signing, notarization, and ticket stapling.
 The inspected local artifact is:
 
 ```text
-apps/macos/dist/hmm.app
+apps/macos/dist/oida.app
 ```
 
 Current signing state on this machine:
 
-- `codesign -dvvv --entitlements :- apps/macos/dist/hmm.app` reports an ad hoc
+- `codesign -dvvv --entitlements :- apps/macos/dist/oida.app` reports an ad hoc
   signature.
 - `security find-identity -p codesigning -v` reports `0 valid identities found`.
-- `spctl -a -vv apps/macos/dist/hmm.app` fails before notarization because the
+- `spctl -a -vv apps/macos/dist/oida.app` fails before notarization because the
   artifact is not Developer ID signed.
 
 This is expected for the unsigned development archive.
@@ -38,10 +38,10 @@ This is expected for the unsigned development archive.
 
 ## Store Notary Credentials Locally
 
-Use a Keychain profile named `hmm-notary`:
+Use a Keychain profile named `oida-notary`:
 
 ```bash
-xcrun notarytool store-credentials hmm-notary \
+xcrun notarytool store-credentials oida-notary \
   --apple-id "you@example.com" \
   --team-id "TEAMID"
 ```
@@ -52,7 +52,7 @@ xcrun notarytool store-credentials hmm-notary \
 For API-key based authentication:
 
 ```bash
-xcrun notarytool store-credentials hmm-notary \
+xcrun notarytool store-credentials oida-notary \
   --key /secure/path/AuthKey_KEYID.p8 \
   --key-id KEYID \
   --issuer ISSUER-UUID
@@ -79,7 +79,7 @@ SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 Output:
 
 ```text
-apps/macos/dist/hmm-macos-signed.zip
+apps/macos/dist/oida-macos-signed.zip
 ```
 
 The script signs with:
@@ -114,21 +114,21 @@ For Individual API Keys, leave `NOTARY_ISSUER` unset.
 Output:
 
 ```text
-apps/macos/dist/hmm-macos-notarized.zip
+apps/macos/dist/oida-macos-notarized.zip
 ```
 
 The script submits the signed zip with `xcrun notarytool submit --wait`, staples
-the ticket to `hmm.app`, validates the staple, runs Gatekeeper assessment with
+the ticket to `oida.app`, validates the staple, runs Gatekeeper assessment with
 `spctl`, and creates a final zip from the stapled app.
 
 ## Validation Commands
 
 ```bash
 security find-identity -p codesigning -v
-codesign -dvvv --entitlements :- apps/macos/dist/package/hmm.app
-codesign --verify --strict --verbose=4 apps/macos/dist/package/hmm.app
-xcrun stapler validate apps/macos/dist/package/hmm.app
-spctl -a -vv -t execute apps/macos/dist/package/hmm.app
+codesign -dvvv --entitlements :- apps/macos/dist/package/oida.app
+codesign --verify --strict --verbose=4 apps/macos/dist/package/oida.app
+xcrun stapler validate apps/macos/dist/package/oida.app
+spctl -a -vv -t execute apps/macos/dist/package/oida.app
 ```
 
 ## CI Notes

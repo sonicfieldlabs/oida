@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from aear.engine_stub import StubMossEngine
-from aear.live import LiveManager
-from aear.reporting import caption, transcribe
+from oida.engine_stub import StubMossEngine
+from oida.live import LiveManager
+from oida.reporting import caption, transcribe
 from harness.akoe_cli import run_chat
 from harness.benchmark import summarize
 from harness.corpus import answer_timeline_question, timeline_entry, write_timeline

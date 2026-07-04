@@ -9,15 +9,15 @@ import jsonschema
 import numpy as np
 import soundfile as sf
 
-from aear.engine_stub import StubMossEngine
-from aear.acoustic_system import acoustic_system_manifest
-from aear.akouo_skills import akouo_manifest
-from aear.engine_base import EngineResult, MossEngine
-from aear.parsers import parse_events
-from aear.reporting import direct_analysis, report, report_to_dict
-from aear.recipes import RECIPES
-from aear.route_comparison import compare_route_events
-from aear.server import _rerun_segment, normalize_audio, sanitize_filename, upload_processing_info
+from oida.engine_stub import StubMossEngine
+from oida.acoustic_system import acoustic_system_manifest
+from oida.akouo_skills import akouo_manifest
+from oida.engine_base import EngineResult, MossEngine
+from oida.parsers import parse_events
+from oida.reporting import direct_analysis, report, report_to_dict
+from oida.recipes import RECIPES
+from oida.route_comparison import compare_route_events
+from oida.server import _rerun_segment, normalize_audio, sanitize_filename, upload_processing_info
 from harness.akouo.command import build_command_output, build_harness_output
 from harness.akouo.loader import AkouoLoader
 from harness.akouo.routing import available_harness_controls, routing_plan
@@ -26,7 +26,7 @@ from harness.akouo.routing import available_harness_controls, routing_plan
 class SchemaCommandTests(unittest.TestCase):
     def test_perception_report_schema_validates_stub_report(self) -> None:
         report_dict = make_report()
-        schema_path = Path(__file__).resolve().parents[1] / "aear" / "schemas" / "perception-report.schema.json"
+        schema_path = Path(__file__).resolve().parents[1] / "oida" / "schemas" / "perception-report.schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         jsonschema.Draft202012Validator(schema).validate(report_dict)
 

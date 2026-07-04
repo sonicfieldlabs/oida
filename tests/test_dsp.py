@@ -5,9 +5,9 @@ import unittest
 
 import numpy as np
 
-from aear.dsp import AudioData, analyze_audio
-from aear.reporting import corroborate_events
-from aear.reportschema import Event
+from oida.dsp import AudioData, analyze_audio
+from oida.reporting import corroborate_events
+from oida.reportschema import Event
 
 
 class DspTests(unittest.TestCase):

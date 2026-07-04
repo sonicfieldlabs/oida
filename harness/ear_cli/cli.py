@@ -8,11 +8,11 @@ from pathlib import Path
 
 from harness.http_client import post_json
 
-DEFAULT_SERVER = os.getenv("AEAR_SERVER_URL", "http://127.0.0.1:8765")
+DEFAULT_SERVER = os.getenv("OIDA_SERVER_URL") or os.getenv("HMM_SERVER_URL") or os.getenv("AEAR_SERVER_URL", "http://127.0.0.1:8765")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="ear", description="Thin CLI for the AEAR perception daemon.")
+    parser = argparse.ArgumentParser(prog="ear", description="Thin CLI for the OIDA perception daemon.")
     parser.add_argument("--server", default=argparse.SUPPRESS)
     parser.add_argument("--output", "-o", default=argparse.SUPPRESS)
     sub = parser.add_subparsers(dest="command", required=True)

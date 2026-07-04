@@ -3,17 +3,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "HmmMacOS",
+    name: "OidaMacOS",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "hmm-macos", targets: ["HmmMacOS"])
+        .executable(name: "oida-macos", targets: ["OidaMacOS"])
     ],
     targets: [
         .executableTarget(
-            name: "HmmMacOS",
-            path: "Sources/HmmMacOS"
+            name: "OidaMacOS",
+            path: "Sources/OidaMacOS"
         )
     ]
 )

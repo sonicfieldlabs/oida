@@ -66,7 +66,7 @@ def run_report_benchmark(
         output_path = Path(output)
     else:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        output_path = Path("benchmarks") / f"aear-report-benchmark-{stamp}.json"
+        output_path = Path("benchmarks") / f"oida-report-benchmark-{stamp}.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     result["output_path"] = str(output_path)

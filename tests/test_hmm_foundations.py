@@ -9,25 +9,25 @@ from unittest.mock import patch
 import numpy as np
 import soundfile as sf
 
-from aear.akouo_skills import akouo_manifest, resolve_route_skill_ids, route_preset, validate_akouo_manifest
-from aear.background import BackgroundRuntime
-from aear.conversation import ConversationStore
-from aear.contracts import audio_segment_from_path, source_for_path, to_dict
-from aear.engine_stub import StubMossEngine
-from aear.generation import GenerationStore
-from aear.listening import listening_event_dict
-from aear.live import LiveManager
-from aear.memory import AkousmataStore
-from aear.native_temp_audio import cleanup_native_system_audio_temp_files, native_system_audio_temp_status
-from aear.reporting import report, report_to_dict
-from aear.source_routes import native_system_audio_route_manifest, normalize_system_audio_source_route
-from aear.sources import source_registry_dict
-from aear.system_audio import classify_browser_audio_device, is_loopback_device_label, system_audio_status
+from oida.akouo_skills import akouo_manifest, resolve_route_skill_ids, route_preset, validate_akouo_manifest
+from oida.background import BackgroundRuntime
+from oida.conversation import ConversationStore
+from oida.contracts import audio_segment_from_path, source_for_path, to_dict
+from oida.engine_stub import StubMossEngine
+from oida.generation import GenerationStore
+from oida.listening import listening_event_dict
+from oida.live import LiveManager
+from oida.memory import AkousmataStore
+from oida.native_temp_audio import cleanup_native_system_audio_temp_files, native_system_audio_temp_status
+from oida.reporting import report, report_to_dict
+from oida.source_routes import native_system_audio_route_manifest, normalize_system_audio_source_route
+from oida.sources import source_registry_dict
+from oida.system_audio import classify_browser_audio_device, is_loopback_device_label, system_audio_status
 from harness.akouo.command import build_harness_output
 from harness.akouo.routing import evidence_level_for_report
 
 
-class HmmFoundationTests(unittest.TestCase):
+class OidaFoundationTests(unittest.TestCase):
     def test_audio_segment_contract_from_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_tone(Path(tmp) / "tone.wav", duration_s=0.25)
@@ -120,7 +120,7 @@ class HmmFoundationTests(unittest.TestCase):
         self.assertEqual(snapshot["meter"]["basis"], "browser-uploaded-live-chunk-dsp")
 
     def test_live_manager_evicts_old_stopped_sessions(self) -> None:
-        from aear.live import STOPPED_SESSIONS_KEEP
+        from oida.live import STOPPED_SESSIONS_KEEP
 
         with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"HMM_DATA_DIR": tmp}, clear=False):
             manager = LiveManager()
@@ -277,7 +277,7 @@ class HmmFoundationTests(unittest.TestCase):
         self.assertEqual(trace["audioPolicy"]["rawAudioPolicy"], "external_ref")
         self.assertEqual(forgotten["forgotten"], trace["id"])
         self.assertEqual(trace["earworm"]["version"], "0.1.0")
-        self.assertEqual(trace["earworm"]["session"]["app_id"], "hmm.akousmata")
+        self.assertEqual(trace["earworm"]["session"]["app_id"], "oida.akousmata")
         self.assertEqual(trace["earworm"]["context_bundle"]["assets"][0]["asset_id"], trace["earworm"]["session"]["assets"][0]["asset_id"])
 
     def test_akousmata_memory_enriches_events_with_similarity_links(self) -> None:
@@ -724,7 +724,7 @@ class HmmFoundationTests(unittest.TestCase):
     def test_native_system_audio_cleanup_only_targets_native_temp_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            native = root / "20260626T000000000000Z-hmm-native-system-output-10s.wav"
+            native = root / "20260626T000000000000Z-oida-native-system-output-10s.wav"
             other = root / "20260626T000000000000Z-user-upload.wav"
             native.write_bytes(b"native")
             other.write_bytes(b"upload")

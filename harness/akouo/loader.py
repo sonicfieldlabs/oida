@@ -11,7 +11,7 @@ from referencing.jsonschema import DRAFT202012
 
 
 DEFAULT_AKOUO_CANDIDATES = [
-    Path(os.getenv("AEAR_AKOUO_ROOT")) if os.getenv("AEAR_AKOUO_ROOT") else None,
+    Path((os.getenv("OIDA_AKOUO_ROOT") or os.getenv("HMM_AKOUO_ROOT") or os.getenv("AEAR_AKOUO_ROOT"))) if (os.getenv("OIDA_AKOUO_ROOT") or os.getenv("HMM_AKOUO_ROOT") or os.getenv("AEAR_AKOUO_ROOT")) else None,
     Path.home() / "Documents" / "SFL" / "akouo",
     Path.home() / "Documents" / "sfl" / "akouo",
 ]

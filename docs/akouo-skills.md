@@ -1,10 +1,10 @@
 # AKOUO Skill Manifests
 
-`hmm` exposes AKOUO listening skills as explicit manifests. A skill is not a
+`oida` exposes AKOUO listening skills as explicit manifests. A skill is not a
 model by itself. It is a routed listening position that tells the daemon,
 dashboard, memory layer, and future desktop shell how to frame one audio segment.
 
-Built-in manifests live in `aear/akouo_skills.py` and are exposed by:
+Built-in manifests live in `oida/akouo_skills.py` and are exposed by:
 
 ```bash
 curl -sS http://127.0.0.1:8765/akouo/skills
@@ -24,7 +24,7 @@ Each `ListeningSkillManifest` has:
   `experimental`.
 - `input_requirements`: duration, stream/file, stereo, or sample-rate hints.
 - `model_requirements`: adapters required by the skill, such as `moss-audio`,
-  `aear-dsp`, `akouo`, or `akousmata`.
+  `oida-dsp`, `akouo`, or `akousmata`.
 - `memory_policy`: `none`, `read`, `write`, or `read_write`.
 - `output_schema`: optional future structured-output contract.
 - `ui_card`: dashboard card renderer hint.
@@ -59,7 +59,7 @@ The daemon rejects unknown skills and rejects an empty active skill chain.
 
 ## Adding A Skill
 
-1. Add a `ListeningSkillManifest` entry to `SKILLS` in `aear/akouo_skills.py`.
+1. Add a `ListeningSkillManifest` entry to `SKILLS` in `oida/akouo_skills.py`.
 2. Add it to one or more `RoutePreset.skill_ids` entries, or create a new preset.
 3. Keep claims grounded in MOSS and DSP limits. MOSS-Audio receives 16 kHz mono
    input; do not claim unsupported stereo image, ultrasonic content, or absolute
@@ -68,7 +68,7 @@ The daemon rejects unknown skills and rejects an empty active skill chain.
 
 ```bash
 uv run python -m unittest discover -s tests
-node --check aear/static/app.js
+node --check oida/static/app.js
 ```
 
 The dashboard skill manager loads the manifest dynamically, so new skills appear

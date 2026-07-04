@@ -32,7 +32,7 @@ def write_session(base: str | Path, audio_path: str | Path, report: dict[str, An
 def render_journal(audio_path: str | Path, report: dict[str, Any], command_output: dict[str, Any]) -> str:
     claims = command_output.get("claim_summary", {})
     lines = [
-        f"# hmm Listening Journal - {Path(audio_path).name}",
+        f"# oída Listening Journal - {Path(audio_path).name}",
         "",
         f"- Command: `{command_output.get('command', '/listen')}`",
         f"- Source: `{report.get('source', {}).get('path', audio_path)}`",

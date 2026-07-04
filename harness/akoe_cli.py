@@ -16,12 +16,12 @@ from harness.http_client import get_json, post_json
 from harness.journal import append_lexicon_entry, render_journal, write_json, write_session
 
 AUDIO_EXTS = {".wav", ".wave", ".aiff", ".aif", ".flac", ".mp3", ".m4a", ".ogg"}
-DEFAULT_SERVER = os.getenv("AEAR_SERVER_URL", "http://127.0.0.1:8765")
+DEFAULT_SERVER = os.getenv("OIDA_SERVER_URL") or os.getenv("HMM_SERVER_URL") or os.getenv("AEAR_SERVER_URL", "http://127.0.0.1:8765")
 DEFAULT_REPO = str(Path(__file__).resolve().parents[1])
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog=Path(sys.argv[0]).name, description="hmm local listening harness.")
+    parser = argparse.ArgumentParser(prog=Path(sys.argv[0]).name, description="oída local listening harness.")
     parser.add_argument("--server", default=argparse.SUPPRESS)
     parser.add_argument("--repo", default=argparse.SUPPRESS)
     sub = parser.add_subparsers(dest="command_name", required=True)
@@ -62,7 +62,7 @@ def main() -> None:
     live.add_argument("--server", default=argparse.SUPPRESS)
     live.add_argument("--repo", default=argparse.SUPPRESS)
 
-    background = sub.add_parser("background", help="Inspect and control the hmm background runtime.")
+    background = sub.add_parser("background", help="Inspect and control the oida background runtime.")
     background.add_argument("action", nargs="?", default="status", choices=["status", "pause", "resume", "capture"])
     background.add_argument("--session-id", default=None)
     background.add_argument("--seconds", type=float, default=None)
@@ -123,7 +123,7 @@ def run_listen(args: argparse.Namespace) -> None:
 
 def run_chat(args: argparse.Namespace) -> None:
     if not args.question:
-        raise SystemExit("aear chat requires at least one --question")
+        raise SystemExit("oida chat requires at least one --question")
     session_id = args.session or default_session_id(args.path)
     if args.reset:
         path = session_path(args.repo, session_id)
@@ -221,9 +221,9 @@ def run_live(args: argparse.Namespace) -> None:
             "Critical-political-listening must be part of live routes.",
         ],
         "controls": {
-            "start": "aear live --start",
-            "status": "aear live --status <session_id>",
-            "stop": "aear live --stop <session_id>",
+            "start": "oida live --start",
+            "status": "oida live --status <session_id>",
+            "stop": "oida live --stop <session_id>",
         },
     }
     sys.stdout.write(json.dumps(note, indent=2) + "\n")
@@ -250,7 +250,7 @@ def run_background(args: argparse.Namespace) -> None:
 def run_memory(args: argparse.Namespace) -> None:
     if args.action == "forget":
         if not args.trace_id and not args.query:
-            raise SystemExit("hmm memory forget requires --trace-id or a trace id argument")
+            raise SystemExit("oida memory forget requires --trace-id or a trace id argument")
         result = post_json(args.server, "/memory/forget", {"trace_id": args.trace_id or args.query})
     else:
         params: dict[str, object] = {}

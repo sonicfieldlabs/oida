@@ -8,11 +8,11 @@ import unittest
 import wave
 from pathlib import Path
 
-from aear.engine_stub import StubMossEngine
-from aear.listening import listening_event_dict
-from aear.reporting import report, report_to_dict
-from aear.signal_listener import interpret_signal
-from aear.sonicfield import SonicFieldBridge, terms_from_event
+from oida.engine_stub import StubMossEngine
+from oida.listening import listening_event_dict
+from oida.reporting import report, report_to_dict
+from oida.signal_listener import interpret_signal
+from oida.sonicfield import SonicFieldBridge, terms_from_event
 from harness.akouo.command import build_harness_output
 
 

@@ -13,7 +13,7 @@ and whether raw audio or private listening traces can be exposed.
 
 ## Local-First Boundaries
 
-`hmm` binds to `127.0.0.1` by default. Wildcard or LAN binds are refused unless
+`oida` binds to `127.0.0.1` by default. Wildcard or LAN binds are refused unless
 `HMM_AUTH_TOKEN` or `AEAR_AUTH_TOKEN` is set, and token-protected clients must
 send `Authorization: Bearer <token>`.
 

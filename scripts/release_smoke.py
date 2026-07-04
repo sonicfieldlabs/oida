@@ -40,9 +40,9 @@ REQUIRED_CAPABILITIES = {
 }
 
 EXPECTED_BUNDLE = {
-    "CFBundleName": "hmm",
-    "CFBundleExecutable": "hmm-macos",
-    "CFBundleIdentifier": "org.sonicfield.hmm",
+    "CFBundleName": "oida",
+    "CFBundleExecutable": "oida-macos",
+    "CFBundleIdentifier": "org.sonicfield.oida",
     "CFBundlePackageType": "APPL",
 }
 
@@ -65,10 +65,10 @@ class CheckResult:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
-    parser = argparse.ArgumentParser(description="Validate local hmm release artifacts and daemon contract.")
+    parser = argparse.ArgumentParser(description="Validate local oida release artifacts and daemon contract.")
     parser.add_argument("--server", default=os.environ.get("HMM_SERVER", "http://127.0.0.1:8765"))
-    parser.add_argument("--app", type=Path, default=repo_root / "apps/macos/dist/hmm.app")
-    parser.add_argument("--archive", type=Path, default=repo_root / "apps/macos/dist/hmm-macos-unsigned.zip")
+    parser.add_argument("--app", type=Path, default=repo_root / "apps/macos/dist/oida.app")
+    parser.add_argument("--archive", type=Path, default=repo_root / "apps/macos/dist/oida-macos-unsigned.zip")
     parser.add_argument("--mutating", action="store_true", help="Create and clean up one prompt record through /generation/prompt.")
     args = parser.parse_args()
 
@@ -91,8 +91,8 @@ def main() -> int:
 def resolve_app_path(path: Path, repo_root: Path) -> Path:
     if path.exists():
         return path
-    packaged = repo_root / "apps/macos/dist/package/hmm.app"
-    if path == repo_root / "apps/macos/dist/hmm.app" and packaged.exists():
+    packaged = repo_root / "apps/macos/dist/package/oida.app"
+    if path == repo_root / "apps/macos/dist/oida.app" and packaged.exists():
         return packaged
     return path
 
@@ -101,14 +101,14 @@ def check_daemon(server: str, repo_root: Path, mutating: bool, result: CheckResu
     try:
         health = get_json(server, "/health")
         api = get_json(server, "/api")
-        hmm_status = get_json(server, "/hmm/status")
+        hmm_status = get_json(server, "/oida/status")
         background = get_json(server, "/background/status")
         generation_history = get_json(server, "/generation/history?limit=1")
     except urllib.error.URLError as exc:
         result.fail(f"daemon is not reachable at {server}: {exc}")
         return
 
-    if health.get("ok") is True and health.get("name") == "hmm":
+    if health.get("ok") is True and health.get("name") == "oida":
         result.ok(f"daemon health {health.get('profile') or 'profile'} at {server}")
     else:
         result.fail(f"unexpected health payload: {health}")
@@ -209,7 +209,7 @@ def check_app_bundle(app_path: Path, result: CheckResult) -> None:
         return
 
     info_path = app_path / "Contents/Info.plist"
-    binary_path = app_path / "Contents/MacOS/hmm-macos"
+    binary_path = app_path / "Contents/MacOS/oida-macos"
     if not info_path.exists():
         result.fail(f"Info.plist is missing: {info_path}")
         return
@@ -253,8 +253,8 @@ def check_archive(archive_path: Path, result: CheckResult) -> None:
         return
 
     required = {
-        "hmm.app/Contents/Info.plist",
-        "hmm.app/Contents/MacOS/hmm-macos",
+        "oida.app/Contents/Info.plist",
+        "oida.app/Contents/MacOS/oida-macos",
     }
     missing = sorted(required - names)
     if missing:
@@ -303,7 +303,7 @@ def is_loopback_server(server: str) -> bool:
 
 def request_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     headers = dict(extra or {})
-    token = os.getenv("HMM_AUTH_TOKEN") or os.getenv("AEAR_AUTH_TOKEN")
+    token = os.getenv("OIDA_AUTH_TOKEN") or os.getenv("HMM_AUTH_TOKEN") or os.getenv("AEAR_AUTH_TOKEN")
     if token:
         headers["authorization"] = f"Bearer {token}"
     return headers

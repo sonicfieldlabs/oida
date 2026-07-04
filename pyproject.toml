@@ -1,7 +1,7 @@
 [project]
-name = "hmm"
+name = "oida"
 version = "0.1.0"
-description = "hmm local listening agent: MOSS-Audio daemon, AKOUO routing, live buffers, and Akousmata memory."
+description = "oída local listening agent: MOSS-Audio daemon, AKOUO routing, live buffers, and Akousmata memory."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
@@ -28,17 +28,20 @@ dev = [
 ]
 
 [project.scripts]
-hmm = "aear.cli:main"
+oida = "oida.cli:main"
+oida-daemon = "oida.server:main"
 ear = "harness.ear_cli.cli:main"
 akoe = "harness.akoe_cli:main"
-aear = "aear.cli:main"
-aear-daemon = "aear.server:main"
-hmm-daemon = "aear.server:main"
+# backward-compat aliases (previous names: AEAR, then hmm)
+hmm = "oida.cli:main"
+aear = "oida.cli:main"
+aear-daemon = "oida.server:main"
+hmm-daemon = "oida.server:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["aear", "harness", "bench_adapter"]
-artifacts = ["aear/static/*", "aear/schemas/*"]
+packages = ["oida", "harness", "bench_adapter"]
+artifacts = ["oida/static/*", "oida/schemas/*"]

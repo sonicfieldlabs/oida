@@ -1,6 +1,6 @@
 # Akousmata Memory
 
-Akousmata is `hmm`'s local listening-memory layer. It stores selected listening
+Akousmata is `oida`'s local listening-memory layer. It stores selected listening
 events as inspectable JSON traces. It does not create hidden session history:
 memory writes happen only when the user explicitly remembers an event, or when a
 background capture request explicitly asks to remember.
@@ -45,7 +45,7 @@ Browse or search traces:
 
 ```bash
 curl -sS "http://127.0.0.1:8765/memory?q=machine+hum"
-uv run hmm memory search "machine hum"
+uv run oida memory search "machine hum"
 ```
 
 Supported filters on `/memory` and `/memory/export`:
@@ -64,8 +64,8 @@ available. It is a pragmatic local comparison, not a learned semantic embedding.
 ```bash
 curl -sS http://127.0.0.1:8765/memory/trace/<trace_id>
 curl -sS http://127.0.0.1:8765/memory/export
-uv run hmm memory export
-uv run hmm memory forget <trace_id>
+uv run oida memory export
+uv run oida memory forget <trace_id>
 ```
 
 ## Dashboard

@@ -4,7 +4,7 @@ set -euo pipefail
 HOST="${HMM_HOST:-127.0.0.1}"
 PORT="${HMM_PORT:-8765}"
 SERVER="http://$HOST:$PORT"
-LOG_FILE="${HMM_SMOKE_LOG:-/tmp/hmm-release-smoke.log}"
+LOG_FILE="${HMM_SMOKE_LOG:-/tmp/oida-release-smoke.log}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"
 
 cleanup() {
@@ -15,7 +15,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-uv run hmm --profile stub --host "$HOST" --port "$PORT" >"$LOG_FILE" 2>&1 &
+uv run oida --profile stub --host "$HOST" --port "$PORT" >"$LOG_FILE" 2>&1 &
 SERVER_PID="$!"
 
 uv run python - "$SERVER/health" <<'PY'

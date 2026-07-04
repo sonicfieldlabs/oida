@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="hmm"
+APP_NAME="oida"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 PACKAGE_DIR="$DIST_DIR/package"
 APP_BUNDLE="$PACKAGE_DIR/$APP_NAME.app"
 SIGNED_ARCHIVE="$DIST_DIR/$APP_NAME-macos-signed.zip"
 NOTARIZED_ARCHIVE="$DIST_DIR/$APP_NAME-macos-notarized.zip"
-NOTARY_PROFILE="${NOTARY_PROFILE:-hmm-notary}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-oida-notary}"
 NOTARY_TIMEOUT="${NOTARY_TIMEOUT:-30m}"
 
 if [[ ! -f "$SIGNED_ARCHIVE" ]]; then

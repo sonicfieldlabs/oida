@@ -7,12 +7,12 @@ from typing import Any
 
 from harness.http_client import get_json, post_json
 
-SERVER = os.getenv("AEAR_SERVER_URL", "http://127.0.0.1:8765")
+SERVER = os.getenv("OIDA_SERVER_URL") or os.getenv("HMM_SERVER_URL") or os.getenv("AEAR_SERVER_URL", "http://127.0.0.1:8765")
 
 TOOLS = [
     {
         "name": "hmm_report",
-        "description": "Run hmm /report on a local audio file.",
+        "description": "Run oida /report on a local audio file.",
         "inputSchema": {
             "type": "object",
             "required": ["path"],
@@ -21,7 +21,7 @@ TOOLS = [
     },
     {
         "name": "hmm_transcribe",
-        "description": "Run hmm timestamped transcription.",
+        "description": "Run oida timestamped transcription.",
         "inputSchema": {
             "type": "object",
             "required": ["path"],
@@ -39,7 +39,7 @@ TOOLS = [
     },
     {
         "name": "hmm_live_start",
-        "description": "Start a local hmm live ring-buffer/VAD session.",
+        "description": "Start a local oida live ring-buffer/VAD session.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -50,12 +50,12 @@ TOOLS = [
     },
     {
         "name": "hmm_live_status",
-        "description": "Get local hmm live session status.",
+        "description": "Get local oida live session status.",
         "inputSchema": {"type": "object", "required": ["session_id"], "properties": {"session_id": {"type": "string"}}},
     },
     {
         "name": "hmm_live_stop",
-        "description": "Stop a local hmm live session and write its manifest.",
+        "description": "Stop a local oida live session and write its manifest.",
         "inputSchema": {"type": "object", "required": ["session_id"], "properties": {"session_id": {"type": "string"}}},
     },
     {
@@ -114,7 +114,7 @@ TOOLS = [
     },
     {
         "name": "hmm_process_metrics",
-        "description": "Read process metrics from the local hmm daemon.",
+        "description": "Read process metrics from the local oida daemon.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -151,7 +151,7 @@ def handle(message: object) -> dict[str, Any] | None:
     is_notification = "id" not in message
     try:
         if method == "initialize":
-            result = {"protocolVersion": "2024-11-05", "serverInfo": {"name": "hmm-local", "version": "0.1.0"}, "capabilities": {"tools": {}}}
+            result = {"protocolVersion": "2024-11-05", "serverInfo": {"name": "oida-local", "version": "0.1.0"}, "capabilities": {"tools": {}}}
         elif method == "tools/list":
             result = {"tools": TOOLS}
         elif method == "tools/call":

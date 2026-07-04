@@ -1,2 +1,2 @@
-"""AEAR harness package."""
+"""OIDA harness package."""
 

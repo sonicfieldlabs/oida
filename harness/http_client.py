@@ -7,7 +7,7 @@ from urllib import request
 
 def _headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     headers = dict(extra or {})
-    token = os.getenv("HMM_AUTH_TOKEN") or os.getenv("AEAR_AUTH_TOKEN")
+    token = os.getenv("OIDA_AUTH_TOKEN") or os.getenv("HMM_AUTH_TOKEN") or os.getenv("AEAR_AUTH_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers
