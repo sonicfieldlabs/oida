@@ -473,10 +473,18 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    # oída→germ bridge (three buttons) over the shared akousma store; optional.
+    try:
+        from .akousma_bridge import build_germ_router
+
+        app.include_router(build_germ_router())
+    except ImportError:
+        pass  # akousma package not installed; oída still boots without the bridge
+
     wildcard_bind = str(config.host) in {"0.0.0.0", "::", ""}
     if wildcard_bind and not config.auth_token:
         raise RuntimeError(
-            "Refusing to bind oida on a wildcard host without HMM_AUTH_TOKEN or AEAR_AUTH_TOKEN. "
+            "Refusing to bind oida on a wildcard host without OIDA_AUTH_TOKEN (or legacy HMM_/AEAR_AUTH_TOKEN). "
             "Use 127.0.0.1 for tokenless local operation."
         )
     if wildcard_bind:

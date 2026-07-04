@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Sonic Field Labs" }]
 dependencies = [
+  "akousma>=0.1.0",
   "fastapi>=0.115",
   "jsonschema>=4.22",
   "numpy>=1.26",
@@ -15,6 +16,9 @@ dependencies = [
   "soundfile>=0.12",
   "uvicorn[standard]>=0.30",
 ]
+
+[tool.uv.sources]
+akousma = { path = "../earworm/packages/py-akousma", editable = true }
 
 [project.optional-dependencies]
 moss = [

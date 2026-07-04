@@ -1,0 +1,73 @@
+"""oída→germ bridge + cross-app akousma round-trip (Phase 4 acceptance)."""
+import tempfile
+import unittest
+
+import akousma
+from oida import akousma_bridge
+
+
+class TestGermDeepLinks(unittest.TestCase):
+    def test_deep_link_format(self):
+        url = akousma_bridge.germ_deep_link("akm_1", "prompt")
+        self.assertIn("/import?", url)
+        self.assertIn("akousma=akm_1", url)
+        self.assertIn("mode=prompt", url)
+
+    def test_rejects_unknown_mode(self):
+        with self.assertRaises(ValueError):
+            akousma_bridge.germ_deep_link("akm_1", "bogus")
+
+    def test_origin_maps_to_earworm_source_type(self):
+        rec = akousma_bridge.build_akousma_from_listen(
+            audio={"asset_id": "a1"}, origin="live-input"
+        )
+        self.assertEqual(rec["provenance"]["source_type"], "recorded")
+        self.assertEqual(rec["provenance"]["origin"], "live-input")
+        self.assertEqual(rec["provenance"]["originating_app"], "oida")
+
+
+class TestCrossAppRoundTrip(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = akousma.AkousmataStore(self.tmp.name)
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def test_listen_to_generate_to_lineage(self):
+        # 1) oída listens to a file → akousma A, "open as prompt" hands it to germ.
+        a = akousma_bridge.build_akousma_from_listen(
+            audio={"asset_id": "file1", "uri": "akousmata://objects/x.wav", "duration_seconds": 8.0},
+            origin="file",
+            listening={"oida.signal": {"class": "tonal"}, "akouo.describe": {"summary": "struck bell"}},
+        )
+        handoff = akousma_bridge.handoff_to_germ(a, "prompt", store=self.store)
+        A = handoff["akousma_id"]
+        self.assertIn("mode=prompt", handoff["germ_url"])
+
+        # 2) germ generates a child B whose lineage points at A.
+        b = akousma.new_akousma(
+            audio={"asset_id": "gen1"},
+            originating_app="germ",
+            source_type="generated",
+            origin="generated",
+            parent_akousma_ids=[A],
+            operation="transform",
+            prompt="make it metallic",
+            model="stable-audio-3",
+        )
+        B = self.store.put(b)
+
+        # 3) germ's lineage explorer walks ancestry; "explore lineage" from oída shows A→B.
+        self.assertEqual(self.store.ancestors(B), [A])
+        self.assertEqual(self.store.children(A), [B])
+
+        # 4) algophony batch query retrieves germ generations from the shared store.
+        germ_generations = [r["akousma_id"] for r in self.store.query(originating_app="germ")]
+        self.assertIn(B, germ_generations)
+        self.assertEqual(len(self.store.query()), 2)  # both A and B live in one store
+
+
+if __name__ == "__main__":
+    unittest.main()
