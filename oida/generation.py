@@ -90,7 +90,10 @@ class GenerationStore:
         path = self._path(generation_id)
         if not path.exists():
             raise FileNotFoundError(f"unknown generation record: {generation_id}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid generation record JSON: {generation_id}") from exc
 
     def attach_relisten(
         self,

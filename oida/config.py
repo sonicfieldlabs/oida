@@ -146,9 +146,11 @@ def load_config(profile: str | None = None, host: str | None = None, port: int |
         instruct_model=instruct,
         thinking_model=thinking,
         sglang_base_url=_env("OIDA_SGLANG_BASE_URL", "HMM_SGLANG_BASE_URL", "AEAR_SGLANG_BASE_URL", default="http://127.0.0.1:30000"),
-        require_model=_env("OIDA_REQUIRE_MODEL", "HMM_REQUIRE_MODEL", "AEAR_REQUIRE_MODEL", default="0") == "1",
+        require_model=_env("OIDA_REQUIRE_MODEL", "HMM_REQUIRE_MODEL", "AEAR_REQUIRE_MODEL", default="0").strip().lower() in {"1", "true", "yes", "on"},
         resident_mode=_env("OIDA_MOSS_RESIDENT", "HMM_MOSS_RESIDENT", "AEAR_MOSS_RESIDENT", default="single"),
-        prewarm=_truthy_env("OIDA_MOSS_PREWARM", "1") and _truthy_env("HMM_MOSS_PREWARM", "1") and _truthy_env("AEAR_MOSS_PREWARM", "1"),
+        # first-set name wins, like every other setting; an AND-chain would let
+        # a leftover legacy HMM_/AEAR_MOSS_PREWARM=0 override OIDA_MOSS_PREWARM=1
+        prewarm=_env("OIDA_MOSS_PREWARM", "HMM_MOSS_PREWARM", "AEAR_MOSS_PREWARM", default="1").strip().lower() in {"1", "true", "yes", "on"},
         moss_chunk_seconds=float(_env("OIDA_MOSS_CHUNK_SECONDS", "HMM_MOSS_CHUNK_SECONDS", "AEAR_MOSS_CHUNK_SECONDS", default=default_chunk)),
         allow_hf_hub=allow_hf_hub,
         hf_hub_offline=hf_hub_offline,

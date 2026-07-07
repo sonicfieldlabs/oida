@@ -9,6 +9,12 @@ __pycache__/
 *.egg-info/
 .playwright-cli/
 test-results/
+*.log
+*.bak
+*.backup
+*.orig
+docs/review-*.md
+*.session.json
 sessions/*/
 sessions/*.json
 journals/*.md

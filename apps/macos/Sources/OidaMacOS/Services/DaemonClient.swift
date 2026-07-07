@@ -35,7 +35,7 @@ struct DaemonClient {
 
     private var authToken: String? {
         let environment = ProcessInfo.processInfo.environment
-        let token = environment["HMM_AUTH_TOKEN"] ?? environment["AEAR_AUTH_TOKEN"]
+        let token = environment["OIDA_AUTH_TOKEN"] ?? environment["HMM_AUTH_TOKEN"] ?? environment["AEAR_AUTH_TOKEN"]
         return token?.isEmpty == false ? token : nil
     }
 

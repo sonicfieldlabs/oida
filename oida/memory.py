@@ -124,7 +124,7 @@ class AkousmataStore:
         if not self.traces_dir.exists():
             return []
         traces = []
-        for path in sorted(self.traces_dir.glob("*.json"), reverse=True):
+        for path in self.traces_dir.glob("*.json"):
             trace = self._load_trace(path)
             if trace is None:
                 continue
@@ -139,9 +139,10 @@ class AkousmataStore:
             if not _within_time(trace.get("createdAt"), since=since, until=until):
                 continue
             traces.append(trace)
-            if limit and len(traces) >= limit:
-                break
-        return traces
+        # filenames are trace_<uuid4>.json, so glob order is arbitrary; recency
+        # has to come from the record itself or ?limit returns random traces
+        traces.sort(key=lambda trace: str(trace.get("createdAt") or ""), reverse=True)
+        return traces[:limit] if limit else traces
 
     def get(self, trace_id: str) -> dict[str, Any]:
         path = self._path(trace_id)

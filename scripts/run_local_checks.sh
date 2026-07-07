@@ -4,7 +4,7 @@ set -euo pipefail
 MODE="${1:-default}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"
 
-uv run python -m unittest discover -s tests
+# pytest collects the unittest.TestCase suite too; one runner is enough.
 uv run --extra dev pytest -q
 uv run python -m compileall -q oida harness bench_adapter scripts tests
 

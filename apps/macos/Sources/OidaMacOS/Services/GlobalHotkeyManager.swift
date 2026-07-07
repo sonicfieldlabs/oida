@@ -29,7 +29,7 @@ final class GlobalHotkeyManager {
         }
 
         var hotKeyRef: EventHotKeyRef?
-        let hotKeyID = EventHotKeyID(signature: fourCharCode("HMMK"), id: id)
+        let hotKeyID = EventHotKeyID(signature: fourCharCode("OIDA"), id: id)
         let registerStatus = RegisterEventHotKey(
             binding.keyCode,
             binding.modifiers,

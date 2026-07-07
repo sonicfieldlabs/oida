@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOST="${HMM_HOST:-127.0.0.1}"
-PORT="${HMM_PORT:-8765}"
+HOST="${OIDA_HOST:-${HMM_HOST:-127.0.0.1}}"
+PORT="${OIDA_PORT:-${HMM_PORT:-8765}}"
 SERVER="http://$HOST:$PORT"
-LOG_FILE="${HMM_SMOKE_LOG:-/tmp/oida-release-smoke.log}"
+LOG_FILE="${OIDA_SMOKE_LOG:-${HMM_SMOKE_LOG:-/tmp/oida-release-smoke.log}}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}"
 
 cleanup() {

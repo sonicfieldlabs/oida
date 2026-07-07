@@ -76,7 +76,10 @@ class ConversationStore:
         path = self._path(conversation_id)
         if not path.exists():
             raise FileNotFoundError(f"unknown conversation: {conversation_id}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid conversation record JSON: {conversation_id}") from exc
 
     def _load_or_create(self, conversation_id: str | None, event: dict[str, Any]) -> dict[str, Any]:
         if conversation_id:

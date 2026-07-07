@@ -397,7 +397,7 @@ final class SystemAudioTapManager: NSObject {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyyMMdd'T'HOidassSSS'Z'"
+        formatter.dateFormat = "yyyyMMdd'T'HHmmssSSS'Z'"
         return formatter.string(from: Date())
     }
 }

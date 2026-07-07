@@ -11,7 +11,7 @@ struct SettingsView: View {
 
                 HStack {
                     Text(store.daemonOnline ? "Online" : "Offline")
-                        .foregroundStyle(store.daemonOnline ? .green : .orange)
+                        .foregroundStyle(store.daemonOnline ? Color.primary : Color.orange)
                     Text(store.engineLabel)
                         .foregroundStyle(.secondary)
                     Spacer()

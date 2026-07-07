@@ -18,13 +18,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
+      # NOTE: the `akousma` dependency is an editable uv path source pointing at
+      # ../earworm/packages/py-akousma. On a bare checkout this sync fails unless
+      # the earworm repo is checked out as a sibling directory first.
       - name: Install Python dependencies
         run: uv sync --extra dev
 
+      # pytest collects the unittest.TestCase suite too; one runner is enough.
       - name: Run Python tests
-        run: |
-          uv run python -m unittest discover -s tests
-          uv run pytest -q
+        run: uv run pytest -q
 
       - name: Compile Python modules
         run: uv run python -m compileall -q oida harness bench_adapter scripts tests

@@ -1,4 +1,4 @@
-"""Bridge into the Sonic Field knowledge base (~/Documents/sonicfield).
+"""Bridge into the Sonic Field knowledge base (~/workspace/sonicfield).
 
 Read-only. Lets a listening result reach outward: after oida produces an
 analysis, `explore()` searches the wiki (lexicon), topics, journal, paths,
@@ -107,7 +107,7 @@ class SonicFieldBridge:
 
     def ensure_index(self) -> None:
         if not self.available:
-            raise ValueError("Sonic Field root is not available; set HMM_SONICFIELD_ROOT")
+            raise ValueError("Sonic Field root is not available; set OIDA_SONICFIELD_ROOT")
         with self._lock:
             if self._entries is not None:
                 return

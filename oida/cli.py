@@ -23,7 +23,7 @@ harness commands:
   memory    Browse, search, export, or forget Akousmata traces.
   bench     Benchmark report latency, memory, and output throughput.
 
-Legacy `oida` command aliases are still installed for existing scripts.
+Legacy `hmm` and `aear` command aliases are still installed for existing scripts.
 """
 
 

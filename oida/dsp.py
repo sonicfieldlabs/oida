@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import math
 import wave
@@ -134,7 +135,34 @@ def _samplerate_hint(path: Path) -> int:
         return 48_000
 
 
+_INSPECT_CACHE: dict[str, tuple[tuple[int, int], dict[str, object]]] = {}
+_INSPECT_CACHE_MAX = 8
+
+
 def inspect_path(path: str | Path) -> dict[str, object]:
+    """Full-decode DSP inspection, memoized on (path, mtime_ns, size).
+
+    One /listen-event otherwise decodes, analyzes, and sha256-hashes the same
+    file two or three times (segment contract, report, live capture).
+    """
+    resolved = Path(path).expanduser().resolve()
+    try:
+        stat = resolved.stat()
+        stamp = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        return _inspect_path_uncached(path)
+    key = str(resolved)
+    cached = _INSPECT_CACHE.get(key)
+    if cached and cached[0] == stamp:
+        return copy.deepcopy(cached[1])
+    result = _inspect_path_uncached(path)
+    if len(_INSPECT_CACHE) >= _INSPECT_CACHE_MAX:
+        _INSPECT_CACHE.pop(next(iter(_INSPECT_CACHE)))
+    _INSPECT_CACHE[key] = (stamp, copy.deepcopy(result))
+    return result
+
+
+def _inspect_path_uncached(path: str | Path) -> dict[str, object]:
     info = audio_info(path)
     audio = load_audio(path, max_seconds=HEAVY_ANALYSIS_MAX_SECONDS)
     features = analyze_audio(audio)

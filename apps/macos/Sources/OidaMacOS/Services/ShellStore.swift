@@ -118,6 +118,19 @@ final class ShellStore: ObservableObject {
         systemAudioTap.onRouteChange = { [weak self] route in
             self?.nativeSystemAudioRoute = route
         }
+        // The managed daemon's stdout/stderr are pipes into this app; if the app
+        // quits without stopping it, the orphan dies on its next log write
+        // (SIGPIPE). Stop it cleanly instead. Externally-started daemons are
+        // never touched.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.supervisor.stop()
+            }
+        }
     }
 
     var daemonOnline: Bool {
@@ -315,8 +328,8 @@ final class ShellStore: ObservableObject {
             background = nil
             liveSignal = nil
             nativeSystemAudioTempStatus = nil
-            recentEvents = []
-            pinnedEvents = []
+            // keep recentEvents/pinnedEvents: stale history beats an empty
+            // panel during a transient refresh failure
             errorMessage = error.localizedDescription
             managedDaemonRunning = supervisor.isManagedRunning
             launchAtLoginStatus = LaunchAtLoginManager.statusLabel
@@ -825,8 +838,8 @@ final class ShellStore: ObservableObject {
             return floatingPanel
         }
         let controller = FloatingPanelController { [weak self] in
-            let view = FloatingListenerView().environmentObject(self ?? ShellStore())
-            return NSHostingView(rootView: view)
+            guard let self else { return NSView() }
+            return ListenerHostingView(rootView: FloatingListenerView().environmentObject(self))
         }
         floatingPanel = controller
         return controller

@@ -106,11 +106,3 @@ def source_registry_dict() -> dict[str, Any]:
         "platform": sys.platform,
         "sources": [to_dict(entry) for entry in source_registry()],
     }
-
-
-def descriptor_for_source(source_id: str) -> AudioSourceDescriptor:
-    for entry in source_registry():
-        if entry.id == source_id:
-            return entry.descriptor()
-    valid = ", ".join(entry.id for entry in source_registry())
-    raise ValueError(f"unknown source id: {source_id}. Valid sources: {valid}")

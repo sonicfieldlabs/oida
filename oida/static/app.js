@@ -11,14 +11,19 @@ const state = {
   selectedSkills: new Set(),
   presetSkillIds: [],
   lastEvent: null,
+  lastEventId: null,
   lastJson: null,
   audioDir: "",
   engine: null,
+  engineSignature: null,
   phase: "idle", // idle | waiting | recording | analyzing
   recorder: null,
   recordedChunks: [],
+  recordTimer: null,
   captureHintTimer: null,
+  captureRequestId: null,
   abortController: null,
+  wikiToken: 0,
   sonicfieldAvailable: false,
   micDevices: [],
   monitor: null, // {stream, ctx, analyser, raf, peak}
@@ -26,23 +31,28 @@ const state = {
 
 const el = (id) => document.getElementById(id);
 const ui = {
-  daemonDot: el("daemonDot"),
-  listenCard: el("listenCard"),
+  resultCard: el("resultCard"),
   listenButton: el("listenButton"),
   listenLabel: el("listenLabel"),
   listenStatus: el("listenStatus"),
   captureSeconds: el("captureSeconds"),
   systemPanel: el("systemPanel"),
-  systemRoute: el("systemRoute"),
   micPanel: el("micPanel"),
   micDevice: el("micDevice"),
-  micRefresh: el("micRefresh"),
   micMonitor: el("micMonitor"),
+  micMeter: el("micMeter"),
   micMeterFill: el("micMeterFill"),
   micMeterPeak: el("micMeterPeak"),
   filePanel: el("filePanel"),
   browseFile: el("browseFile"),
-  presetRow: el("presetRow"),
+  modeButton: el("modeButton"),
+  modeIcon: el("modeIcon"),
+  modeName: el("modeName"),
+  modeMenu: el("modeMenu"),
+  sideLeft: el("sideLeft"),
+  sideRight: el("sideRight"),
+  leftToggle: el("leftToggle"),
+  rightToggle: el("rightToggle"),
   skillList: el("skillList"),
   skillNote: el("skillNote"),
   engineNote: el("engineNote"),
@@ -58,19 +68,22 @@ const ui = {
   resultSummary: el("resultSummary"),
   resultTags: el("resultTags"),
   resultBody: el("resultBody"),
-  resultActions: el("resultActions"),
-  evidenceChip: el("evidenceChip"),
-  askToggle: el("askToggle"),
-  askRow: el("askRow"),
-  askInput: el("askInput"),
-  askSend: el("askSend"),
-  askResult: el("askResult"),
-  rememberButton: el("rememberButton"),
-  wikiButton: el("wikiButton"),
-  jsonToggle: el("jsonToggle"),
+  leftResize: el("leftResize"),
+  rightResize: el("rightResize"),
+  exportDrop: el("exportDrop"),
+  exportMenu: el("exportMenu"),
+  rememberItem: el("rememberItem"),
+  wikiItem: el("wikiItem"),
+  jsonItem: el("jsonItem"),
+  soundItem: el("soundItem"),
+  promptItem: el("promptItem"),
+  skillsFootButton: el("skillsFootButton"),
+  configMenu: el("configMenu"),
+  jsonWrap: el("jsonWrap"),
+  jsonCopy: el("jsonCopy"),
   jsonOutput: el("jsonOutput"),
-  wikiCard: el("wikiCard"),
-  wikiClose: el("wikiClose"),
+  germNote: el("germNote"),
+  wikiModal: el("wikiModal"),
   wikiQuery: el("wikiQuery"),
   wikiGo: el("wikiGo"),
   wikiTerms: el("wikiTerms"),
@@ -80,7 +93,8 @@ const ui = {
   memorySearch: el("memorySearch"),
   memoryGo: el("memoryGo"),
   memoryList: el("memoryList"),
-  footAudioDir: el("footAudioDir"),
+  engineAddress: el("engineAddress"),
+  engineAudioDir: el("engineAudioDir"),
 };
 
 /* ────────────────────────────── helpers ─────────────────────────── */
@@ -100,7 +114,10 @@ async function fetchJson(url, options) {
     let detail = `${response.status}`;
     try {
       const body = await response.json();
-      if (body && body.detail) detail = String(body.detail);
+      if (body && body.detail) {
+        // FastAPI validation errors ship detail as a list of objects.
+        detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      }
     } catch (_) { /* keep status */ }
     throw new Error(detail);
   }
@@ -123,6 +140,14 @@ function setPhase(phase, label) {
   ui.listenLabel.textContent = label || (busy ? "Stop" : "Listen");
 }
 
+const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+// A mic recording is a purely local flow; daemon events from other surfaces
+// must not steal its phase. Same while a local /listen-event fetch owns the UI.
+function localFlowOwnsUi() {
+  return state.phase === "recording" || Boolean(state.abortController);
+}
+
 function timeAgo(iso) {
   if (!iso) return "";
   const delta = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -138,20 +163,18 @@ function timeAgo(iso) {
 async function refreshHealth() {
   try {
     const health = await fetchJson("/health");
-    ui.daemonDot.className = "dot ok";
-    ui.daemonDot.title = `daemon :${health.port}`;
+    ui.engineAddress.textContent = `${health.host || "127.0.0.1"}:${health.port}`;
     state.audioDir = health.audio_dir || "";
     state.sonicfieldAvailable = Boolean(health.sonicfield && health.sonicfield.available);
     ui.audioDirNote.textContent = state.audioDir;
-    ui.footAudioDir.textContent = state.audioDir;
+    ui.engineAudioDir.textContent = state.audioDir;
     if (!ui.audioPath.value && state.audioDir) ui.audioPath.placeholder = `${state.audioDir}/…`;
     if (state.lastEvent) {
-      ui.wikiButton.disabled = !state.sonicfieldAvailable;
+      ui.wikiItem.disabled = !state.sonicfieldAvailable;
     }
     renderEngine(health.engine);
   } catch (_) {
-    ui.daemonDot.className = "dot bad";
-    ui.daemonDot.title = "daemon offline";
+    ui.engineAddress.textContent = "offline";
   }
 }
 
@@ -166,6 +189,11 @@ const ENGINE_LABELS = {
 
 function renderEngine(engine) {
   if (!engine) return;
+  // Health polls every 20 s; rebuilding the selects for identical data closes
+  // open dropdowns and stomps in-flight assignment. Skip unchanged payloads.
+  const signature = JSON.stringify(engine);
+  if (signature === state.engineSignature) return;
+  state.engineSignature = signature;
   state.engine = engine;
   ui.engineNote.textContent = `${engine.instruct_model || engine.profile || ""} · ${ENGINE_LABELS[engine.state] || engine.state || ""}`;
   ui.engineNote.dataset.state = engine.state || "";
@@ -238,20 +266,63 @@ ui.warmEngine.addEventListener("click", async () => {
   }
 });
 
-async function refreshSystemRoute() {
-  try {
-    const manifest = await fetchJson("/native/system-audio/routes");
-    const route = (manifest.routes || [])[0];
-    if (route) ui.systemRoute.textContent = String(route.label || "display system mix").toLowerCase();
-  } catch (_) { /* keep default */ }
+/* ─────────────────────── skill / engine / path modals ───────────── */
+
+const PANEL_DIALOGS = { skill: "skillModal", engine: "engineModal", path: "pathModal" };
+
+// Callable from the native shell and the rail icons; renders each panel as a
+// modal dialog. Modals are exclusive: opening one closes whatever is open.
+window.oidaOpenPanel = (name) => {
+  const target = document.getElementById(PANEL_DIALOGS[name]);
+  if (!target || typeof target.showModal !== "function") return;
+  document.querySelectorAll("dialog[open]").forEach((other) => { if (other !== target) other.close(); });
+  if (!target.open) target.showModal();
+};
+
+document.querySelectorAll(".modal").forEach((dialog) => {
+  dialog.querySelector("[data-close]")?.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+});
+
+// The native shell injects __oidaNative; that reveals the shell-only actions
+// (floating listener, open-in-browser), which post into the app.
+if (window.__oidaNative) document.body.classList.add("native");
+
+function shellAction(name) {
+  if (name === "reload" && !window.webkit?.messageHandlers?.oidaShell) {
+    window.location.reload();
+    return;
+  }
+  window.webkit?.messageHandlers?.oidaShell?.postMessage(name);
 }
+
+// the floating-listener corner button (drop-menu items are delegated below)
+document.querySelectorAll("button[data-shell]:not(.drop-item)").forEach((button) =>
+  button.addEventListener("click", () => shellAction(button.dataset.shell))
+);
+
+ui.skillsFootButton.addEventListener("click", () => window.oidaOpenPanel("skill"));
+
+// configuration corner menu: Engine / Path / Reload / Open in browser
+ui.configMenu.addEventListener("click", (event) => {
+  const item = event.target.closest(".drop-item");
+  if (!item) return;
+  closeDropdowns();
+  if (item.dataset.panel) window.oidaOpenPanel(item.dataset.panel);
+  else if (item.dataset.shell) shellAction(item.dataset.shell);
+});
 
 /* ─────────────────────────────── SSE ────────────────────────────── */
 
 function connectStream() {
   const stream = new EventSource("/events/stream");
-  stream.onopen = () => { ui.daemonDot.className = "dot ok"; };
-  stream.onerror = () => { ui.daemonDot.className = "dot bad"; };
+  stream.onerror = () => {
+    // EventSource retries transient drops itself, but gives up for good on an
+    // HTTP error response; recreate it so a daemon restart resyncs the page.
+    if (stream.readyState === EventSource.CLOSED) {
+      setTimeout(connectStream, 5000);
+    }
+  };
   stream.onmessage = (message) => {
     let payload = null;
     try { payload = JSON.parse(message.data); } catch (_) { return; }
@@ -264,6 +335,7 @@ function connectStream() {
         break;
       case "capture_claimed":
         clearCaptureHint();
+        if (localFlowOwnsUi()) break;
         setPhase("analyzing");
         setListenStatus(`Capturing ${Math.round(data.seconds || 10)} s of system audio…`, "active");
         break;
@@ -276,18 +348,24 @@ function connectStream() {
         break;
       case "listen_started":
         clearCaptureHint();
+        if (localFlowOwnsUi()) break;
         if (state.phase === "idle" || state.phase === "waiting") setPhase("analyzing");
         setListenStatus(`Listening (${data.route_preset || "basic"})…`, "active");
         break;
       case "listen_completed":
         clearCaptureHint();
+        if (localFlowOwnsUi()) break;
         setPhase("idle");
         setListenStatus("Done.", "");
-        if (data.listening_event) renderEvent(data.listening_event, null);
+        // The local fetch path already rendered this event with its full response.
+        if (data.listening_event && data.listening_event.id !== state.lastEventId) {
+          renderEvent(data.listening_event, null);
+        }
         refreshHistory();
         break;
       case "listen_failed":
         clearCaptureHint();
+        if (localFlowOwnsUi()) break;
         setPhase("idle");
         setListenStatus(data.detail || "Listen failed.", "error");
         break;
@@ -353,7 +431,7 @@ async function loadManifest() {
     renderPresets();
     renderSkills();
   } catch (_) {
-    ui.presetRow.innerHTML = `<span class="empty-note">Presets unavailable.</span>`;
+    ui.modeMenu.innerHTML = `<span class="empty-note">Presets unavailable.</span>`;
   }
 }
 
@@ -364,35 +442,110 @@ function applyPresetSkills() {
   updateSkillNote();
 }
 
+// The listening mode lives in a dropdown beside the Listen button.
 function renderPresets() {
-  ui.presetRow.innerHTML = "";
+  ui.modeMenu.innerHTML = "";
   for (const preset of state.presets) {
-    const button = document.createElement("button");
-    button.className = `preset${preset.id === state.preset ? " active" : ""}`;
-    button.innerHTML = `${PRESET_ICONS[preset.id] || MODE_ICONS.basic}<span>${escapeHtml(preset.name)}</span>`;
-    button.title = presetTooltip(preset);
-    button.addEventListener("click", () => {
+    const item = document.createElement("button");
+    item.className = `drop-item${preset.id === state.preset ? " active" : ""}`;
+    item.setAttribute("role", "option");
+    item.dataset.preset = preset.id;
+    item.innerHTML = `${PRESET_ICONS[preset.id] || MODE_ICONS.basic}<span>${escapeHtml(preset.name)}</span>`;
+    item.title = presetTooltip(preset);
+    item.addEventListener("click", () => {
       state.preset = preset.id;
       applyPresetSkills();
       renderPresets();
       renderSkills();
+      closeDropdowns();
     });
-    ui.presetRow.appendChild(button);
+    ui.modeMenu.appendChild(item);
   }
-  renderPresetHint();
+  updateModeButton();
 }
 
-function renderPresetHint() {
-  const hint = document.getElementById("presetHint");
-  if (!hint) return;
+function updateModeButton() {
   const preset = state.presets.find((item) => item.id === state.preset);
-  if (!preset) {
-    hint.textContent = "";
-    return;
+  ui.modeIcon.innerHTML = PRESET_ICONS[state.preset] || MODE_ICONS.basic;
+  ui.modeName.textContent = preset ? preset.name : (state.preset || "Basic");
+}
+
+/* ─────────────────────────── dropdowns ──────────────────────────── */
+
+// One mechanism for every .dropdown (mode, export, configuration): open one,
+// close the rest; click-outside and Escape close all.
+function closeDropdowns() {
+  document.querySelectorAll(".dropdown").forEach((dd) => {
+    const menu = dd.querySelector(".drop-menu");
+    if (menu) menu.hidden = true;
+    dd.querySelector("[aria-haspopup]")?.setAttribute("aria-expanded", "false");
+  });
+}
+
+document.querySelectorAll(".dropdown").forEach((dd) => {
+  const button = dd.querySelector("[aria-haspopup]");
+  const menu = dd.querySelector(".drop-menu");
+  if (!button || !menu) return;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const willOpen = menu.hidden;
+    closeDropdowns();
+    if (willOpen) {
+      menu.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+    }
+  });
+});
+document.addEventListener("click", (event) => { if (!event.target.closest(".dropdown")) closeDropdowns(); });
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDropdowns(); });
+
+/* ─────────────────────────── sidebars ───────────────────────────── */
+
+// Collapse (persisted) + drag-resize (persisted). Collapsing clears the inline
+// width so the 44px rail class wins; expanding restores the stored width.
+for (const [key, side, toggle, handle, dir] of [
+  ["left", ui.sideLeft, ui.leftToggle, ui.leftResize, 1],
+  ["right", ui.sideRight, ui.rightToggle, ui.rightResize, -1],
+]) {
+  const widthKey = `oida.side.${key}.width`;
+  const storedWidth = localStorage.getItem(widthKey);
+  if (localStorage.getItem(`oida.side.${key}`) === "collapsed") {
+    side.classList.add("collapsed");
+  } else if (storedWidth) {
+    side.style.width = storedWidth;
   }
-  const passes = (preset.moss_passes || []).map((name) => PASS_LABELS[name] || name);
-  const passText = passes.length ? `model: ${passes.join(" + ")}` : "dsp only, instant";
-  hint.textContent = `${preset.description || ""} · ${passText}`;
+
+  toggle.addEventListener("click", () => {
+    const collapsed = side.classList.toggle("collapsed");
+    localStorage.setItem(`oida.side.${key}`, collapsed ? "collapsed" : "open");
+    if (collapsed) {
+      side.style.width = "";
+    } else {
+      const remembered = localStorage.getItem(widthKey);
+      if (remembered) side.style.width = remembered;
+    }
+  });
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (side.classList.contains("collapsed")) return;
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    side.classList.add("dragging");
+    const startX = event.clientX;
+    const startWidth = side.getBoundingClientRect().width;
+    const onMove = (moveEvent) => {
+      const width = Math.min(440, Math.max(172, startWidth + dir * (moveEvent.clientX - startX)));
+      side.style.width = `${width}px`;
+    };
+    const onUp = () => {
+      side.classList.remove("dragging");
+      if (side.style.width) localStorage.setItem(widthKey, side.style.width);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+  });
 }
 
 function renderSkills() {
@@ -448,25 +601,44 @@ function selectedSkillIds() {
 
 /* ─────────────────────────── source panels ──────────────────────── */
 
-const SOURCE_HINTS = {
-  system: "Capture what the computer is playing.",
-  mic: "Record from the selected input.",
-  file: "Choose or drop an audio file.",
-};
+// Arrow-key navigation for the radiogroup rows (sources, presets).
+function radioKeyNav(container, selector) {
+  if (!container) return;
+  container.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const items = [...container.querySelectorAll(selector)];
+    const index = items.indexOf(document.activeElement);
+    if (index === -1 || !items.length) return;
+    event.preventDefault();
+    const step = event.key === "ArrowRight" ? 1 : items.length - 1;
+    const next = items[(index + step) % items.length];
+    next.focus();
+    next.click();
+  });
+}
+
+function markRadioSelection(buttons, isActive) {
+  buttons.forEach((button) => {
+    const active = isActive(button);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-checked", active ? "true" : "false");
+    button.tabIndex = active ? 0 : -1;
+  });
+}
 
 document.querySelectorAll(".source").forEach((button) => {
   button.addEventListener("click", () => {
     if (state.phase !== "idle") return;
-    document.querySelectorAll(".source").forEach((other) => other.classList.remove("active"));
-    button.classList.add("active");
+    markRadioSelection([...document.querySelectorAll(".source")], (other) => other === button);
     state.source = button.dataset.source;
     ui.systemPanel.hidden = state.source !== "system";
     ui.micPanel.hidden = state.source !== "mic";
     ui.filePanel.hidden = state.source !== "file";
-    setListenStatus(SOURCE_HINTS[state.source] || "", "");
+    setListenStatus("", "");
     if (state.source === "mic" && !state.micDevices.length) refreshMicDevices(false);
   });
 });
+radioKeyNav(document.querySelector(".sources"), ".source");
 
 /* mic devices + monitor */
 
@@ -490,7 +662,6 @@ async function refreshMicDevices(requestPermission) {
   }
 }
 
-ui.micRefresh.addEventListener("click", () => refreshMicDevices(true));
 ui.micDevice.addEventListener("change", () => {
   if (state.monitor) {
     stopMonitor();
@@ -522,6 +693,7 @@ async function startMonitor() {
       monitor.peak = Math.max(peak, monitor.peak * 0.96);
       ui.micMeterFill.style.width = `${Math.round(level * 100)}%`;
       ui.micMeterPeak.style.left = `${Math.round(Math.min(1, monitor.peak) * 100)}%`;
+      ui.micMeter.setAttribute("aria-valuenow", String(Math.round(level * 100)));
       monitor.raf = requestAnimationFrame(tick);
     };
     monitor.raf = requestAnimationFrame(tick);
@@ -558,16 +730,22 @@ ui.listenButton.addEventListener("click", () => {
   ui.fileInput.click();
 });
 
-ui.browseFile.addEventListener("click", () => ui.fileInput.click());
+ui.browseFile.addEventListener("click", () => {
+  if (state.phase !== "idle") return;
+  ui.fileInput.click();
+});
 
 async function stopListening() {
   if (state.phase === "recording") {
-    state.recorder?.stop();
+    if (state.recorder && state.recorder.state === "recording") state.recorder.stop();
     return;
   }
   if (state.phase === "waiting") {
     clearCaptureHint();
-    try { await post("/background/capture-request/cancel", {}); } catch (_) { /* already gone */ }
+    try {
+      await post("/background/capture-request/cancel", state.captureRequestId ? { id: state.captureRequestId } : {});
+    } catch (_) { /* already gone */ }
+    state.captureRequestId = null;
     setPhase("idle");
     setListenStatus("Capture cancelled.", "");
     return;
@@ -585,9 +763,19 @@ async function listenSystem() {
   setPhase("waiting");
   setListenStatus("Asking the oída app to capture system audio…", "active");
   try {
-    await post("/background/capture-request", { seconds, route_preset: state.preset });
+    const response = await post("/background/capture-request", { seconds, route_preset: state.preset });
+    state.captureRequestId = response.capture_request?.id || null;
     clearCaptureHint();
-    state.captureHintTimer = setTimeout(() => {
+    // If nothing claims the request, check with the daemon before declaring
+    // failure — the claim can happen while this page's SSE is down.
+    state.captureHintTimer = setTimeout(async () => {
+      state.captureHintTimer = null;
+      if (state.phase !== "waiting") return;
+      try {
+        const status = await fetchJson("/background/status");
+        if (!status.state?.capture_request) return; // claimed — the capture is under way
+      } catch (_) { /* daemon unreachable; fall through to the hint */ }
+      if (state.phase !== "waiting") return;
       setPhase("idle");
       setListenStatus("No capture yet — open the oída mac app (system audio is captured through it).", "error");
     }, 15000);
@@ -604,22 +792,33 @@ function clearCaptureHint() {
   }
 }
 
+function stopRecordTimer() {
+  if (state.recordTimer) {
+    clearInterval(state.recordTimer);
+    state.recordTimer = null;
+  }
+}
+
 async function listenMic() {
+  let stream = null;
   try {
     const constraints = { audio: ui.micDevice.value ? { deviceId: { exact: ui.micDevice.value } } : true };
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
     const recorder = new MediaRecorder(stream);
     state.recorder = recorder;
     state.recordedChunks = [];
     recorder.ondataavailable = (event) => { if (event.data.size) state.recordedChunks.push(event.data); };
     recorder.onstop = async () => {
+      stopRecordTimer();
       stream.getTracks().forEach((track) => track.stop());
-      const blob = new Blob(state.recordedChunks, { type: recorder.mimeType || "audio/webm" });
+      const mime = recorder.mimeType || "audio/webm";
+      const extension = mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm";
+      const blob = new Blob(state.recordedChunks, { type: mime });
       state.recorder = null;
       setPhase("analyzing");
       setListenStatus("Uploading recording…", "active");
       try {
-        const upload = await uploadBlob(blob, `oida-mic-${Date.now()}.webm`);
+        const upload = await uploadBlob(blob, `oida-mic-${Date.now()}.${extension}`);
         await analyzePath(upload.path, "mic");
       } catch (error) {
         setPhase("idle");
@@ -628,8 +827,19 @@ async function listenMic() {
     };
     recorder.start();
     setPhase("recording", "Stop");
+    const startedAt = Date.now();
     setListenStatus("Recording… press Stop when done.", "active");
+    stopRecordTimer();
+    state.recordTimer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      const minutes = Math.floor(seconds / 60);
+      setListenStatus(`Recording ${minutes}:${String(seconds % 60).padStart(2, "0")} — press Stop when done.`, "active");
+    }, 1000);
   } catch (error) {
+    // Without this, a failed recorder leaves the acquired mic hot forever.
+    stream?.getTracks().forEach((track) => track.stop());
+    state.recorder = null;
+    stopRecordTimer();
     setListenStatus(`Microphone: ${error.message}`, "error");
   }
 }
@@ -646,6 +856,7 @@ ui.fileInput.addEventListener("change", async () => {
   const file = ui.fileInput.files?.[0];
   ui.fileInput.value = "";
   if (!file) return;
+  if (state.phase !== "idle") return;
   setPhase("analyzing");
   setListenStatus(`Uploading ${file.name}…`, "active");
   try {
@@ -658,12 +869,16 @@ ui.fileInput.addEventListener("change", async () => {
 });
 
 ["dragover", "dragleave", "drop"].forEach((kind) => {
-  ui.listenCard.addEventListener(kind, (event) => {
+  ui.resultCard.addEventListener(kind, (event) => {
     event.preventDefault();
-    ui.listenCard.classList.toggle("dragover", kind === "dragover");
+    ui.resultCard.classList.toggle("dragover", kind === "dragover");
     if (kind !== "drop") return;
     const file = event.dataTransfer?.files?.[0];
     if (!file) return;
+    if (state.phase !== "idle") {
+      setListenStatus("Still busy with the current listen — drop it again in a moment.", "error");
+      return;
+    }
     setPhase("analyzing");
     setListenStatus(`Uploading ${file.name}…`, "active");
     uploadBlob(file, file.name)
@@ -676,6 +891,7 @@ ui.fileInput.addEventListener("change", async () => {
 });
 
 ui.analyzePath.addEventListener("click", () => {
+  if (state.phase !== "idle") return;
   const path = ui.audioPath.value.trim();
   if (!path) return setListenStatus("Enter an audio path first.", "error");
   setPhase("analyzing");
@@ -707,6 +923,7 @@ async function analyzePath(path, sourceKind) {
 function renderEvent(event, fullResponse) {
   if (!event) return;
   state.lastEvent = event;
+  state.lastEventId = event.id || null;
   state.lastJson = fullResponse || { listening_event: event };
   const aggregate = event.aggregate || {};
 
@@ -714,165 +931,211 @@ function renderEvent(event, fullResponse) {
   ui.resultSummary.textContent = aggregate.short_summary || aggregate.detailed_summary || "";
   ui.resultSummary.classList.remove("placeholder");
 
-  const evidence = event.routes?.[0]?.structured?.evidence_level;
-  if (evidence) {
-    ui.evidenceChip.hidden = false;
-    ui.evidenceChip.dataset.level = evidence;
-    ui.evidenceChip.textContent = String(evidence).replaceAll("_", " ");
-  } else {
-    ui.evidenceChip.hidden = true;
-  }
+  const tags = event.tags || [];
+  ui.resultTags.innerHTML =
+    tags.slice(0, 8).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("") +
+    (tags.length > 8 ? `<span class="tag more">+${tags.length - 8}</span>` : "");
 
-  ui.resultTags.innerHTML = (event.tags || [])
-    .slice(0, 8)
-    .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
-    .join("");
-
-  ui.resultBody.innerHTML = buildResultBody(event);
-  ui.resultActions.hidden = false;
-  ui.askResult.hidden = true;
-  ui.jsonOutput.hidden = true;
-  ui.rememberButton.disabled = false;
-  ui.rememberButton.textContent = event.memory?.saved_trace_id ? "Remembered" : "Remember";
-  ui.wikiButton.disabled = !state.sonicfieldAvailable;
-  ui.wikiButton.title = state.sonicfieldAvailable ? "" : "Sonic Field root not found";
+  renderBreakdown(buildResultGroups(event));
+  ui.exportDrop.hidden = false;
+  ui.jsonWrap.hidden = true;
+  ui.germNote.hidden = true;
+  ui.rememberItem.disabled = false;
+  ui.rememberItem.textContent = event.memory?.saved_trace_id ? "Remembered" : "Remember";
+  ui.wikiItem.disabled = !state.sonicfieldAvailable;
+  ui.wikiItem.title = state.sonicfieldAvailable ? "" : "Sonic Field root not found";
+  ui.soundItem.disabled = !segmentUri(event);
+  ui.soundItem.title = segmentUri(event) ? "" : "This event keeps no audio reference, so germ cannot load it as sound";
 }
 
-function buildResultBody(event) {
+// Group the event's claims into the tabbed sections shown under the reading.
+function buildResultGroups(event) {
   const aggregate = event.aggregate || {};
   const claims = event.routes?.[0]?.structured?.claim_summary || {};
-  const parts = [];
+  const groups = [];
+
+  const conf = (c) => `<span class="conf ${escapeHtml(c || "")}">${escapeHtml(c || "")}</span>`;
+  const claimList = (items, withConf) =>
+    `<div class="block"><ul>${items
+      .map((it) => `<li>${withConf ? conf(it.confidence) : ""}<span>${escapeHtml(it.statement)}</span></li>`)
+      .join("")}</ul></div>`;
 
   const summaryPrefix = (aggregate.short_summary || "").slice(0, 60);
   const hypotheses = (aggregate.hypotheses || []).filter(
-    (hypothesis) => !summaryPrefix || !String(hypothesis.statement || "").startsWith(summaryPrefix)
+    (h) => !summaryPrefix || !String(h.statement || "").startsWith(summaryPrefix)
   );
-  if (hypotheses.length) {
-    parts.push(`<div class="block"><h4>Hypotheses</h4><ul>${hypotheses
-      .slice(0, 6)
-      .map(
-        (hypothesis) =>
-          `<li><span class="conf ${escapeHtml(hypothesis.confidence || "")}">${escapeHtml(hypothesis.confidence || "")}</span><span>${escapeHtml(hypothesis.statement)}</span></li>`
-      )
-      .join("")}</ul></div>`);
-  }
+  if (hypotheses.length) groups.push({ key: "hypotheses", label: "Hypotheses", count: hypotheses.length, html: claimList(hypotheses.slice(0, 8), true) });
 
-  const heard = (claims.heard || []).slice(0, 10);
-  if (heard.length) {
-    parts.push(`<div class="block"><h4>Heard</h4><ul>${heard
-      .map((claim) => `<li><span class="conf ${escapeHtml(claim.confidence || "")}">${escapeHtml(claim.confidence || "")}</span><span>${escapeHtml(claim.statement)}</span></li>`)
-      .join("")}</ul></div>`);
-  }
+  const heard = (claims.heard || []).slice(0, 12);
+  if (heard.length) groups.push({ key: "heard", label: "Heard", count: heard.length, html: claimList(heard, true) });
 
-  const interpreted = (claims.interpreted || []).slice(0, 6);
-  if (interpreted.length) {
-    parts.push(`<div class="block"><h4>Interpreted</h4><ul>${interpreted
-      .map((claim) => `<li><span class="conf ${escapeHtml(claim.confidence || "")}">${escapeHtml(claim.confidence || "")}</span><span>${escapeHtml(claim.statement)}</span></li>`)
-      .join("")}</ul></div>`);
-  }
+  const interpreted = (claims.interpreted || []).slice(0, 10);
+  if (interpreted.length) groups.push({ key: "interpreted", label: "Interpreted", count: interpreted.length, html: claimList(interpreted, true) });
 
   const measured = claims.measured || [];
-  if (measured.length) {
-    parts.push(`<details class="block"><summary>Measured (${measured.length})</summary><ul>${measured
-      .map((claim) => `<li><span class="conf"></span><span>${escapeHtml(claim.statement)}</span></li>`)
-      .join("")}</ul></details>`);
-  }
+  if (measured.length) groups.push({ key: "measured", label: "Measured", count: measured.length, html: claimList(measured, false) });
 
   const undetermined = claims.undetermined || [];
-  if (undetermined.length) {
-    parts.push(`<details class="block"><summary>Undetermined (${undetermined.length})</summary><ul>${undetermined
-      .map((claim) => `<li><span class="conf"></span><span>${escapeHtml(claim.statement)}</span></li>`)
-      .join("")}</ul></details>`);
-  }
+  if (undetermined.length) groups.push({ key: "undetermined", label: "Undetermined", count: undetermined.length, html: claimList(undetermined, false) });
 
   const memoryMatches = event.memory?.similarity || [];
   if (memoryMatches.length) {
-    parts.push(`<div class="block"><h4>Memory echoes</h4><ul>${memoryMatches
-      .slice(0, 4)
+    const items = memoryMatches
+      .slice(0, 6)
       .map((match) => {
         const trace = match.trace || {};
         const score = typeof match.score === "number" ? ` · ${Math.round(match.score * 100)}%` : "";
-        return `<li><span class="conf"></span><span>${escapeHtml(trace.title || trace.id || "trace")}${score}</span></li>`;
+        return `<li><span>${escapeHtml(trace.title || trace.id || "trace")}${score}</span></li>`;
       })
-      .join("")}</ul></div>`);
+      .join("");
+    groups.push({ key: "memory", label: "Memory", count: memoryMatches.length, html: `<div class="block"><ul>${items}</ul></div>` });
   }
+  return groups;
+}
 
-  return parts.join("") || `<p class="empty-note">No claims were produced.</p>`;
+// The breakdown lives in the right rail as stacked sections, each collapsible
+// and open by default.
+function renderBreakdown(groups) {
+  if (!groups.length) {
+    ui.resultBody.innerHTML = `<p class="empty-note">No claims were produced.</p>`;
+    return;
+  }
+  const caret = `<svg class="ci bd-caret" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+  ui.resultBody.innerHTML = groups
+    .map((g) => `<details class="bd-section" open><summary>${caret}${escapeHtml(g.label)}<span class="bd-count">${g.count}</span></summary>${g.html}</details>`)
+    .join("");
 }
 
 /* ─────────────────────────── result actions ─────────────────────── */
 
-ui.askToggle.addEventListener("click", () => {
-  ui.askRow.hidden = !ui.askRow.hidden;
-  if (!ui.askRow.hidden) ui.askInput.focus();
-});
-
-async function sendAsk() {
-  const question = ui.askInput.value.trim();
-  if (!question || !state.lastEvent) return;
-  ui.askSend.disabled = true;
-  try {
-    const result = await post("/conversation/ask", { question, event: state.lastEvent });
-    const turn = result.turn || result;
-    const answer =
-      turn.answer ||
-      (Array.isArray(turn.known_facts) && turn.known_facts.length ? turn.known_facts.join(" ") : "") ||
-      (Array.isArray(turn.uncertainty_notes) && turn.uncertainty_notes.length ? turn.uncertainty_notes.join(" ") : "") ||
-      "No grounded answer was produced.";
-    ui.askResult.hidden = false;
-    ui.askResult.innerHTML = `<div class="ask-q">${escapeHtml(question)}</div><div>${escapeHtml(answer)}</div>`;
-    ui.askInput.value = "";
-  } catch (error) {
-    ui.askResult.hidden = false;
-    ui.askResult.innerHTML = `<div class="ask-q">${escapeHtml(question)}</div><div>${escapeHtml(error.message)}</div>`;
-  } finally {
-    ui.askSend.disabled = false;
-  }
-}
-ui.askSend.addEventListener("click", sendAsk);
-ui.askInput.addEventListener("keydown", (event) => { if (event.key === "Enter") sendAsk(); });
-
-ui.rememberButton.addEventListener("click", async () => {
+async function rememberReading() {
   if (!state.lastEvent) return;
-  ui.rememberButton.disabled = true;
+  ui.rememberItem.disabled = true;
   try {
     const result = await post("/memory/remember", { event: state.lastEvent, tags: [state.preset] });
     if (result.trace?.id) {
       state.lastEvent.memory = { ...(state.lastEvent.memory || {}), saved_trace_id: result.trace.id };
-      ui.rememberButton.textContent = "Remembered";
+      ui.rememberItem.textContent = "Remembered";
     }
     refreshMemory();
   } catch (error) {
     setListenStatus(`Memory: ${error.message}`, "error");
-    ui.rememberButton.disabled = false;
+    ui.rememberItem.disabled = false;
+  }
+}
+
+ui.exportMenu.addEventListener("click", (event) => {
+  const item = event.target.closest(".drop-item");
+  if (!item || item.disabled) return;
+  closeDropdowns();
+  switch (item.dataset.action) {
+    case "remember":
+      rememberReading();
+      break;
+    case "wiki":
+      if (!state.lastEvent) break;
+      if (ui.wikiModal && typeof ui.wikiModal.showModal === "function" && !ui.wikiModal.open) ui.wikiModal.showModal();
+      exploreWiki({ event: state.lastEvent });
+      break;
+    case "json":
+      ui.jsonWrap.hidden = !ui.jsonWrap.hidden;
+      if (!ui.jsonWrap.hidden) ui.jsonOutput.textContent = JSON.stringify(state.lastJson, null, 2);
+      break;
+    case "sound":
+      germHandoff("sound");
+      break;
+    case "prompt":
+      germHandoff("prompt");
+      break;
   }
 });
 
-ui.jsonToggle.addEventListener("click", () => {
-  ui.jsonOutput.hidden = !ui.jsonOutput.hidden;
-  if (!ui.jsonOutput.hidden) ui.jsonOutput.textContent = JSON.stringify(state.lastJson, null, 2);
+ui.jsonCopy.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(state.lastJson, null, 2));
+    ui.jsonCopy.textContent = "copied";
+    setTimeout(() => { ui.jsonCopy.textContent = "copy"; }, 1200);
+  } catch (_) {
+    ui.jsonCopy.textContent = "copy failed";
+    setTimeout(() => { ui.jsonCopy.textContent = "copy"; }, 1800);
+  }
 });
+
+/* ─────────────────────────── germ handoff ───────────────────────── */
+
+// oída is generative ears; germ is generative voice. The germ dropdown's
+// options persist the listen as an akousma in the shared store and deep-link germ.
+function segmentUri(event) {
+  const dataRef = event?.segment?.data_ref;
+  if (!dataRef || !dataRef.uri) return null;
+  return dataRef.kind === "path" ? `file://${dataRef.uri}` : String(dataRef.uri);
+}
+
+function setGermNote(text, tone) {
+  ui.germNote.hidden = !text;
+  ui.germNote.textContent = text || "";
+  ui.germNote.className = `germ-note${tone ? ` ${tone}` : ""}`;
+}
+
+const GERM_ORIGINS = {
+  live_input: "live-input",
+  system_output: "system-output",
+  buffer: "live-input",
+  external_stream: "system-output",
+  file: "file",
+};
+
+async function germHandoff(mode) {
+  const event = state.lastEvent;
+  if (!event) return;
+  const segment = event.segment || {};
+  const audio = { asset_id: segment.id || event.id };
+  const uri = segmentUri(event);
+  if (uri) audio.uri = uri;
+  if (segment.duration_ms != null) audio.duration_seconds = segment.duration_ms / 1000;
+  if (segment.sample_rate) audio.sample_rate = segment.sample_rate;
+  if (segment.channels) audio.channels = segment.channels;
+  const listening = {
+    "oida.listen": {
+      title: event.aggregate?.title || "",
+      short_summary: event.aggregate?.short_summary || "",
+      route_preset: state.preset,
+    },
+  };
+  const structured = event.routes?.[0]?.structured;
+  if (structured) listening["akouo.describe"] = structured;
+  setGermNote(`Handing to germ (${mode})…`);
+  try {
+    const result = await post("/germ/handoff", {
+      mode,
+      audio,
+      listening,
+      origin: GERM_ORIGINS[event.source?.type] || "file",
+      session_id: event.id,
+      tags: (event.tags || []).slice(0, 8),
+    });
+    setGermNote(`akousma ${result.akousma_id} → germ`);
+    window.open(result.germ_url, "_blank", "noopener");
+  } catch (error) {
+    const detail = String(error.message) === "404" ? "germ bridge unavailable (akousma package not installed)" : error.message;
+    setGermNote(`germ: ${detail}`, "error");
+  }
+}
 
 /* ─────────────────────────── wiki explore ───────────────────────── */
 
-ui.wikiButton.addEventListener("click", () => {
-  if (!state.lastEvent) return;
-  ui.wikiCard.hidden = false;
-  ui.wikiCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  exploreWiki({ event: state.lastEvent });
-});
-
-ui.wikiClose.addEventListener("click", () => { ui.wikiCard.hidden = true; });
 ui.wikiGo.addEventListener("click", () => exploreWiki({ query: ui.wikiQuery.value.trim() || null, event: state.lastEvent }));
 ui.wikiQuery.addEventListener("keydown", (event) => {
   if (event.key === "Enter") exploreWiki({ query: ui.wikiQuery.value.trim() || null, event: state.lastEvent });
 });
 
 async function exploreWiki(body) {
+  const token = ++state.wikiToken; // out-of-order responses must not paint stale results
   ui.wikiGroups.innerHTML = `<p class="wiki-empty">Searching the Sonic Field…</p>`;
   ui.wikiTerms.textContent = "";
   try {
     const result = await post("/sonicfield/explore", { ...body, limit_per_surface: 5 });
+    if (token !== state.wikiToken) return;
     ui.wikiTerms.textContent = (result.query_terms || []).join(" · ");
     const groups = result.groups || {};
     const surfaces = Object.keys(groups);
@@ -896,6 +1159,7 @@ async function exploreWiki(body) {
       })
       .join("");
   } catch (error) {
+    if (token !== state.wikiToken) return;
     ui.wikiGroups.innerHTML = `<p class="wiki-empty">${escapeHtml(error.message)}</p>`;
   }
 }
@@ -914,8 +1178,8 @@ ui.wikiGroups.addEventListener("click", async (event) => {
 
 async function refreshHistory() {
   try {
-    const status = await fetchJson("/background/status");
-    const recent = status.state?.recent_events || [];
+    const history = await fetchJson("/background/history?limit=10");
+    const recent = history.recent_events || [];
     ui.historyNote.textContent = recent.length ? `${recent.length}` : "";
     if (!recent.length) {
       ui.historyList.innerHTML = `<p class="empty-note">Nothing listened yet.</p>`;
@@ -955,7 +1219,7 @@ async function refreshMemory(query) {
     ui.memoryList.innerHTML = "";
     traces.slice(0, 12).forEach((trace) => {
       const row = document.createElement("div");
-      row.className = "row-item";
+      row.className = "row-item static";
       const title = document.createElement("span");
       title.className = "ri-title";
       title.textContent = trace.title || trace.id;
@@ -971,7 +1235,8 @@ async function refreshMemory(query) {
           await post("/memory/forget", { trace_id: trace.id });
           refreshMemory(ui.memorySearch.value.trim() || undefined);
         } catch (error) {
-          ui.memoryList.insertAdjacentHTML("afterbegin", `<p class="empty-note">${escapeHtml(error.message)}</p>`);
+          ui.memoryList.querySelector(".memory-error")?.remove();
+          ui.memoryList.insertAdjacentHTML("afterbegin", `<p class="empty-note memory-error">${escapeHtml(error.message)}</p>`);
         }
       });
       row.append(title, meta, forget);
@@ -994,7 +1259,15 @@ refreshHealth().finally(() => {
 });
 loadManifest();
 refreshMemory();
-refreshSystemRoute();
+refreshMicDevices(false); // load input devices by default, no permission prompt
 connectStream();
 setInterval(refreshHealth, 20000);
-window.addEventListener("pagehide", stopMonitor);
+window.addEventListener("pagehide", () => {
+  stopMonitor();
+  stopRecordTimer();
+  // A recording in flight must not leave the microphone hot after the page goes away.
+  if (state.recorder) {
+    state.recorder.stream?.getTracks().forEach((track) => track.stop());
+    state.recorder = null;
+  }
+});

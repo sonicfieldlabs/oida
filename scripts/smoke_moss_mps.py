@@ -12,11 +12,11 @@ from oida.recipes import get_recipe
 def main() -> None:
     repo = Path(__file__).resolve().parents[1]
     _ensure_macos_homebrew_dylibs()
-    os.environ.setdefault("AEAR_ENGINE_PROFILE", "mac-mps")
-    os.environ.setdefault("AEAR_MOSS_AUDIO_REPO", str(repo / "MOSS-Audio"))
-    os.environ.setdefault("AEAR_MOSS_INSTRUCT_MODEL", str(repo / "weights" / "MOSS-Audio-4B-Instruct"))
-    os.environ.setdefault("AEAR_MOSS_THINKING_MODEL", str(repo / "weights" / "MOSS-Audio-4B-Thinking"))
-    os.environ.setdefault("AEAR_MOSS_RESIDENT", "single")
+    os.environ.setdefault("OIDA_ENGINE_PROFILE", "mac-mps")
+    os.environ.setdefault("OIDA_MOSS_AUDIO_REPO", str(repo / "MOSS-Audio"))
+    os.environ.setdefault("OIDA_MOSS_INSTRUCT_MODEL", str(repo / "weights" / "MOSS-Audio-4B-Instruct"))
+    os.environ.setdefault("OIDA_MOSS_THINKING_MODEL", str(repo / "weights" / "MOSS-Audio-4B-Thinking"))
+    os.environ.setdefault("OIDA_MOSS_RESIDENT", "single")
     audio_path = repo / "MOSS-Audio" / "test" / "test_en.mp3"
     engine = build_engine(load_config(profile="mac-mps"))
     recipe = get_recipe("caption_brief")

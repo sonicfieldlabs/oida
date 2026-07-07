@@ -112,11 +112,15 @@ class CompletedFeatureTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run_chat(args)
 
-    def test_mcp_server_prefers_aear_tool_aliases(self) -> None:
+    def test_mcp_server_canonical_oida_tools_with_legacy_aliases(self) -> None:
         names = {tool["name"] for tool in TOOLS}
+        self.assertIn("oida_report", names)
+        self.assertIn("oida_live_start", names)
+        self.assertIn("hmm_report", names)
         self.assertIn("aear_report", names)
         self.assertIn("aear_transcribe", names)
         self.assertIn("aear_qa", names)
+        self.assertIn("aear_live_start", names)
         self.assertIn("ear_report", names)
 
     def test_mcp_server_ignores_notifications(self) -> None:

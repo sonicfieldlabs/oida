@@ -2,6 +2,118 @@
 
 ## 0.2.0 - Unreleased
 
+- **Floating listener redesigned**: the macOS floating listener is no longer a
+  window. It is a borderless, transparent, non-activating panel whose visible
+  body is the listening-result box itself — the reading is always shown, with a
+  small reactive waveform in its corner that animates only while listening.
+  Every control floats just outside the box and fades in on hover: listening
+  mode at the top-left, close at the top-right, and source / Listen / control
+  center in a row below. The box and its type are larger than the prior card,
+  and it drags from the box. The box stays empty until something is actually
+  heard, and the mode (preset) control matches the size of the row below it.
+  (An earlier take on this rebuild used a Metal shader orb; that was dropped in
+  favor of the box-centric layout.)
+- **Dashboard restyled flat and grey, then re-laid-out**: one continuous
+  surface instead of white cards (sections separated by hairlines, no shadows,
+  flush to the width); no green anywhere. The Listen surface is now two lines —
+  source + its config (capture / input / file) on one line with the Skills /
+  Engine / Path controls as segmented tabs at the top-right (each toggling a
+  panel), and the grey Listen button beside the route presets on the next line.
+  Presets and the result actions (Ask, Remember, Wiki, JSON, and the germ
+  handoff) are borderless icon+word buttons. The claim groups (Hypotheses,
+  Heard, Interpreted, Measured, Undetermined, Memory) are tabs below the
+  reading. Source descriptions, the preset hint, and the evidence-level chip
+  were removed; the header is just the wordmark and the daemon address sits in
+  the footer as `host:port`. Skills / Engine / Path open as **modal dialogs**
+  (not inline). The source row is one line — source tabs plus their config; in
+  System the buffer length reads `Buffer: 10sec` (no route text), and in Mic
+  the input list loads by default (no Devices button) with a small icon monitor
+  toggle. Selects use the app font, not a mono face.
+- **Native top bar**: the mac window is just the embedded dashboard with one
+  top-right bar of icon buttons, split into two groups of three — Skills /
+  Engine / Path (each opens its modal in the page via `evaluateJavaScript`) and
+  the shell actions floating-listener / reload / browser (or Start daemon when
+  offline). Icons get a subtle hover wash. The shell injects `window.__oidaNative`
+  so the page hides its own browser-only panel icons.
+- **Dashboard reorganized into an Obsidian-style three-rail shell**: collapse
+  toggles live in the top corners (state persists). The **left rail** carries
+  the source tabs (System / Mic / File) and their config at its top, then
+  Recent and Memory; the **right rail** carries the tool icons at its top —
+  Skills / Engine / Path, plus (inside the native app) floating-listener /
+  reload / browser — then the claim Breakdown as a vertical nav. The center is
+  the reading, usable with either rail collapsed, and the rails stay rails at
+  native-window widths instead of stacking full-width. The foot reads like an
+  agent chatbox: Remember / Wiki / JSON / germ as icon+word actions at the
+  bottom-left (germ opens a Sound / Prompt / Lineage menu), the listening mode
+  as a quiet borderless selector, and **Listen as a round dark send-style
+  button** at the bottom-right. The Ask button, page footer, and wordmark are
+  gone — the daemon address, audio path, and API/health links moved into the
+  Engine modal — and opening any panel modal closes whichever was open.
+- **Native shell is chrome-free**: the capsule top bar was removed; the page's
+  right rail hosts the shell actions, which post back over a
+  `oidaShell` script-message bridge (reload reloads the WebView directly). The
+  only native overlay left is a Start-daemon card when the daemon is offline.
+- Floating listener: the status dot in the box footer was removed (the status
+  word and corner waveform remain), and the listening-mode button is a
+  rectangular frost tile with the same rounding and margins as the buttons
+  under the box.
+- **Shell refinements**: the rails are drag-resizable (widths persist) with
+  Obsidian-style panel toggles in the top corners; the sources are icons whose
+  config always fits the rail (including the mic meter); memory search is an
+  icon. The claim Breakdown is stacked collapsible sections, all expanded by
+  default. The result actions condensed into one **export menu** at the box's
+  bottom-right — Remember, Expand on Wiki, Export JSON, Generate derived sound,
+  Convert listening to prompt (Lineage removed) — next to the Skills icon, the
+  quiet mode selector, and Listen. Two corner buttons float over everything:
+  a configuration menu bottom-left (Engine / Path / Reload / Open in browser)
+  and, inside the native app, the floating-listener toggle bottom-right.
+- **App icon**: a minimal abstract listening mark — a single bold two-hump sine
+  wave on a charcoal squircle, transparent corners. Sourced from
+  `apps/macos/Resources/AppIcon.svg`, shipped as `AppIcon.icns`, and staged into
+  the bundle by both packaging scripts.
+- **germ handoff fixed and surfaced**: `/germ/handoff` was unusable (with
+  `from __future__ import annotations` FastAPI could not resolve the
+  function-local request model and degraded the JSON body to a query param);
+  the model is now module-scoped. The dashboard gained the three germ buttons
+  (Sound / Prompt / Lineage) that persist an akousma to the shared store and
+  deep-link germ; origins are normalized to the akousma vocabulary; opt-in
+  song identification (`OIDA_SONGID=1`) now enriches handoff records.
+- Dashboard hardening: SSE events from other surfaces no longer stomp a local
+  mic recording (orphaned hot mic); mic streams are released when MediaRecorder
+  fails and on page hide; duplicate render/refresh after each listen removed;
+  engine fold no longer rebuilds every 20 s (dropdown-closing); phase guards on
+  drop/file/path during a running listen; capture-cancel sends the request id;
+  the 15 s "no capture yet" hint verifies with the daemon before flipping to an
+  error; SSE reconnects after a permanently closed stream; recording shows
+  elapsed time; JSON view gained copy; Ask cannot double-submit via Enter.
+- Dashboard accessibility and polish: visible focus rings, AA-passing text
+  tones, radio semantics + arrow-key navigation for source/preset groups, a
+  live daemon status label, meter semantics, reduced-motion-aware scrolling,
+  evidence-level chip colors for all levels, `dsp only` no longer styled as an
+  error, dead CSS removed, tags overflow as `+n`.
+- Backend correctness: memory list/limit now ordered by `createdAt` (was
+  filename-random); `OIDA_MOSS_PREWARM` precedence fixed (legacy `HMM_`/`AEAR_`
+  could override it); `OIDA_REQUIRE_MODEL` accepts true/yes/on; per-listen DSP
+  inspection memoized (a listen decoded and hashed the same file 2–3×); ffmpeg
+  conversion gets a timeout; `/sonicfield/reveal` containment can no longer be
+  bypassed by sibling directories; corrupt memory/generation/conversation
+  records return 4xx instead of 500; `/health` `legacy_name` reports
+  `hmm, aear`; `/api` lists the capture-request, engine-model, status, and germ
+  routes; double prewarm race closed.
+- macOS shell: native capture filenames had a corrupted date pattern from the
+  rename (`HOidassSSS`); the shell now reads `OIDA_AUTH_TOKEN` first; the
+  managed daemon is stopped on app quit (its pipes died with the app and the
+  orphan would crash on SIGPIPE); transient refresh errors keep recent/pinned
+  history; hotkey signature renamed `HMMK` → `OIDA`.
+- MCP tools renamed to canonical `oida_*` with `hmm_*`/`aear_*`/`ear_*` aliases
+  kept and the previously undeclared `aear_live_*` aliases declared.
+- Environment/docs unification: project scripts export `OIDA_*` names (legacy
+  still honored), release smoke reads the `*_SERVER_URL` chain and cleans its
+  prompt record from the daemon data dir, README/SECURITY/shell docs are
+  rewritten OIDA-first and match current behavior, CI/local checks run the
+  suite once via pytest, and the server-integration tests isolate ambient
+  `OIDA_*`/`HMM_*`/`AEAR_*` variables.
+
 - **Renamed the project `hmm` → `oída`** (part of the Sonic Field "sonic
   evolution"). Python package `aear` → `oida`; primary CLI `oida`
   (`oida-daemon`), with `hmm`/`aear` kept as aliases. Environment variables use

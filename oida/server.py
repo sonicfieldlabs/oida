@@ -450,6 +450,9 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     def start_prewarm(model_kind: str = "instruct") -> bool:
         if config.profile != "mac-mps" or engine_monitor["state"] == "warming":
             return False
+        # claim the warming state before spawning so two rapid /engine/warm
+        # calls cannot race two prewarm threads
+        engine_monitor["state"] = "warming"
         threading.Thread(target=_prewarm_engine, args=(model_kind,), name="oida-moss-prewarm", daemon=True).start()
         return True
 
@@ -559,7 +562,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         return {
             "ok": True,
             "name": "oida",
-            "legacy_name": "oida",
+            "legacy_name": "hmm, aear",
             "profile": config.profile,
             "host": config.host,
             "port": config.port,
@@ -628,7 +631,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         if not sonicfield.available or sonicfield.root is None:
             raise HTTPException(status_code=400, detail="Sonic Field root is not available")
         target = Path(req.path).expanduser().resolve()
-        if not str(target).startswith(str(sonicfield.root)):
+        # startswith(str) would accept sibling dirs like ".../sonicfield-evil"
+        if not target.is_relative_to(sonicfield.root):
             raise HTTPException(status_code=400, detail="path is outside the Sonic Field root")
         if not target.exists():
             raise HTTPException(status_code=404, detail="path does not exist")
@@ -640,20 +644,24 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
     @app.get("/")
     def root() -> FileResponse:
-        return FileResponse(static_dir / "index.html")
+        # no-cache: without it browsers reuse a heuristically-cached dashboard
+        # after an upgrade (assets are ?v= versioned, the document is not)
+        return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
 
     @app.get("/api")
     def api_root() -> dict[str, object]:
         return {
             "name": "oida",
-            "legacy_name": "oida",
+            "legacy_name": "hmm, aear",
             "ok": True,
             "profile": config.profile,
             "docs": "/docs",
             "health": "/health",
             "endpoints": [
+                "/oida/status",
                 "/engine/status",
                 "/engine/warm",
+                "/engine/model",
                 "/events/stream",
                 "/sonicfield/status",
                 "/sonicfield/explore",
@@ -680,6 +688,9 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "/background/pause",
                 "/background/resume",
                 "/background/capture",
+                "/background/capture-request",
+                "/background/capture-request/claim",
+                "/background/capture-request/cancel",
                 "/native/system-audio/analyze",
                 "/native/system-audio/routes",
                 "/native/system-audio/temp",
@@ -712,6 +723,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "/live/signal/{session_id}",
                 "/live/status",
                 "/live/stop",
+                "/germ/handoff",
+                "/germ/link",
                 "/qa",
                 "/think",
                 "/report",
@@ -719,7 +732,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         }
 
     @app.get("/oida/status")
-    def hmm_status_endpoint() -> dict[str, object]:
+    def oida_status_endpoint() -> dict[str, object]:
         return {
             "name": "oida",
             "description": "Local open listening agent built from the oida daemon and AKOUO harness.",
@@ -735,7 +748,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "hf_hub_offline": config.hf_hub_offline,
                 "instruct_model": config.instruct_model,
                 "thinking_model": config.thinking_model,
-                "note": "Hub model IDs are refused unless HMM_ALLOW_HF_HUB or AEAR_ALLOW_HF_HUB is set and HF_HUB_OFFLINE is not enabled.",
+                "note": "Hub model IDs are refused unless OIDA_ALLOW_HF_HUB (legacy HMM_/AEAR_ALLOW_HF_HUB) is set and HF_HUB_OFFLINE is not enabled.",
             },
             "privacy_defaults": {
                 "raw_audio_policy": "external_ref_for_files_temp_for_live_captures",
@@ -1465,6 +1478,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             return {"trace": memory.get(trace_id), "similar": memory.similar_to_trace(trace_id)}
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post("/memory/remember")
     def memory_remember_endpoint(req: MemoryRememberRequest) -> dict[str, object]:
@@ -1564,9 +1579,12 @@ def normalize_audio(path: Path) -> tuple[Path, str | None]:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=120,
         )
     except FileNotFoundError:
         return path, "ffmpeg is required to convert uploaded or recorded non-WAV audio to WAV."
+    except subprocess.TimeoutExpired:
+        return path, "ffmpeg timed out converting the uploaded audio; the file may be malformed."
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or "").strip().splitlines()
         suffix = f" ffmpeg: {detail[-1]}" if detail else ""

@@ -66,7 +66,13 @@ class CheckResult:
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description="Validate local oida release artifacts and daemon contract.")
-    parser.add_argument("--server", default=os.environ.get("HMM_SERVER", "http://127.0.0.1:8765"))
+    parser.add_argument(
+        "--server",
+        default=os.environ.get("OIDA_SERVER_URL")
+        or os.environ.get("HMM_SERVER_URL")
+        or os.environ.get("AEAR_SERVER_URL")
+        or os.environ.get("HMM_SERVER", "http://127.0.0.1:8765"),
+    )
     parser.add_argument("--app", type=Path, default=repo_root / "apps/macos/dist/oida.app")
     parser.add_argument("--archive", type=Path, default=repo_root / "apps/macos/dist/oida-macos-unsigned.zip")
     parser.add_argument("--mutating", action="store_true", help="Create and clean up one prompt record through /generation/prompt.")
@@ -192,12 +198,23 @@ def smoke_generation_prompt(server: str, repo_root: Path, result: CheckResult) -
         result.fail(f"unexpected prompt smoke payload: {record}")
         return
 
-    record_path = repo_root / "generations/records" / f"{safe_id(generation_id)}.json"
-    if record_path.exists():
+    # GenerationStore writes under the daemon's data dir, not the repo root.
+    data_dir_env = os.environ.get("OIDA_DATA_DIR") or os.environ.get("HMM_DATA_DIR") or os.environ.get("AEAR_DATA_DIR")
+    record_name = f"{safe_id(generation_id)}.json"
+    candidates = [
+        Path(data_dir_env).expanduser() if data_dir_env else None,
+        Path.home() / "Library/Application Support/oida",
+        repo_root,
+    ]
+    record_path = next(
+        (base / "generations/records" / record_name for base in candidates if base and (base / "generations/records" / record_name).exists()),
+        None,
+    )
+    if record_path:
         record_path.unlink()
         result.ok("mutating prompt smoke record cleaned up")
     else:
-        result.warn(f"could not find prompt smoke record for cleanup: {record_path}")
+        result.warn(f"could not find prompt smoke record for cleanup: {record_name}")
 
 
 def check_app_bundle(app_path: Path, result: CheckResult) -> None:

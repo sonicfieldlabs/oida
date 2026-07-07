@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,23 @@ import soundfile as sf
 from fastapi.testclient import TestClient
 
 from oida.server import create_app
+
+
+_AMBIENT_ENV: dict[str, str] = {}
+
+
+def setUpModule() -> None:  # noqa: N802 (unittest hook)
+    # A developer's ambient oída configuration (OIDA_DATA_DIR, OIDA_AUTH_TOKEN, …)
+    # must not leak into these tests: OIDA_* is read before the HMM_*/AEAR_*
+    # names the tests patch.
+    for name in list(os.environ):
+        if name.startswith(("OIDA_", "HMM_", "AEAR_")):
+            _AMBIENT_ENV[name] = os.environ.pop(name)
+
+
+def tearDownModule() -> None:  # noqa: N802 (unittest hook)
+    os.environ.update(_AMBIENT_ENV)
+    _AMBIENT_ENV.clear()
 
 
 def _client() -> TestClient:
@@ -26,7 +44,7 @@ def _write_tone(path: Path) -> Path:
 
 
 class ServerSecurityTests(unittest.TestCase):
-    def test_health_reports_hmm(self) -> None:
+    def test_health_reports_oida(self) -> None:
         response = _client().get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["name"], "oida")

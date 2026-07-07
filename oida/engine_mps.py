@@ -60,7 +60,7 @@ class MpsMossEngine(MossEngine):
             from src.processing_moss_audio import MossAudioProcessor
         except Exception as exc:
             raise EngineUnavailable(
-                "official MOSS-Audio repo/dependencies are unavailable; set AEAR_MOSS_AUDIO_REPO and install MOSS extras"
+                "official MOSS-Audio repo/dependencies are unavailable; set OIDA_MOSS_AUDIO_REPO (legacy HMM_/AEAR_ accepted) and install MOSS extras"
             ) from exc
 
         if self.config.resident_mode == "single":
@@ -93,7 +93,7 @@ class MpsMossEngine(MossEngine):
             raise EngineUnavailable("HF_HUB_OFFLINE is set; refusing Hugging Face model lookup.")
         if not self.config.allow_hf_hub:
             raise EngineUnavailable(
-                "Hugging Face model lookup is disabled by default. Download weights into ./weights or set HMM_ALLOW_HF_HUB=1."
+                "Hugging Face model lookup is disabled by default. Download weights into ./weights or set OIDA_ALLOW_HF_HUB=1."
             )
         LOGGER.warning(
             "Hugging Face hub lookup explicitly enabled; '%s' may be downloaded from the network with trust_remote_code=True.",
@@ -113,7 +113,9 @@ class MpsMossEngine(MossEngine):
             pass
         return {
             "profile": self.profile,
-            "loaded_models": [Path(model_id).name for model_id in self._models],
+            # list() snapshots the keys so a concurrent _load_pair cannot
+            # mutate the dict mid-iteration (without blocking on the load lock)
+            "loaded_models": [Path(model_id).name for model_id in list(self._models)],
             "device": device,
             "assignments": {
                 "instruct": Path(self.model_id_for_kind("instruct")).name,

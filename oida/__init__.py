@@ -1,6 +1,8 @@
-"""oida perception daemon package.
+"""oída perception daemon package.
 
-The internal Python package remains named ``oida`` for compatibility.
+The Python package is named ``oida``; the project was previously AEAR, then hmm,
+and the ``hmm``/``aear`` CLI aliases plus ``HMM_*``/``AEAR_*`` env fallbacks
+remain for compatibility.
 """
 
 __all__ = ["__version__"]
