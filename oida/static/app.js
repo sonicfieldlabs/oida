@@ -1281,6 +1281,109 @@ ui.memorySearch.addEventListener("keydown", (event) => {
   if (event.key === "Enter") refreshMemory(ui.memorySearch.value.trim() || undefined);
 });
 
+/* ─────────────── akousmata: the shared library, embedded ─────────────── */
+
+const akousmataUi = {
+  list: document.getElementById("akousmataList"),
+  search: document.getElementById("akousmataSearch"),
+  go: document.getElementById("akousmataGo"),
+  note: document.getElementById("akousmataNote"),
+  modal: document.getElementById("akousmataModal"),
+  title: document.getElementById("akousmataTitle"),
+  detail: document.getElementById("akousmataDetail"),
+};
+
+async function refreshAkousmata(query) {
+  if (!akousmataUi.list) return;
+  try {
+    const url = query ? `/akousmata/records?text=${encodeURIComponent(query)}&limit=24` : "/akousmata/records?limit=24";
+    const result = await fetchJson(url);
+    const records = result.records || [];
+    akousmataUi.note.textContent = records.length ? `${records.length}` : "";
+    if (!records.length) {
+      akousmataUi.list.innerHTML = `<p class="empty-note">${query ? "No shared memories match." : "The shared library is empty."}</p>`;
+      return;
+    }
+    akousmataUi.list.innerHTML = "";
+    records.forEach((record) => {
+      const row = document.createElement("div");
+      row.className = "row-item";
+      row.title = record.akousma_id;
+      const title = document.createElement("span");
+      title.className = "ri-title";
+      title.textContent = record.summary || record.akousma_id;
+      const meta = document.createElement("span");
+      meta.className = "ri-meta";
+      meta.textContent = [record.originating_app, (record.created_at || "").slice(0, 10)].filter(Boolean).join(" · ");
+      row.append(title, meta);
+      row.addEventListener("click", () => openAkousma(record.akousma_id));
+      akousmataUi.list.appendChild(row);
+    });
+  } catch (_) {
+    akousmataUi.list.innerHTML = `<p class="empty-note">Shared akousmata unavailable (py-akousma not installed?).</p>`;
+  }
+}
+
+async function openAkousma(akousmaId) {
+  try {
+    const data = await fetchJson(`/akousmata/records/${encodeURIComponent(akousmaId)}`);
+    const record = data.record;
+    akousmataUi.title.textContent = data.summary || akousmaId;
+    const rows = [];
+    const provenance = record.provenance || {};
+    rows.push(`<p class="empty-note" style="margin-top:0">${escapeHtml(akousmaId)} · ${escapeHtml(provenance.originating_app || "?")} · ${escapeHtml(provenance.origin || "?")} · ${escapeHtml((record.created_at || "").slice(0, 16).replace("T", " "))}</p>`);
+    if (data.audio_available) rows.push(`<audio controls style="width:100%" src="/akousmata/audio/${encodeURIComponent(akousmaId)}"></audio>`);
+    const listening = record.listening || {};
+    for (const namespace of Object.keys(listening).sort()) {
+      const entry = listening[namespace];
+      if (typeof entry !== "object" || entry === null) continue;
+      const payload = entry.payload && typeof entry.payload === "object" ? entry.payload : entry;
+      const text = entry.summary || payload.caption || payload.summary || payload.main_reading || payload.notes || "";
+      rows.push(`<p><strong class="ri-meta">${escapeHtml(namespace)}${entry.contract ? ` · ${escapeHtml(entry.contract)}` : ""}</strong><br>${escapeHtml(String(text).slice(0, 400)) || "<em>structured payload</em>"}</p>`);
+    }
+    const link = (ref) => `<a href="#" data-akousma="${escapeHtml(ref.akousma_id)}" class="${ref.missing ? "ri-meta" : ""}">${escapeHtml(ref.summary || ref.akousma_id)}</a>`;
+    if (data.parents.length) rows.push(`<p><strong class="ri-meta">made from</strong><br>${data.parents.map(link).join("<br>")}</p>`);
+    if (data.children.length) rows.push(`<p><strong class="ri-meta">became</strong><br>${data.children.map(link).join("<br>")}</p>`);
+    if (data.related.length) {
+      rows.push(`<p><strong class="ri-meta">kinship</strong><br>${data.related.map((item) => `${escapeHtml((item.type || "").replaceAll("_", " "))} ${item.direction === "incoming" ? "⭠" : "⭢"} ${link(item)}`).join("<br>")}</p>`);
+    }
+    if ((record.tags || []).length) rows.push(`<p class="ri-meta">#${record.tags.map(escapeHtml).join(" #")}</p>`);
+    rows.push(
+      `<p>` +
+      ["sound", "prompt", "lineage"].map((mode) => `<button class="pill-button small" data-germ-mode="${mode}" data-germ-id="${escapeHtml(akousmaId)}">germ: ${mode}</button>`).join(" ") +
+      `</p>`,
+    );
+    akousmataUi.detail.innerHTML = rows.join("");
+    akousmataUi.detail.querySelectorAll("a[data-akousma]").forEach((anchor) => {
+      anchor.addEventListener("click", (event) => {
+        event.preventDefault();
+        openAkousma(anchor.dataset.akousma);
+      });
+    });
+    akousmataUi.detail.querySelectorAll("button[data-germ-mode]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          const data = await fetchJson(`/germ/link?akousma_id=${encodeURIComponent(button.dataset.germId)}&mode=${button.dataset.germMode}`);
+          window.open(data.germ_url, "_blank");
+        } catch (error) {
+          button.textContent = "germ unavailable";
+        }
+      });
+    });
+    if (typeof akousmataUi.modal.showModal === "function" && !akousmataUi.modal.open) akousmataUi.modal.showModal();
+  } catch (error) {
+    akousmataUi.list.insertAdjacentHTML("afterbegin", `<p class="empty-note">${escapeHtml(error.message)}</p>`);
+  }
+}
+
+if (akousmataUi.go) {
+  akousmataUi.go.addEventListener("click", () => refreshAkousmata(akousmataUi.search.value.trim() || undefined));
+  akousmataUi.search.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") refreshAkousmata(akousmataUi.search.value.trim() || undefined);
+  });
+  akousmataUi.modal?.querySelector("[data-close]")?.addEventListener("click", () => akousmataUi.modal.close());
+}
+
 /* ────────────────────────────── boot ────────────────────────────── */
 
 refreshHealth().finally(() => {
@@ -1288,6 +1391,7 @@ refreshHealth().finally(() => {
 });
 loadManifest();
 refreshMemory();
+refreshAkousmata();
 refreshMicDevices(false); // load input devices by default, no permission prompt
 connectStream();
 setInterval(refreshHealth, 20000);

@@ -2,6 +2,16 @@
 
 ## 0.2.0 - Unreleased
 
+- **Akousmata history embedded in the dashboard**: a new left-side
+  "Akousmata" section browses the shared store natively inside oída (search,
+  compact cards, and a detail modal with listenings, lineage, kinship, audio
+  playback, and the three germ buttons) — the same library the standalone
+  akousmata navigator (`github.com/sonicfieldlabs/akousmata`) serves, without
+  launching the external app. Backed by new optional `/akousmata/*` routes
+  (`oida/akousmata_view.py`) over py-akousma; card shapes stay compatible
+  with the navigator. Read-only by design: oída writes through its listen
+  flow and the germ bridge; edits belong to the navigator.
+
 - **Preset ids aligned with AKOÚŌ v0.6's portable vocabulary**:
   `environment`→`field`, `speech`→`voice`, `memory`→`recall` (with a
   `LEGACY_PRESET_ALIASES` map so saved configs, sessions, and older clients

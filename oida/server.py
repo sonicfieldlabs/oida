@@ -500,6 +500,14 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     except ImportError:
         pass  # akousma package not installed; oída still boots without the bridge
 
+    # Shared-store history view (the akousmata library, embedded); optional.
+    try:
+        from .akousmata_view import build_akousmata_router
+
+        app.include_router(build_akousmata_router())
+    except (ImportError, RuntimeError):
+        pass  # akousma package not installed; oída still boots without the view
+
     wildcard_bind = str(config.host) in {"0.0.0.0", "::", ""}
     if wildcard_bind and not config.auth_token:
         raise RuntimeError(
