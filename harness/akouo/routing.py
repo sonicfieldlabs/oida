@@ -31,7 +31,8 @@ COMMAND_ROUTES: dict[str, CommandRoute] = {
     "/method": CommandRoute("/method", ["acoulogical-object-listening", "critical-political-listening", "accessibility-normative-listening"], "none", "Sonic methodology and agent-handoff route."),
     "/route": CommandRoute("/route", ["acoulogical-object-listening"], "none", "Router-only handoff plan for another agent or app."),
     "/forensic": CommandRoute("/forensic", ["signal-inspection-listening", "forensic-archival-listening", "critical-political-listening"], "critical-political-listening", "Strict evidentiary route; paralinguistic speculation is suppressed."),
-    "/one-sound-many-ears": CommandRoute("/one-sound-many-ears", LISTENING_MODES, "undetermined", "Comparative flagship: all thirteen listening modes read one PerceptionReport."),
+    "/remember": CommandRoute("/remember", ["memory-lineage-listening", "acoulogical-object-listening", "signal-inspection-listening"], "none", "Memory route: compare against stored akousmata and register the listening."),
+    "/one-sound-many-ears": CommandRoute("/one-sound-many-ears", LISTENING_MODES, "undetermined", "Comparative flagship: all fourteen listening modes read one PerceptionReport."),
 }
 
 
@@ -74,6 +75,10 @@ def claim_permissions_for(evidence_level: str, command: str = "/listen") -> dict
         # route summary ("paralinguistic speculation is suppressed").
         interpreted = False
         speculative = False
+    if command == "/fiction":
+        # Declared fiction grants speculative permission by user intent (AKOÚŌ v0.6
+        # command_permission_overrides); evidence categories keep their ladder limits.
+        speculative = True
     return {
         "heard_allowed": heard,
         "measured_allowed": measured,

@@ -3,7 +3,7 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
-struct NativeAudioTapSnapshot {
+struct NativeAudioTapSnapshot: Sendable {
     let bands: [Double]
     let rms: Double
     let peak: Double
@@ -12,7 +12,7 @@ struct NativeAudioTapSnapshot {
     let updatedAt: Date
 }
 
-struct NativeSystemAudioCapture {
+struct NativeSystemAudioCapture: Sendable {
     let path: URL
     let durationSeconds: Double
     let sampleRate: Double
@@ -66,10 +66,10 @@ enum SystemAudioTapState: Equatable {
     }
 }
 
-final class SystemAudioTapManager: NSObject {
-    var onSnapshot: ((NativeAudioTapSnapshot) -> Void)?
-    var onStateChange: ((SystemAudioTapState) -> Void)?
-    var onRouteChange: ((NativeSystemAudioRoutePayload?) -> Void)?
+final class SystemAudioTapManager: NSObject, @unchecked Sendable {
+    var onSnapshot: (@MainActor @Sendable (NativeAudioTapSnapshot) -> Void)?
+    var onStateChange: (@MainActor @Sendable (SystemAudioTapState) -> Void)?
+    var onRouteChange: (@MainActor @Sendable (NativeSystemAudioRoutePayload?) -> Void)?
 
     private var stream: SCStream?
     private let captureQueue = DispatchQueue(label: "org.sonicfield.oida.system-audio-tap")
@@ -123,6 +123,7 @@ final class SystemAudioTapManager: NSObject {
         onStateChange?(.stopped)
     }
 
+    @MainActor
     func writeRecentAudio(seconds: Double, audioDirectory: URL = oidaAudioDirectory()) throws -> NativeSystemAudioCapture {
         guard isCapturing else { throw SystemAudioTapCaptureError.notCapturing }
         let sourceRoute = currentSourceRoute ?? fallbackDisplayMixRoute()
@@ -154,6 +155,7 @@ final class SystemAudioTapManager: NSObject {
     }
 
     @available(macOS 13.0, *)
+    @MainActor
     private func startScreenCaptureKit() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first else {
@@ -256,7 +258,7 @@ final class SystemAudioTapManager: NSObject {
             updatedAt: Date()
         )
 
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.onSnapshot?(snapshot)
         }
     }
@@ -409,7 +411,7 @@ extension SystemAudioTapManager: SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.isCapturing = false
             self?.stream = nil
             self?.onStateChange?(.failed(error.localizedDescription))

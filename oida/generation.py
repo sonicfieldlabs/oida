@@ -36,6 +36,7 @@ class GenerationStore:
         created_at = now_iso()
         raw_audio_policy = str(event.get("raw_audio_policy") or "external_ref")
         stored_event = redact_event_audio_for_policy(event, raw_audio_policy)
+        persistent = event.get("privacy_mode") != "incognito"
         prompt_text = str(prompt).strip() if prompt else _prompt_from_event(event, intent=intent, duration_s=duration_s)
         negative_text = str(negative_prompt).strip() if negative_prompt else _negative_prompt_from_event(event)
         record = {
@@ -43,6 +44,7 @@ class GenerationStore:
             "id": new_id("gen"),
             "created_at": created_at,
             "updated_at": created_at,
+            "persistent": persistent,
             "source_event_id": event.get("id"),
             "source_event": stored_event,
             "status": "adapter_required" if generate and adapter != "prompt_only" else "prompt_ready",
@@ -71,7 +73,8 @@ class GenerationStore:
                 "Audio generation is optional and delegated to a separate adapter.",
             ],
         }
-        self._write(record)
+        if persistent:
+            self._write(record)
         return record
 
     def list(self, *, limit: int | None = None) -> list[dict[str, Any]]:
@@ -102,9 +105,11 @@ class GenerationStore:
         output_path: str,
         generated_event: dict[str, Any],
         route_comparison: dict[str, Any] | None,
+        persist: bool = True,
     ) -> dict[str, Any]:
         record = self.get(generation_id)
         record["updated_at"] = now_iso()
+        record["persistent"] = persist
         record["status"] = "relistened"
         record["output_audio"] = {
             "kind": "path",
@@ -118,7 +123,8 @@ class GenerationStore:
             "route_comparison": route_comparison,
             "updated_at": record["updated_at"],
         }
-        self._write(record)
+        if persist:
+            self._write(record)
         return record
 
     def _write(self, record: dict[str, Any]) -> None:

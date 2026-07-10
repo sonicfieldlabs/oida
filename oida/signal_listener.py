@@ -62,7 +62,6 @@ def interpret_signal(dsp: dict[str, Any] | None) -> SignalReading:
     flatness = _num(features.get("spectralFlatness"))
     centroid = _num(features.get("spectralCentroidHz"))
     centroid_std = _num(features.get("spectralCentroidStdHz"))
-    rolloff = _num(features.get("spectralRolloffHz"))
     onset_density = _num(features.get("onsetDensityPerSec"))
     bpm = _num(features.get("bpmCandidate"))
     zcr = _num(features.get("zeroCrossingRate"))

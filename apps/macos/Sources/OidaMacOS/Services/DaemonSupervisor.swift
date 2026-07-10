@@ -17,6 +17,7 @@ enum DaemonSupervisorError: LocalizedError {
     }
 }
 
+@MainActor
 final class DaemonSupervisor {
     private var process: Process?
     private var outputPipe: Pipe?
@@ -58,14 +59,21 @@ final class DaemonSupervisor {
         proc.environment = mergedEnvironment()
 
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            self?.emitLines(from: handle.availableData)
+            let data = handle.availableData
+            Task { @MainActor [weak self] in
+                self?.emitLines(from: data)
+            }
         }
         errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            self?.emitLines(from: handle.availableData)
+            let data = handle.availableData
+            Task { @MainActor [weak self] in
+                self?.emitLines(from: data)
+            }
         }
         proc.terminationHandler = { [weak self] process in
-            DispatchQueue.main.async {
-                self?.onExit?(process.terminationStatus)
+            let status = process.terminationStatus
+            Task { @MainActor [weak self] in
+                self?.onExit?(status)
                 self?.cleanup()
             }
         }
@@ -105,10 +113,8 @@ final class DaemonSupervisor {
             .map(String.init)
             .filter { !$0.isEmpty }
         guard !lines.isEmpty else { return }
-        DispatchQueue.main.async { [weak self] in
-            for line in lines {
-                self?.onLogLine?(line)
-            }
+        for line in lines {
+            onLogLine?(line)
         }
     }
 

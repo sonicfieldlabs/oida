@@ -20,7 +20,7 @@ ListeningMode = Literal[
 ]
 
 
-AKOUO_CONTRACT_VERSION = "v0.5"
+AKOUO_CONTRACT_VERSION = "v0.6"
 AKOUO_PUBLIC_COMMANDS = [
     "/listen",
     "/full-ear",
@@ -38,6 +38,7 @@ AKOUO_PUBLIC_COMMANDS = [
     "/field",
     "/method",
     "/route",
+    "/remember",
 ]
 
 
@@ -283,8 +284,8 @@ PRESETS: list[RoutePreset] = [
         moss_passes=["caption"],
     ),
     RoutePreset(
-        id="environment",
-        name="Environment",
+        id="field",
+        name="Field",
         description="Soundscape/ecology listening for field recordings, rooms, infrastructure, and ambience.",
         skill_ids=["basic-listener", "soundscape-ecology", "material-gesture", "spectral-cartographer"],
         akouo_command="/field",
@@ -310,8 +311,8 @@ PRESETS: list[RoutePreset] = [
         moss_passes=["music", "caption"],
     ),
     RoutePreset(
-        id="speech",
-        name="Speech",
+        id="voice",
+        name="Voice",
         description="Transcript and speech route with identity caution.",
         skill_ids=["speech-route", "signal-health"],
         akouo_command="/voice",
@@ -319,11 +320,20 @@ PRESETS: list[RoutePreset] = [
         moss_passes=["transcribe", "speech"],
     ),
     RoutePreset(
-        id="memory",
-        name="Memory",
-        description="Basic listening plus local Akousmata comparison.",
+        id="recall",
+        name="Recall",
+        description="Basic listening plus local Akousmata comparison, read-only (AKOÚŌ v0.6 'recall').",
         skill_ids=["basic-listener", "comparative-memory", "spectral-cartographer"],
         akouo_command="/listen",
+        direct_moss_modes=["environment"],
+        moss_passes=["caption"],
+    ),
+    RoutePreset(
+        id="remember",
+        name="Remember",
+        description="Memory route (AKOÚŌ v0.6 /remember): compare against stored akousmata and register the listening into the store.",
+        skill_ids=["basic-listener", "comparative-memory", "spectral-cartographer"],
+        akouo_command="/remember",
         direct_moss_modes=["environment"],
         moss_passes=["caption"],
     ),
@@ -367,7 +377,17 @@ def skill_manifest(skill_id: str) -> ListeningSkillManifest:
     raise ValueError(f"unknown listening skill: {skill_id}. Valid skills: {valid}")
 
 
+# Pre-v0.6 preset ids, kept as aliases so saved configs, sessions, and older
+# clients keep resolving after the upstream-aligned rename.
+LEGACY_PRESET_ALIASES = {
+    "environment": "field",
+    "speech": "voice",
+    "memory": "recall",
+}
+
+
 def route_preset(preset_id: str) -> RoutePreset:
+    preset_id = LEGACY_PRESET_ALIASES.get(preset_id, preset_id)
     for preset in PRESETS:
         if preset.id == preset_id:
             return preset
@@ -429,7 +449,7 @@ def validate_akouo_manifest() -> list[str]:
 def akouo_manifest() -> dict[str, Any]:
     errors = validate_akouo_manifest()
     return {
-        "version": "0.5-oida.1",
+        "version": "0.6-oida.1",
         "akouo_contract_version": AKOUO_CONTRACT_VERSION,
         "schema_version": "0.1",
         "public_commands": AKOUO_PUBLIC_COMMANDS,
@@ -441,6 +461,7 @@ def akouo_manifest() -> dict[str, Any]:
         "errors": errors,
         "skills": [to_dict(skill) for skill in SKILLS],
         "route_presets": [to_dict(preset) for preset in PRESETS],
+        "preset_aliases": dict(LEGACY_PRESET_ALIASES),
     }
 
 

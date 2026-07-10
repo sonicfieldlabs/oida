@@ -13,6 +13,7 @@ Requires the ``akousma`` package (earworm/packages/py-akousma).
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 from urllib.parse import urlencode
 
@@ -60,6 +61,49 @@ def _origin_to_source_type(origin: str) -> str:
     }.get(origin, "unknown")
 
 
+AKOUO_CONTRACT = "akouo/v0.6"
+
+
+def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
+    """Wrap raw producer payloads in the akousma spec v1.1 listening envelope
+    (``{contract?, created_at, summary?, payload}``). Entries already enveloped
+    pass through untouched; akouo.* entries get the contract pin."""
+    wrapped: dict[str, Any] = {}
+    for namespace, value in (listening or {}).items():
+        if isinstance(value, dict) and "payload" in value and set(value) <= {"contract", "created_at", "summary", "payload"}:
+            wrapped[namespace] = value
+            continue
+        entry: dict[str, Any] = {
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "payload": value,
+        }
+        if namespace.startswith("akouo."):
+            entry["contract"] = AKOUO_CONTRACT
+        if isinstance(value, dict):
+            for key in ("summary", "caption", "brief", "main_reading"):
+                text = value.get(key)
+                if isinstance(text, str) and text.strip():
+                    entry["summary"] = text.strip()
+                    break
+        wrapped[namespace] = entry
+    return wrapped
+
+
+def _derive_summary(listening: dict[str, Any]) -> str | None:
+    """Skimmable one-liner for the record, preferring oída's own signal caption."""
+    for namespace in ("oida.signal", "oida.moss", "akouo.describe"):
+        entry = listening.get(namespace)
+        if isinstance(entry, dict):
+            if isinstance(entry.get("summary"), str) and entry["summary"].strip():
+                return entry["summary"].strip()
+            payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else entry
+            for key in ("caption", "brief", "summary", "main_reading"):
+                text = payload.get(key) if isinstance(payload, dict) else None
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
+    return None
+
+
 def build_akousma_from_listen(
     *,
     audio: dict[str, Any],
@@ -68,26 +112,53 @@ def build_akousma_from_listen(
     device: str | None = None,
     session_id: str | None = None,
     tags: list[str] | None = None,
+    summary: str | None = None,
 ) -> dict[str, Any]:
     """Build a valid akousma record from an oída listen result.
 
     ``audio`` needs at least ``asset_id`` (and ideally ``uri``/``content_hash``/duration).
-    ``listening`` is namespaced per producer, e.g. ``{"oida.signal": {...}, "akouo.describe": {...}}``.
+    ``listening`` is namespaced per producer, e.g. ``{"oida.signal": {...}, "akouo.describe": {...}}``;
+    entries are wrapped in the spec v1.1 envelope with akouo.* entries pinned to the
+    ``akouo/v0.6`` contract.
     """
     origin = _normalize_origin(origin)
+    enveloped = _envelope_listening(listening or {})
     record = akousma.new_akousma(
         audio=audio,
         originating_app="oida",
         source_type=_origin_to_source_type(origin),
         origin=origin,
-        listening=listening or {},
+        listening=enveloped,
         operation="listen",
         tags=tags,
         session_id=session_id,
+        summary=summary or _derive_summary(enveloped),
     )
     if device:
         record["provenance"]["device"] = device
     return record
+
+
+def _maybe_link_recurrence(record: dict[str, Any], store: "akousma.AkousmataStore") -> None:
+    """When the same audio content already lives in the store, link the new record
+    to the most recent holder as ``same_source_as`` (spec v1.1 relations). Best-effort:
+    registration must never fail because kinship lookup did."""
+    try:
+        content_hash = str(record.get("audio", {}).get("content_hash") or "")
+        if not content_hash or not hasattr(store, "find_by_hash"):
+            return
+        matches = [r for r in store.find_by_hash(content_hash) if r.get("akousma_id") != record.get("akousma_id")]
+        if not matches:
+            return
+        newest = matches[0]
+        relations = record.setdefault("lineage", {}).setdefault("relations", [])
+        if any(rel.get("target_akousma_id") == newest["akousma_id"] for rel in relations):
+            return
+        relations.append(
+            akousma.relation("same_source_as", newest["akousma_id"], note="Same audio content hash already in the akousmata.")
+        )
+    except Exception:
+        pass
 
 
 def _maybe_enrich_songid(record: dict[str, Any], audio: dict[str, Any]) -> None:
@@ -122,6 +193,7 @@ def handoff_to_germ(
     owns_store = store is None
     store = store or akousma.AkousmataStore()
     try:
+        _maybe_link_recurrence(record, store)
         akousma_id = store.put(record)
     finally:
         if owns_store:
@@ -148,6 +220,7 @@ def build_germ_router():
         device: str | None = None
         session_id: str | None = None
         tags: list[str] | None = None
+        summary: str | None = None
 
     router = APIRouter(prefix="/germ", tags=["germ"])
 
@@ -161,6 +234,7 @@ def build_germ_router():
                 device=req.device,
                 session_id=req.session_id,
                 tags=req.tags,
+                summary=req.summary,
             )
             _maybe_enrich_songid(record, req.audio)
             return handoff_to_germ(record, req.mode)

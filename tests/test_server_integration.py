@@ -65,6 +65,12 @@ class ServerSecurityTests(unittest.TestCase):
         response = _client().post("/listen-event", json={"path": "/no/such/file.wav"})
         self.assertEqual(response.status_code, 400)
 
+    def test_report_rejects_directory_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            response = _client().post("/report", json={"path": tmp})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("not a file", response.json()["detail"])
+
     def test_path_endpoints_missing_path_return_400(self) -> None:
         client = _client()
         for endpoint, payload in [
@@ -154,6 +160,65 @@ class ServerSecurityTests(unittest.TestCase):
             response = _client().post("/report", json={"path": str(path)})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["version"], "0.1")
+
+    def test_listen_event_preserves_microphone_source_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+            clear=False,
+        ):
+            path = _write_tone(Path(tmp) / "mic.wav")
+            response = TestClient(
+                create_app(profile="stub"), base_url="http://127.0.0.1"
+            ).post(
+                "/listen-event",
+                json={
+                    "path": str(path),
+                    "source_type": "live_input",
+                    "source_label": "Microphone · USB interface",
+                    "device_id": "input-1",
+                    "privacy_mode": "ephemeral",
+                    "raw_audio_policy": "temp",
+                },
+            )
+
+        event = response.json()["listening_event"]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(event["source"]["type"], "live_input")
+        self.assertEqual(event["source"]["device_id"], "input-1")
+        self.assertEqual(event["raw_audio_policy"], "temp")
+        self.assertTrue(event["segment"]["ephemeral"])
+
+    def test_generation_relisten_honors_signal_preset_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+            clear=False,
+        ):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            source_event = {
+                "id": "evt_source",
+                "source": {"type": "file", "label": "source.wav"},
+                "segment": {"duration_ms": 1000, "data_ref": {"kind": "path", "uri": "source.wav"}},
+                "aggregate": {"title": "Source", "short_summary": "A source sound."},
+                "routes": [],
+                "features": {},
+                "privacy_mode": "session",
+                "raw_audio_policy": "external_ref",
+            }
+            generation = client.post("/generation/prompt", json={"event": source_event}).json()
+            output = _write_tone(Path(tmp) / "generated.wav")
+            response = client.post(
+                "/generation/relisten",
+                json={
+                    "generation_id": generation["id"],
+                    "path": str(output),
+                    "route_preset": "signal",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["perception_report"]["moss_passes"], [])
 
     def test_qa_forbidden_topic_short_circuits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

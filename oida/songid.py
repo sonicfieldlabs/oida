@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 
 def songid_enabled(explicit: bool | None = None) -> bool:

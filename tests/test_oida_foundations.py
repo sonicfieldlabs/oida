@@ -426,6 +426,34 @@ class OidaFoundationTests(unittest.TestCase):
         self.assertEqual(attached["relisten"]["listening_event"]["id"], "evt_generated")
         self.assertEqual(len(listed), 2)
 
+    def test_incognito_conversation_and_generation_are_not_persisted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            conversations = ConversationStore(root=Path(tmp) / "conversations")
+            generations = GenerationStore(root=Path(tmp) / "generations")
+            memory = AkousmataStore(root=Path(tmp) / "akousmata")
+            event = {
+                "id": "evt_incognito",
+                "source": {"type": "live_input", "label": "Private microphone"},
+                "segment": {"duration_ms": 1000, "data_ref": {"kind": "path", "uri": "/tmp/private.wav"}},
+                "aggregate": {"title": "Private", "short_summary": "An incognito event."},
+                "routes": [],
+                "features": {"duration_s": 1.0},
+                "privacy_mode": "incognito",
+                "raw_audio_policy": "temp",
+            }
+
+            conversation = conversations.ask(
+                event=event,
+                question="What happened?",
+                memory=memory,
+            )
+            generation = generations.create_prompt(event)
+
+            self.assertFalse(conversation["persistent"])
+            self.assertFalse(generation["persistent"])
+            self.assertEqual(list((Path(tmp) / "conversations").glob("*.json")), [])
+            self.assertEqual(generations.list(), [])
+
     def test_background_runtime_persists_config_and_tracks_live_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "background.json"
@@ -449,7 +477,9 @@ class OidaFoundationTests(unittest.TestCase):
                 "default_route_preset": "not-a-route",
                 "floating_agent": {"size": "huge", "x": "nan"},
                 "recent_history": {"max_events": 999},
-                "upload_audio_retention": {"policy": "bad", "max_files": -1},
+                "upload_audio_retention": {"policy": "bad", "max_files": -1, "delete_after_days": float("nan")},
+                "paused": "false",
+                "native_temp_audio_retention": {"delete_after_analysis": "false"},
             })
             restored = BackgroundRuntime(config_path=config_path)
 
@@ -459,6 +489,20 @@ class OidaFoundationTests(unittest.TestCase):
         self.assertIsNone(restored.config.floating_agent["x"])
         self.assertEqual(restored.config.recent_history["max_events"], 50)
         self.assertEqual(restored.config.upload_audio_retention["policy"], "keep")
+        self.assertEqual(restored.config.upload_audio_retention["delete_after_days"], 7.0)
+        self.assertFalse(restored.config.paused)
+        self.assertFalse(restored.config.native_temp_audio_retention["delete_after_analysis"])
+
+    def test_background_capture_request_cancel_is_distinct_from_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = BackgroundRuntime(config_path=Path(tmp) / "background.json")
+            request = runtime.request_capture(seconds=4, route_preset="signal")
+            cancelled = runtime.cancel_capture_request(request["id"])
+
+        self.assertIsNotNone(cancelled)
+        assert cancelled is not None
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertIsNone(runtime.claim_capture_request(request["id"]))
 
     def test_akouo_evidence_level_reflects_unavailable_model(self) -> None:
         report = {

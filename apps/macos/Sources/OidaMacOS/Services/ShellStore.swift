@@ -287,6 +287,12 @@ final class ShellStore: ObservableObject {
         let loaded = (manifest.routePresets ?? []).filter { $0.enabledByDefault != false }
         if !loaded.isEmpty {
             presets = loaded
+            // Pre-v0.6 preset ids saved in UserDefaults follow the rename instead of
+            // resetting to the first preset (mirrors the daemon's LEGACY_PRESET_ALIASES).
+            let legacyAliases = ["environment": "field", "speech": "voice", "memory": "recall"]
+            if let renamed = legacyAliases[selectedPreset], loaded.contains(where: { $0.id == renamed }) {
+                selectedPreset = renamed
+            }
             if !loaded.contains(where: { $0.id == selectedPreset }) {
                 selectedPreset = loaded.first?.id ?? "basic"
             }
@@ -346,7 +352,12 @@ final class ShellStore: ObservableObject {
             claimedCaptureRequestIds.removeAll()
             claimedCaptureRequestIds.insert(request.id)
         }
-        guard let claim = try? await client.claimCaptureRequest(id: request.id), claim.claimed else { return }
+        guard let claim = try? await client.claimCaptureRequest(id: request.id), claim.claimed else {
+            // A transient daemon/network error must not poison this request ID;
+            // the next poll should be allowed to retry the atomic claim.
+            claimedCaptureRequestIds.remove(request.id)
+            return
+        }
         let seconds = request.seconds
         let preset = request.routePreset
         Task { @MainActor [weak self] in
@@ -417,7 +428,14 @@ final class ShellStore: ObservableObject {
         guard !Task.isCancelled else { return }
         do {
             let output = try micTap.writeRecentAudio(seconds: captureSeconds)
-            let response = try await client.listenEvent(path: output.path, routePreset: preset ?? defaultRoutePreset)
+            let response = try await client.listenEvent(
+                path: output.path,
+                routePreset: preset ?? defaultRoutePreset,
+                sourceType: "live_input",
+                sourceLabel: "Native microphone",
+                privacyMode: "ephemeral",
+                rawAudioPolicy: "temp"
+            )
             latestRouteComparison = nil
             latestEvent = response.listeningEvent ?? latestEvent
             resetConversation()

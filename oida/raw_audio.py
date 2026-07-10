@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -217,7 +218,7 @@ def _positive_float(value: Any, fallback: float) -> float:
         parsed = float(value)
     except (TypeError, ValueError):
         return float(fallback)
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         return float(fallback)
     return parsed
 

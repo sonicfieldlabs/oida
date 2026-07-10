@@ -2,6 +2,31 @@
 
 ## 0.2.0 - Unreleased
 
+- **Preset ids aligned with AKOÚŌ v0.6's portable vocabulary**:
+  `environment`→`field`, `speech`→`voice`, `memory`→`recall` (with a
+  `LEGACY_PRESET_ALIASES` map so saved configs, sessions, and older clients
+  keep resolving; the manifest exposes `preset_aliases`). oída's preset id set
+  is now a strict subset of the upstream `presets/presets.json` vocabulary,
+  enforced by a test.
+- **AKOÚŌ v0.6 contract adopted** (`akouo_contract_version: v0.6`): new
+  `/remember` command with a `remember` route preset (memory comparison plus
+  registration into the akousmata) alongside the read-only `memory` preset;
+  `memory-lineage-listening` added to the harness mode set; `/fiction` now
+  grants declared speculative permission and `/forensic` keeps its
+  interpreted/speculative suppression, both matching the published
+  `command_permission_overrides`. Listening outputs now carry `akouo_version`,
+  an `apparatus` declaration (hybrid MOSS+DSP substrate, perception sources,
+  known blind spots, model ids), and a `listener` block; claims carry `source`
+  (`dsp` / `model` / `context`) and, for events, `time_range` anchors. A new
+  `harness/akouo/manifest.py` loads the upstream machine-readable contract
+  (`akouo.manifest.json` + `presets/presets.json`) and the test suite includes
+  a drift check so the harness fallback tables cannot silently diverge.
+- **Earworm v0.2 / akousma spec v1.1 adopted in the bridge**: listen records
+  now carry a skimmable `summary`, listening entries are wrapped in the v1.1
+  envelope (`contract`/`created_at`/`summary`/`payload`, with `akouo.*` entries
+  pinned to `akouo/v0.6`), and registration links recurrences — when the same
+  audio content hash already exists in the store, the new record gets a
+  `same_source_as` relation to the most recent holder.
 - **Floating listener redesigned**: the macOS floating listener is no longer a
   window. It is a borderless, transparent, non-activating panel whose visible
   body is the listening-result box itself — the reading is always shown, with a

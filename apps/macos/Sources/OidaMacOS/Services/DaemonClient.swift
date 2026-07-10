@@ -154,8 +154,25 @@ struct DaemonClient {
         try await post("/background/capture-request/claim", payload: CaptureRequestClaimPayload(id: id))
     }
 
-    func listenEvent(path: String, routePreset: String) async throws -> ListenEventResponse {
-        try await post("/listen-event", payload: ListenEventPayload(path: path, routePreset: routePreset))
+    func listenEvent(
+        path: String,
+        routePreset: String,
+        sourceType: String? = nil,
+        sourceLabel: String? = nil,
+        deviceId: String? = nil,
+        privacyMode: String? = nil,
+        rawAudioPolicy: String? = nil
+    ) async throws -> ListenEventResponse {
+        let payload = ListenEventPayload(
+            path: path,
+            routePreset: routePreset,
+            sourceType: sourceType,
+            sourceLabel: sourceLabel,
+            deviceId: deviceId,
+            privacyMode: privacyMode,
+            rawAudioPolicy: rawAudioPolicy
+        )
+        return try await post("/listen-event", payload: payload)
     }
 
     func akouoSkills() async throws -> AkouoSkillsResponse {

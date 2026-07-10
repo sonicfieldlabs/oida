@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -244,7 +245,22 @@ class BackgroundRuntime:
             return None
         self.state.capture_request = None
         self.state.updated_at = now_iso()
-        return {key: value for key, value in request.items() if key != "requested_monotonic"}
+        claimed = {key: value for key, value in request.items() if key != "requested_monotonic"}
+        claimed["status"] = "claimed"
+        return claimed
+
+    @_synchronized
+    def cancel_capture_request(self, request_id: str | None = None) -> dict[str, Any] | None:
+        request = self._live_capture_request()
+        if request is None:
+            return None
+        if request_id and request.get("id") != request_id:
+            return None
+        self.state.capture_request = None
+        self.state.updated_at = now_iso()
+        cancelled = {key: value for key, value in request.items() if key != "requested_monotonic"}
+        cancelled["status"] = "cancelled"
+        return cancelled
 
     def _live_capture_request(self) -> dict[str, Any] | None:
         request = self.state.capture_request
@@ -646,9 +662,11 @@ def normalize_recent_history_config(value: Any) -> dict[str, Any]:
         normalized["max_pinned"] = max(1, min(25, int(normalized["max_pinned"])))
     except (TypeError, ValueError):
         normalized["max_pinned"] = default["max_pinned"]
-    normalized["enabled"] = bool(normalized["enabled"])
-    normalized["persist"] = bool(normalized["persist"])
-    normalized["include_incognito"] = bool(normalized["include_incognito"])
+    normalized["enabled"] = _coerce_bool(normalized["enabled"], default["enabled"])
+    normalized["persist"] = _coerce_bool(normalized["persist"], default["persist"])
+    normalized["include_incognito"] = _coerce_bool(
+        normalized["include_incognito"], default["include_incognito"]
+    )
     return normalized
 
 
@@ -660,7 +678,7 @@ def normalize_background_config_data(value: dict[str, Any]) -> dict[str, Any]:
             data[key] = value[key]
 
     for key in ("enabled", "paused", "launch_at_login", "show_floating_agent", "incognito", "save_events_by_default"):
-        data[key] = bool(data.get(key))
+        data[key] = _coerce_bool(data.get(key), default[key])
 
     data["floating_agent"] = normalize_floating_agent_config(data.get("floating_agent"))
     data["default_capture_seconds"] = _bounded_float(data.get("default_capture_seconds"), 10.0, 0.25, 600.0)
@@ -687,10 +705,10 @@ def normalize_floating_agent_config(value: Any) -> dict[str, Any]:
     for key in data:
         if key in value:
             data[key] = value[key]
-    data["visible"] = bool(data["visible"])
+    data["visible"] = _coerce_bool(data["visible"], default["visible"])
     data["size"] = "medium" if data.get("size") == "medium" else "compact"
-    data["pinned"] = bool(data["pinned"])
-    data["reduced_motion"] = bool(data["reduced_motion"])
+    data["pinned"] = _coerce_bool(data["pinned"], default["pinned"])
+    data["reduced_motion"] = _coerce_bool(data["reduced_motion"], default["reduced_motion"])
     data["x"] = _optional_finite_float(data.get("x"))
     data["y"] = _optional_finite_float(data.get("y"))
     return data
@@ -726,9 +744,23 @@ def _bounded_float(value: Any, fallback: float, minimum: float, maximum: float) 
         parsed = float(value)
     except (TypeError, ValueError):
         return fallback
-    if parsed < minimum or parsed > maximum:
+    if not math.isfinite(parsed) or parsed < minimum or parsed > maximum:
         return fallback
     return parsed
+
+
+def _coerce_bool(value: Any, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return fallback
 
 
 def _optional_finite_float(value: Any) -> float | None:

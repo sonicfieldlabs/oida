@@ -85,10 +85,20 @@ struct AkouoSkillsResponse: Codable {
 struct ListenEventPayload: Codable {
     let path: String
     let routePreset: String
+    let sourceType: String?
+    let sourceLabel: String?
+    let deviceId: String?
+    let privacyMode: String?
+    let rawAudioPolicy: String?
 
     enum CodingKeys: String, CodingKey {
         case path
         case routePreset = "route_preset"
+        case sourceType = "source_type"
+        case sourceLabel = "source_label"
+        case deviceId = "device_id"
+        case privacyMode = "privacy_mode"
+        case rawAudioPolicy = "raw_audio_policy"
     }
 }
 
@@ -417,6 +427,7 @@ struct ConversationAskResponse: Codable {
     let conversationId: String?
     let eventId: String?
     let rawAudioPolicy: String?
+    let persistent: Bool?
     let forbiddenTopicsTriggered: [String]?
     let turn: ConversationTurn?
 
@@ -426,6 +437,7 @@ struct ConversationAskResponse: Codable {
         case conversationId = "conversation_id"
         case eventId = "event_id"
         case rawAudioPolicy = "raw_audio_policy"
+        case persistent
         case forbiddenTopicsTriggered = "forbidden_topics_triggered"
         case turn
     }
@@ -492,6 +504,7 @@ struct GenerationRecord: Codable, Identifiable {
     let id: String
     let createdAt: String?
     let updatedAt: String?
+    let persistent: Bool?
     let sourceEventId: String?
     let status: String?
     let adapter: String?
@@ -506,6 +519,7 @@ struct GenerationRecord: Codable, Identifiable {
         case id
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case persistent
         case sourceEventId = "source_event_id"
         case status
         case adapter
@@ -1004,7 +1018,7 @@ struct NativeSystemAudioAnalyzePayload: Codable {
     }
 }
 
-struct NativeSystemAudioRoutePayload: Codable {
+struct NativeSystemAudioRoutePayload: Codable, Sendable {
     let routeId: String
     let captureScope: String
     let adapter: String

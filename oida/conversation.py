@@ -36,7 +36,10 @@ class ConversationStore:
 
         raw_audio_policy = str(event.get("raw_audio_policy") or "external_ref")
         stored_event = redact_event_audio_for_policy(event, raw_audio_policy)
-        conversation = self._load_or_create(conversation_id, stored_event)
+        persistent = event.get("privacy_mode") != "incognito"
+        # Incognito turns remain usable in the immediate response but must not be
+        # appended to an existing durable conversation or written as a new one.
+        conversation = self._load_or_create(conversation_id if persistent else None, stored_event)
         similar = memory.similar_to_event(event, limit=3) if include_memory else []
         turn = _build_turn(
             event=event,
@@ -56,12 +59,14 @@ class ConversationStore:
                 "turns": turns[-50:],
             }
         )
-        self._write(conversation)
+        if persistent:
+            self._write(conversation)
         return {
             "version": "0.1",
             "mode": "event_grounded_conversation",
             "conversation_id": conversation["id"],
             "event_id": event.get("id"),
+            "persistent": persistent,
             "raw_audio_policy": "Conversation stores derived event JSON and turn text only; raw audio is not copied.",
             "turn": turn,
             "conversation": {

@@ -4,8 +4,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-_SEGMENT_PREFIX_RE = re.compile(r"^Segment \d+ \[[0-9.]+-[0-9.]+s\]:\s*")
-
 from oida.akouo_skills import RoutePreset, resolve_route_skill_ids, route_preset, skill_manifest
 from oida.contracts import (
     AkousmataLinks,
@@ -25,6 +23,8 @@ from oida.contracts import (
     now_iso,
     to_dict,
 )
+
+_SEGMENT_PREFIX_RE = re.compile(r"^Segment \d+ \[[0-9.]+-[0-9.]+s\]:\s*")
 
 
 def listening_event_from_report(
@@ -65,11 +65,11 @@ def listening_event_from_report(
                 summary=_summary_from_report(report),
                 structured={"perception_report": report, "route_preset": preset.id},
                 uncertainty=_uncertainty(report),
-                suggested_next_routes=_suggested_next_routes(route_preset_id),
+                suggested_next_routes=_suggested_next_routes(preset.id),
             )
         ]
 
-    aggregate = _aggregate(report, command_output or {}, route_preset_id)
+    aggregate = _aggregate(report, command_output or {}, preset.id)
     features = _features(report)
     tags = _tags(report, aggregate.primary_tags)
     artifacts = []
@@ -220,9 +220,9 @@ def _aggregate(report: dict[str, Any], command_output: dict[str, Any], route_pre
         signal_facts=signal_facts,
         warnings=_dedupe(warnings),
         next_actions=[
-            ListeningNextAction(id="run_environment", label="Run environment route", route_preset="environment"),
+            ListeningNextAction(id="run_field", label="Run field route", route_preset="field"),
             ListeningNextAction(id="run_signal", label="Run signal route", route_preset="signal"),
-            ListeningNextAction(id="remember", label="Remember this sound", route_preset=route_preset_id),
+            ListeningNextAction(id="remember", label="Remember this sound", route_preset="remember"),
         ],
     )
 
@@ -381,7 +381,7 @@ def _uncertainty(report: dict[str, Any]) -> list[str]:
 
 
 def _suggested_next_routes(current: str | None) -> list[str]:
-    routes = ["environment", "signal", "music", "speech", "memory"]
+    routes = ["field", "signal", "music", "voice", "recall"]
     return [route for route in routes if route != current][:4]
 
 

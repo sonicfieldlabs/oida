@@ -25,9 +25,15 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised only without deps
     FastAPI = None  # type: ignore[assignment]
     HTTPException = RuntimeError  # type: ignore[assignment]
-    Form = lambda default=None, **_: default  # type: ignore[assignment]
+
+    def Form(default=None, **_):  # type: ignore[no-redef]
+        return default
+
     BaseModel = object  # type: ignore[assignment,misc]
-    Field = lambda default=None, **_: default  # type: ignore[assignment]
+
+    def Field(default=None, **_):  # type: ignore[no-redef]
+        return default
+
     FASTAPI_IMPORT_ERROR = exc
 else:
     FASTAPI_IMPORT_ERROR = None
@@ -37,7 +43,7 @@ from oida.acoustic_system import acoustic_system_manifest
 from oida.akouo_skills import akouo_manifest, route_preset
 from oida.background import BackgroundRuntime
 from oida.conversation import ConversationStore
-from oida.contracts import AudioSegment, AudioSourceDescriptor, PrivacyMode, RawAudioPolicy, audio_segment_from_path, source_for_path, to_dict
+from oida.contracts import AudioSegment, AudioSourceDescriptor, PrivacyMode, RawAudioPolicy, SourceType, audio_segment_from_path, source_for_path
 from oida.engine import build_engine
 from oida.generation import GenerationStore
 from oida.listening import listening_event_dict
@@ -209,6 +215,10 @@ class ListenEventRequest(PathRequest):
     enabled_skill_ids: list[str] | None = None
     disabled_skill_ids: list[str] | None = None
     privacy_mode: str = "session"
+    source_type: str = "file"
+    source_label: str | None = None
+    device_id: str | None = None
+    raw_audio_policy: str | None = None
 
 
 class ListenEventRerunRequest(BaseModel):  # type: ignore[misc,valid-type]
@@ -411,48 +421,54 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         "detail": "stub profile produces no model perception; DSP still listens" if config.profile == "stub" else None,
         "warmed_ms": None,
     }
+    engine_monitor_lock = threading.RLock()
     weights_root = REPO_ROOT / "weights"
     available_models = scan_moss_models(weights_root)
 
     def engine_status() -> dict[str, Any]:
         runtime = engine.runtime_status()
-        if config.profile == "mac-mps" and runtime.get("loaded_models"):
-            engine_monitor["state"] = "ready"
-        assignments = runtime.get("assignments") or {}
-        return {
-            "profile": config.profile,
-            "state": engine_monitor["state"],
-            "detail": engine_monitor["detail"],
-            "warmed_ms": engine_monitor["warmed_ms"],
-            "loaded_models": runtime.get("loaded_models", []),
-            "device": runtime.get("device"),
-            "prewarm": config.prewarm,
-            "chunk_seconds": config.moss_chunk_seconds,
-            "instruct_model": assignments.get("instruct") or (Path(config.instruct_model).name if config.instruct_model else None),
-            "thinking_model": assignments.get("thinking") or (Path(config.thinking_model).name if config.thinking_model else None),
-            "available_models": available_models,
-        }
+        with engine_monitor_lock:
+            if config.profile == "mac-mps" and runtime.get("loaded_models"):
+                engine_monitor["state"] = "ready"
+            assignments = runtime.get("assignments") or {}
+            return {
+                "profile": config.profile,
+                "state": engine_monitor["state"],
+                "detail": engine_monitor["detail"],
+                "warmed_ms": engine_monitor["warmed_ms"],
+                "loaded_models": runtime.get("loaded_models", []),
+                "device": runtime.get("device"),
+                "prewarm": config.prewarm,
+                "chunk_seconds": config.moss_chunk_seconds,
+                "instruct_model": assignments.get("instruct") or (Path(config.instruct_model).name if config.instruct_model else None),
+                "thinking_model": assignments.get("thinking") or (Path(config.thinking_model).name if config.thinking_model else None),
+                "available_models": available_models,
+            }
 
     def _prewarm_engine(model_kind: str = "instruct") -> None:
-        engine_monitor["state"] = "warming"
-        engine_monitor["detail"] = None
+        with engine_monitor_lock:
+            engine_monitor["state"] = "warming"
+            engine_monitor["detail"] = None
         broadcaster.publish("engine", engine_status())
         started = time.perf_counter()
         try:
             engine.prewarm(model_kind)
-            engine_monitor["state"] = "ready"
-            engine_monitor["warmed_ms"] = round((time.perf_counter() - started) * 1000)
+            with engine_monitor_lock:
+                engine_monitor["state"] = "ready"
+                engine_monitor["warmed_ms"] = round((time.perf_counter() - started) * 1000)
         except Exception as exc:
-            engine_monitor["state"] = "degraded"
-            engine_monitor["detail"] = str(exc)
+            with engine_monitor_lock:
+                engine_monitor["state"] = "degraded"
+                engine_monitor["detail"] = str(exc)
         broadcaster.publish("engine", engine_status())
 
     def start_prewarm(model_kind: str = "instruct") -> bool:
-        if config.profile != "mac-mps" or engine_monitor["state"] == "warming":
-            return False
-        # claim the warming state before spawning so two rapid /engine/warm
-        # calls cannot race two prewarm threads
-        engine_monitor["state"] = "warming"
+        with engine_monitor_lock:
+            if config.profile != "mac-mps" or engine_monitor["state"] == "warming":
+                return False
+            # Claim the warming state atomically: sync FastAPI handlers may run
+            # on different worker threads.
+            engine_monitor["state"] = "warming"
         threading.Thread(target=_prewarm_engine, args=(model_kind,), name="oida-moss-prewarm", daemon=True).start()
         return True
 
@@ -465,12 +481,12 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         # Honor the default delete_after_session native-temp retention policy on shutdown.
         try:
             finalize_native_temp_audio_session(background.config.native_temp_audio_retention)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.warning("native temp-audio shutdown cleanup failed: %s", exc)
         try:
             finalize_upload_audio_session(background.config.upload_audio_retention)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.warning("upload-audio shutdown cleanup failed: %s", exc)
 
     app = FastAPI(title="oida", version="0.1.0", lifespan=lifespan)
     static_dir = Path(__file__).resolve().parent / "static"
@@ -787,7 +803,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
     @app.post("/background/capture-request/cancel")
     def background_capture_request_cancel_endpoint(req: CaptureRequestClaimBody) -> dict[str, object]:
-        request = background.claim_capture_request(req.id)
+        request = background.cancel_capture_request(req.id)
         if request:
             broadcaster.publish("capture_cancelled", request)
         return {"cancelled": bool(request), "capture_request": request}
@@ -949,18 +965,40 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     def listen_event_endpoint(req: ListenEventRequest) -> dict[str, object]:
         try:
             preset = route_preset(req.route_preset)
-            broadcaster.publish("listen_started", {"path": req.path, "route_preset": preset.id, "source": "file"})
-            perception = report(engine, req.path, "oida", passes=preset.moss_passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
+            path = _require_existing_path(req.path)
+            privacy_mode = _privacy_mode(req.privacy_mode)
+            source_type = _audio_source_type(req.source_type)
+            raw_audio_policy = _raw_audio_policy(
+                req.raw_audio_policy or ("temp" if source_type in {"live_input", "system_output", "buffer"} else "external_ref")
+            )
+            segment = audio_segment_from_path(
+                path,
+                source=source_for_path(
+                    path,
+                    source_type=source_type,
+                    label=req.source_label,
+                    device_id=req.device_id,
+                ),
+                privacy_mode=privacy_mode,
+                ephemeral=raw_audio_policy in {"temp", "not_stored"},
+                metadata={"raw_audio_policy": raw_audio_policy},
+            )
+            broadcaster.publish(
+                "listen_started",
+                {"path": str(path), "route_preset": preset.id, "source": source_type},
+            )
+            perception = report(engine, str(path), "oida", passes=preset.moss_passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
             perception_dict = report_to_dict(perception)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
             event = listening_event_dict(
                 perception_dict,
                 command_output=command_output,
+                segment=segment,
                 route_preset_id=preset.id,
                 enabled_skill_ids=req.enabled_skill_ids,
                 disabled_skill_ids=req.disabled_skill_ids,
-                privacy_mode=_privacy_mode(req.privacy_mode),
-                raw_audio_policy="external_ref",
+                privacy_mode=privacy_mode,
+                raw_audio_policy=raw_audio_policy,
             )
             event = memory.enrich_event(event)
             background.finish_action(event)
@@ -1028,9 +1066,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     def native_system_audio_analyze_endpoint(req: NativeSystemAudioAnalyzeRequest) -> dict[str, object]:
         try:
             preset = route_preset(req.route_preset)
-            path = Path(req.path).expanduser().resolve()
-            if not path.exists():
-                raise ValueError(f"native system-audio temp file does not exist: {path}")
+            path = _require_existing_path(req.path)
             source_route = normalize_system_audio_source_route(req.source_route)
             source_label = system_audio_source_label(req.source_label, source_route)
             source = source_for_path(
@@ -1363,11 +1399,16 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         try:
             generation = generations.get(req.generation_id)
             preset = route_preset(req.route_preset)
-            output_path = Path(req.path).expanduser().resolve()
-            if not output_path.exists():
-                raise ValueError(f"generated audio file does not exist: {output_path}")
+            output_path = _require_existing_path(req.path)
             privacy_mode = _privacy_mode(req.privacy_mode)
-            perception = report(engine, str(output_path), f"oida-generation-relisten-{preset.id}")
+            perception = report(
+                engine,
+                str(output_path),
+                f"oida-generation-relisten-{preset.id}",
+                passes=preset.moss_passes,
+                chunk_seconds=config.moss_chunk_seconds,
+                overlap_seconds=_chunk_overlap(config),
+            )
             perception_dict = report_to_dict(perception)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
             event = listening_event_dict(
@@ -1396,12 +1437,15 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 output_path=str(output_path),
                 generated_event=event,
                 route_comparison=route_comparison,
+                persist=privacy_mode != "incognito",
             )
             background.finish_action(event)
             return {
                 "generation": stored,
                 "trace": trace,
                 "listening_event": event,
+                "perception_report": perception_dict,
+                "command_output": command_output,
                 "route_comparison": route_comparison,
                 "background": background.status(),
             }
@@ -1537,6 +1581,9 @@ def save_upload(file: UploadFile) -> dict[str, object]:
             status_code=413,
             detail=f"upload exceeds the maximum size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB",
         ) from None
+    except OSError:
+        cleanup_failed_upload(raw_path)
+        raise
 
     normalized_path, normalization_error = normalize_audio(raw_path)
     if normalization_error:
@@ -1652,6 +1699,8 @@ def _rerun_segment(
     path = Path(str(path_value)).expanduser().resolve()
     if not path.exists():
         raise ValueError(f"route rerun audio path does not exist: {path}")
+    if not path.is_file():
+        raise ValueError(f"route rerun audio path is not a file: {path}")
 
     resolved_privacy = _privacy_mode(str(privacy_mode or event.get("privacy_mode") or segment.get("privacy_mode") or "session"))
     resolved_policy = _raw_audio_policy(str(raw_audio_policy or event.get("raw_audio_policy") or _segment_raw_audio_policy(segment) or "external_ref"))
@@ -1708,6 +1757,12 @@ def _raw_audio_policy(value: str) -> RawAudioPolicy:
     if value in {"not_stored", "temp", "saved", "external_ref"}:
         return value  # type: ignore[return-value]
     raise ValueError(f"unknown raw audio policy: {value}")
+
+
+def _audio_source_type(value: str) -> SourceType:
+    if value in {"live_input", "system_output", "file", "buffer", "generated", "external_stream"}:
+        return value  # type: ignore[return-value]
+    raise ValueError(f"unknown audio source type: {value}")
 
 
 _app_singleton = None

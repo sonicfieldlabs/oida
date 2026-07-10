@@ -1,6 +1,7 @@
 .DS_Store
 .venv/
 .uv-cache/
+.uv-tools/
 __pycache__/
 *.py[cod]
 .pytest_cache/

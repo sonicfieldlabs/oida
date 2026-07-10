@@ -397,11 +397,12 @@ const MODE_ICONS = {
 
 const PRESET_ICONS = {
   basic: MODE_ICONS.basic,
-  environment: MODE_ICONS.ecological,
+  field: MODE_ICONS.ecological,
   signal: MODE_ICONS.signal,
   music: MODE_ICONS.music,
-  speech: MODE_ICONS.speech,
-  memory: ICON('<path d="M6 3h12v18l-6-4-6 4V3Z"/>'),
+  voice: MODE_ICONS.speech,
+  recall: ICON('<path d="M6 3h12v18l-6-4-6 4V3Z"/>'),
+  remember: ICON('<path d="M6 3h12v18l-6-4-6 4V3Z"/><path d="M9 8h6M12 5v6"/>'),
   deep: ICON('<path d="M3 8c3-5 6-5 9 0s6 5 9 0"/><path d="M3 13c3-5 6-5 9 0s6 5 9 0" opacity="0.6"/><path d="M3 18c3-5 6-5 9 0s6 5 9 0" opacity="0.3"/>'),
   "extended-spectrum": MODE_ICONS.experimental,
   generative: MODE_ICONS.generative,
@@ -652,10 +653,10 @@ async function refreshMicDevices(requestPermission) {
     state.micDevices = devices.filter((device) => device.kind === "audioinput");
     const current = ui.micDevice.value;
     ui.micDevice.innerHTML = "";
-    ui.micDevice.appendChild(new Option("default input", ""));
+    ui.micDevice.appendChild(new Option("default input", "", false, !current));
     state.micDevices.forEach((device, index) => {
       const label = device.label || `input ${index + 1}`;
-      ui.micDevice.appendChild(new Option(label, device.deviceId, false, device.deviceId === current));
+      ui.micDevice.appendChild(new Option(label, device.deviceId, false, Boolean(current) && device.deviceId === current));
     });
   } catch (error) {
     setListenStatus(`Inputs: ${error.message}`, "error");
@@ -773,7 +774,13 @@ async function listenSystem() {
       if (state.phase !== "waiting") return;
       try {
         const status = await fetchJson("/background/status");
-        if (!status.state?.capture_request) return; // claimed — the capture is under way
+        if (!status.state?.capture_request) {
+          // The request disappeared before its 30 s TTL, so the native shell
+          // claimed it even if this page missed the SSE notification.
+          setPhase("analyzing");
+          setListenStatus(`Capturing ${Math.round(seconds)} s of system audio…`, "active");
+          return;
+        }
       } catch (_) { /* daemon unreachable; fall through to the hint */ }
       if (state.phase !== "waiting") return;
       setPhase("idle");
@@ -802,6 +809,8 @@ function stopRecordTimer() {
 async function listenMic() {
   let stream = null;
   try {
+    const deviceId = ui.micDevice.value || null;
+    const deviceLabel = ui.micDevice.selectedOptions[0]?.textContent || "default input";
     const constraints = { audio: ui.micDevice.value ? { deviceId: { exact: ui.micDevice.value } } : true };
     stream = await navigator.mediaDevices.getUserMedia(constraints);
     const recorder = new MediaRecorder(stream);
@@ -818,8 +827,13 @@ async function listenMic() {
       setPhase("analyzing");
       setListenStatus("Uploading recording…", "active");
       try {
-        const upload = await uploadBlob(blob, `oida-mic-${Date.now()}.${extension}`);
-        await analyzePath(upload.path, "mic");
+        await uploadAndAnalyze(
+          blob,
+          `oida-mic-${Date.now()}.${extension}`,
+          "mic",
+          `Microphone · ${deviceLabel}`,
+          deviceId
+        );
       } catch (error) {
         setPhase("idle");
         if (error.name !== "AbortError") setListenStatus(error.message, "error");
@@ -844,12 +858,21 @@ async function listenMic() {
   }
 }
 
-async function uploadBlob(blob, filename) {
+async function uploadBlob(blob, filename, signal) {
   const form = new FormData();
   form.append("file", blob, filename);
-  const response = await fetch("/upload", { method: "POST", body: form });
-  if (!response.ok) throw new Error(`upload failed (${response.status})`);
-  return response.json();
+  return fetchJson("/upload", { method: "POST", body: form, signal });
+}
+
+async function uploadAndAnalyze(blob, filename, sourceKind, sourceLabel, deviceId) {
+  const controller = new AbortController();
+  state.abortController = controller;
+  try {
+    const upload = await uploadBlob(blob, filename, controller.signal);
+    await analyzePath(upload.path, sourceKind, { controller, sourceLabel, deviceId });
+  } finally {
+    if (state.abortController === controller) state.abortController = null;
+  }
 }
 
 ui.fileInput.addEventListener("change", async () => {
@@ -860,8 +883,7 @@ ui.fileInput.addEventListener("change", async () => {
   setPhase("analyzing");
   setListenStatus(`Uploading ${file.name}…`, "active");
   try {
-    const upload = await uploadBlob(file, file.name);
-    await analyzePath(upload.path, "file");
+    await uploadAndAnalyze(file, file.name, "file");
   } catch (error) {
     setPhase("idle");
     if (error.name !== "AbortError") setListenStatus(error.message, "error");
@@ -881,8 +903,7 @@ ui.fileInput.addEventListener("change", async () => {
     }
     setPhase("analyzing");
     setListenStatus(`Uploading ${file.name}…`, "active");
-    uploadBlob(file, file.name)
-      .then((upload) => analyzePath(upload.path, "file"))
+    uploadAndAnalyze(file, file.name, "file")
       .catch((error) => {
         setPhase("idle");
         if (error.name !== "AbortError") setListenStatus(error.message, "error");
@@ -901,20 +922,28 @@ ui.analyzePath.addEventListener("click", () => {
   });
 });
 
-async function analyzePath(path, sourceKind) {
+async function analyzePath(path, sourceKind, options = {}) {
   setListenStatus(`Listening (${state.preset})…`, "active");
   const body = { path, route_preset: state.preset };
+  if (sourceKind === "mic") {
+    body.source_type = "live_input";
+    body.source_label = options.sourceLabel || "Microphone recording";
+    body.privacy_mode = "ephemeral";
+    body.raw_audio_policy = "temp";
+    if (options.deviceId) body.device_id = options.deviceId;
+  }
   const skills = selectedSkillIds();
   if (skills) body.enabled_skill_ids = skills;
-  state.abortController = new AbortController();
+  const controller = options.controller || new AbortController();
+  state.abortController = controller;
   try {
-    const result = await post("/listen-event", body, { signal: state.abortController.signal });
+    const result = await post("/listen-event", body, { signal: controller.signal });
     setPhase("idle");
     setListenStatus("Done.", "");
     renderEvent(result.listening_event, result);
     refreshHistory();
   } finally {
-    state.abortController = null;
+    if (state.abortController === controller) state.abortController = null;
   }
 }
 

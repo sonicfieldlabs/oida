@@ -879,3 +879,56 @@ button.corner-right { position: fixed; }
 
 /* native-only elements stay hidden outside the shell regardless of later display rules */
 body:not(.native) .native-only { display: none !important; }
+
+/* Narrow screens keep the source switch first, then the result, followed by
+   history and the claim breakdown. The desktop rail widths must never squeeze
+   the center column into overflow. */
+@media (max-width: 640px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "source"
+      "center"
+      "left-details"
+      "right-details";
+    width: 100%;
+    min-width: 0;
+    overflow-x: clip;
+  }
+
+  .side-left { display: contents; }
+  .side-left .side-top {
+    grid-area: source;
+    border-bottom: 1px solid var(--line);
+  }
+  .side-left .side-body {
+    grid-area: left-details;
+    width: 100%;
+    padding: 18px 16px 56px;
+    border-top: 1px solid var(--line);
+    overflow: visible;
+  }
+  .center {
+    grid-area: center;
+    width: 100%;
+    padding: 8px 14px 14px;
+  }
+  .side-right {
+    grid-area: right-details;
+    width: 100% !important;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+  .side-right .side-body {
+    padding: 4px 16px 56px;
+    overflow: visible;
+  }
+  .side-right .side-top { min-height: 42px; }
+  .side-resize { display: none; }
+  .result-card {
+    min-height: 420px;
+    padding: 18px 2px 0;
+  }
+  .result-foot { flex-wrap: wrap; }
+  .modal { width: calc(100vw - 24px); }
+}

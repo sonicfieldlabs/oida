@@ -16,6 +16,7 @@ LISTENING_MODES = [
     "voice-speech-listening",
     "accessibility-normative-listening",
     "material-event-listening",
+    "memory-lineage-listening",
 ]
 
 def empty_claim_taxonomy() -> dict[str, list[dict[str, str]]]:

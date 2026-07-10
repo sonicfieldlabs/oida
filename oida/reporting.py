@@ -253,8 +253,11 @@ def report(
     overlap_seconds: float = 15.0,
     passes: list[str] | tuple[str, ...] | None = None,
 ) -> PerceptionReport:
-    if not Path(path).expanduser().exists():
+    audio_path = Path(path).expanduser()
+    if not audio_path.exists():
         raise ValueError(f"audio path does not exist: {path}")
+    if not audio_path.is_file():
+        raise ValueError(f"audio path is not a file: {audio_path.resolve()}")
     selected = _normalize_passes(passes)
     dsp = inspect_path(path)
     features = dsp.get("features", {})
@@ -353,7 +356,7 @@ def chunked_report(
 
     with tempfile.TemporaryDirectory(prefix="oida-chunks-") as temp_dir:
         chunk_paths = write_chunk_audios(path, chunks, temp_dir)
-        for chunk, chunk_path in zip(chunks, chunk_paths):
+        for chunk, chunk_path in zip(chunks, chunk_paths, strict=True):
             if "transcribe" in selected:
                 transcript_obj, transcript_result = transcribe(engine, str(chunk_path), timestamps="sentence")
                 engine_results.append(transcript_result)

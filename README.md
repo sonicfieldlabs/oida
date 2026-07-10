@@ -32,9 +32,13 @@ name **oída**.
   stereo correlation/width/balance. One inspection per file per listen (results
   are memoized on path+mtime).
 - **Route presets** scope the MOSS passes: Basic (one caption pass), Signal
-  (DSP-only, instant), Environment, Music, Speech, Memory, and Deep (the full
-  report). Presets come from the AKOÚŌ skill registry (`/akouo/skills`) and the
-  dashboard skill manager can deviate per listen.
+  (DSP-only, instant), Field, Music, Voice, Recall (read-only memory
+  comparison), Remember (memory comparison + registration into the shared
+  akousmata, AKOÚŌ `/remember`), and Deep (the full report). Preset ids follow
+  AKOÚŌ v0.6's portable preset vocabulary (pre-v0.6 ids `environment`/`speech`/
+  `memory` still resolve as aliases). Presets come from the AKOÚŌ skill
+  registry (`/akouo/skills`) and the dashboard skill manager can deviate per
+  listen.
 - **Akousmata memory** (private traces): remember/list/search/similar/export/
   forget over local JSON traces with deterministic DSP similarity. This is
   oída's private store — distinct from the shared akousmata below.

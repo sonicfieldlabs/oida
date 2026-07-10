@@ -140,9 +140,11 @@ struct DashboardWebView: NSViewRepresentable {
             requestMediaCapturePermissionFor origin: WKSecurityOrigin,
             initiatedByFrame frame: WKFrameInfo,
             type: WKMediaCaptureType,
-            decisionHandler: @escaping (WKPermissionDecision) -> Void
+            decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void
         ) {
-            decisionHandler(type == .microphone ? .grant : .deny)
+            let localHosts = Set(["127.0.0.1", "localhost", "::1"])
+            let isLocalDashboard = localHosts.contains(origin.host.lowercased())
+            decisionHandler(type == .microphone && isLocalDashboard ? .grant : .deny)
         }
 
         // target=_blank links (API docs, health) open in the default browser

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from functools import partial
 from typing import Any
 
 from harness.types import CLAIM_CATEGORIES, empty_claim_taxonomy
@@ -108,6 +109,7 @@ def map_report_to_claims(
 
 
 def _map_dsp(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
+    add = partial(_add, source="dsp")
     dsp = report.get("dsp") if isinstance(report.get("dsp"), dict) else {}
     features = dsp.get("features") if isinstance(dsp.get("features"), dict) else {}
     basis = "oida DSP module, AKOUO audioAdapter parity port"
@@ -115,11 +117,11 @@ def _map_dsp(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) ->
     sample_rate = dsp.get("sampleRate")
     channels = dsp.get("channelCount")
     if isinstance(duration, (int, float)):
-        _add(claims, "measured", f"Duration is {duration:.2f} seconds.", "high", "Decoded audio metadata")
+        add(claims, "measured", f"Duration is {duration:.2f} seconds.", "high", "Decoded audio metadata")
     if isinstance(sample_rate, int):
-        _add(claims, "measured", f"Sample rate is {sample_rate} Hz.", "high", "Decoded audio metadata")
+        add(claims, "measured", f"Sample rate is {sample_rate} Hz.", "high", "Decoded audio metadata")
     if isinstance(channels, int):
-        _add(claims, "measured", f"Channel count is {channels}.", "high", "Decoded audio metadata")
+        add(claims, "measured", f"Channel count is {channels}.", "high", "Decoded audio metadata")
     numeric_templates = [
         ("peakDbfs", "Peak amplitude is approx {value:.1f} dBFS."),
         ("rmsDbfs", "RMS level is approx {value:.1f} dBFS."),
@@ -140,21 +142,22 @@ def _map_dsp(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) ->
         value = features.get(key)
         if isinstance(value, (int, float)):
             confidence = "low" if key == "bpmCandidate" else "medium"
-            _add(claims, "measured", template.format(value=float(value)), confidence, basis)
+            add(claims, "measured", template.format(value=float(value)), confidence, basis)
     silence = features.get("silenceRatio")
     if isinstance(silence, (int, float)):
-        _add(claims, "measured", f"Approx {silence * 100:.1f}% of frames sit below -60 dBFS.", "medium", basis)
+        add(claims, "measured", f"Approx {silence * 100:.1f}% of frames sit below -60 dBFS.", "medium", basis)
     clipped = features.get("clippedSampleRatio")
     if isinstance(clipped, (int, float)) and clipped > 0:
-        _add(claims, "measured", f"Approx {clipped * 100:.3f}% of samples sit near full scale.", "medium", basis)
+        add(claims, "measured", f"Approx {clipped * 100:.3f}% of samples sit near full scale.", "medium", basis)
     band_energy = features.get("bandEnergy")
     if isinstance(band_energy, dict):
         parts = ", ".join(f"{key} {float(value) * 100:.0f}%" for key, value in band_energy.items() if isinstance(value, (int, float)))
         if parts:
-            _add(claims, "measured", f"Band energy distribution is approx {parts}.", "medium", basis)
+            add(claims, "measured", f"Band energy distribution is approx {parts}.", "medium", basis)
 
 
 def _map_signal_interpretation(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
+    add = partial(_add, source="dsp")
     """Deterministic signal-listener deductions. These are logical inferences from
     measured features (never cultural readings), so they belong in `inferred`."""
     signal = report.get("signal_interpretation") if isinstance(report.get("signal_interpretation"), dict) else {}
@@ -163,7 +166,7 @@ def _map_signal_interpretation(report: dict[str, Any], claims: dict[str, list[di
     for hypothesis in signal.get("hypotheses", []):
         if not isinstance(hypothesis, dict) or not hypothesis.get("statement"):
             continue
-        _add(
+        add(
             claims,
             "inferred",
             str(hypothesis["statement"]),
@@ -172,10 +175,11 @@ def _map_signal_interpretation(report: dict[str, Any], claims: dict[str, list[di
         )
     for caution in signal.get("cautions", []):
         if isinstance(caution, str) and caution.strip():
-            _add(claims, "measured", caution.strip(), "medium", "oida signal listener capture-chain check")
+            add(claims, "measured", caution.strip(), "medium", "oida signal listener capture-chain check")
 
 
 def _map_transcript(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
+    add = partial(_add, source="model")
     transcript = report.get("transcript") if isinstance(report.get("transcript"), dict) else {}
     if not transcript.get("present"):
         return
@@ -185,10 +189,11 @@ def _map_transcript(report: dict[str, Any], claims: dict[str, list[dict[str, str
         time_range = _range(segment.get("t0"), segment.get("t1"))
         statement = f"Transcript{time_range}: {segment['text']}"
         confidence = str(segment.get("confidence") or "medium")
-        _add(claims, "heard", statement, confidence, f"{model_name} ASR, temp 0, timestamp anchored when available")
+        add(claims, "heard", statement, confidence, f"{model_name} ASR, temp 0, timestamp anchored when available")
 
 
 def _map_events(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
+    add = partial(_add, source="model")
     for event in report.get("events", []):
         if not isinstance(event, dict):
             continue
@@ -203,26 +208,31 @@ def _map_events(report: dict[str, Any], claims: dict[str, list[dict[str, str]]],
         description = event.get("description")
         if description:
             statement += f" - {description}"
+        time_range = None
+        if isinstance(event.get("t0"), (int, float)) and isinstance(event.get("t1"), (int, float)):
+            time_range = {"start_s": max(0.0, float(event["t0"])), "end_s": max(0.0, float(event["t1"]))}
         forbidden_reason = _forbidden_output_reason(f"{label} {description or ''}")
         if forbidden_reason:
-            _add(
+            add(
                 claims,
                 "undetermined",
                 f"Unsupported MOSS event claim remains undetermined: {statement}",
                 "undetermined",
                 forbidden_reason,
+                time_range=time_range,
             )
             continue
-        _add(claims, "heard", statement, confidence, basis)
+        add(claims, "heard", statement, confidence, basis, time_range=time_range)
 
 
 def _map_caption(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
+    add = partial(_add, source="model")
     caption = report.get("caption") if isinstance(report.get("caption"), dict) else {}
     dense = caption.get("dense") or caption.get("brief")
     if isinstance(dense, str) and dense.strip():
         forbidden_reason = _forbidden_output_reason(dense)
         if forbidden_reason:
-            _add(
+            add(
                 claims,
                 "undetermined",
                 f"Unsupported MOSS caption claim remains undetermined: {dense.strip()}",
@@ -230,10 +240,11 @@ def _map_caption(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]
                 forbidden_reason,
             )
             return
-        _add(claims, "inferred", dense.strip(), "medium", f"{model_name} dense audio caption")
+        add(claims, "inferred", dense.strip(), "medium", f"{model_name} dense audio caption")
 
 
 def _map_speech(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
+    add = partial(_add, source="model")
     speech = report.get("speech") if isinstance(report.get("speech"), dict) else {}
     if not speech.get("present"):
         return
@@ -244,7 +255,7 @@ def _map_speech(report: dict[str, Any], claims: dict[str, list[dict[str, str]]],
             continue
         forbidden_reason = _forbidden_output_reason(text)
         if forbidden_reason:
-            _add(
+            add(
                 claims,
                 "undetermined",
                 f"Unsupported speech-caption dimension {key} remains undetermined: {text}",
@@ -253,7 +264,7 @@ def _map_speech(report: dict[str, Any], claims: dict[str, list[dict[str, str]]],
             )
             continue
         confidence = "low" if key in {"age", "gender", "accent", "personality", "emotion"} else "medium"
-        _add(
+        add(
             claims,
             "interpreted",
             f"Speech-caption dimension {key}: {text}",
@@ -263,6 +274,7 @@ def _map_speech(report: dict[str, Any], claims: dict[str, list[dict[str, str]]],
 
 
 def _map_music(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
+    add = partial(_add, source="model")
     music = report.get("music") if isinstance(report.get("music"), dict) else {}
     if not music.get("present"):
         return
@@ -270,7 +282,7 @@ def _map_music(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], 
     if isinstance(description, str) and description.strip():
         forbidden_reason = _forbidden_output_reason(description)
         if forbidden_reason:
-            _add(
+            add(
                 claims,
                 "undetermined",
                 f"Unsupported MOSS music-analysis claim remains undetermined: {description.strip()}",
@@ -278,13 +290,13 @@ def _map_music(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], 
                 forbidden_reason,
             )
         else:
-            _add(claims, "interpreted", description.strip(), "medium", f"{model_name} music analysis")
+            add(claims, "interpreted", description.strip(), "medium", f"{model_name} music analysis")
     dsp_bpm = music.get("dsp_bpm_candidate")
     moss_bpm = music.get("moss_bpm_candidate")
     if isinstance(dsp_bpm, (int, float)) and isinstance(moss_bpm, (int, float)):
         delta = abs(float(dsp_bpm) - float(moss_bpm))
         if delta <= 5:
-            _add(
+            add(
                 claims,
                 "inferred",
                 f"MOSS and DSP both support a tempo region near {float(dsp_bpm):.1f}-{float(moss_bpm):.1f} BPM.",
@@ -292,7 +304,7 @@ def _map_music(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], 
                 f"{model_name} music analysis + DSP bpmCandidate corroboration",
             )
         else:
-            _add(
+            add(
                 claims,
                 "undetermined",
                 f"Tempo is unresolved: DSP suggests {float(dsp_bpm):.1f} BPM while MOSS suggests {float(moss_bpm):.1f} BPM.",
@@ -302,21 +314,23 @@ def _map_music(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], 
 
 
 def _map_uncertainty(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
+    add = partial(_add, source="context")
     for note in report.get("model_uncertainty_notes", []):
         if isinstance(note, str) and note.strip():
-            _add(claims, "undetermined", note.strip(), "undetermined", "oida model uncertainty note")
+            add(claims, "undetermined", note.strip(), "undetermined", "oida model uncertainty note")
     for note in report.get("forbidden_topics_triggered", []):
         if isinstance(note, str) and note.strip():
-            _add(claims, "undetermined", note.strip(), "undetermined", "oida forbidden topic guard")
+            add(claims, "undetermined", note.strip(), "undetermined", "oida forbidden topic guard")
 
 
 def _map_forbidden_query(question: str | None, claims: dict[str, list[dict[str, str]]]) -> None:
+    add = partial(_add, source="context")
     if not question:
         return
     lowered = question.lower()
     for term, statement in FORBIDDEN_QUERY_TERMS:
         if term in lowered:
-            _add(claims, "undetermined", statement, "undetermined", "MOSS-Audio 16 kHz mono input limitation")
+            add(claims, "undetermined", statement, "undetermined", "MOSS-Audio 16 kHz mono input limitation")
 
 
 def _forbidden_output_reason(text: str) -> str | None:
@@ -368,10 +382,24 @@ def _range(t0: object, t1: object) -> str:
     return ""
 
 
-def _add(claims: dict[str, list[dict[str, str]]], category: str, statement: str, confidence: str, basis: str) -> None:
+def _add(
+    claims: dict[str, list[dict[str, str]]],
+    category: str,
+    statement: str,
+    confidence: str,
+    basis: str,
+    *,
+    source: str | None = None,
+    time_range: dict[str, float] | None = None,
+) -> None:
     if category not in CLAIM_CATEGORIES:
         raise ValueError(f"invalid claim category: {category}")
     statement = " ".join(statement.split())
     if not statement:
         return
-    claims[category].append({"statement": statement, "confidence": confidence, "basis": basis})
+    claim: dict[str, object] = {"statement": statement, "confidence": confidence, "basis": basis}
+    if source:
+        claim["source"] = source
+    if time_range:
+        claim["time_range"] = time_range
+    claims[category].append(claim)

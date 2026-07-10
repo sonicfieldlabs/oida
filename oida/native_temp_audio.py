@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -31,7 +32,9 @@ def normalize_native_temp_audio_retention(value: Mapping[str, Any] | None = None
         "policy": policy,
         "delete_after_days": _positive_float(incoming.get("delete_after_days"), base["delete_after_days"]),
         "max_files": _positive_int(incoming.get("max_files"), base["max_files"]),
-        "delete_after_analysis": bool(incoming.get("delete_after_analysis", base["delete_after_analysis"])),
+        "delete_after_analysis": _coerce_bool(
+            incoming.get("delete_after_analysis"), base["delete_after_analysis"]
+        ),
     }
 
 
@@ -205,7 +208,7 @@ def _positive_float(value: Any, fallback: float) -> float:
         parsed = float(value)
     except (TypeError, ValueError):
         return float(fallback)
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         return float(fallback)
     return parsed
 
@@ -218,3 +221,17 @@ def _positive_int(value: Any, fallback: int) -> int:
     if parsed < 0:
         return int(fallback)
     return parsed
+
+
+def _coerce_bool(value: Any, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return fallback

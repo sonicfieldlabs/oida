@@ -19,8 +19,8 @@ enum MicTapError: LocalizedError {
 
 /// Ring-buffered microphone capture via AVAudioEngine, mirroring the system
 /// tap so the floating listener can listen to the default input natively.
-final class MicTapManager {
-    var onLevel: ((Double) -> Void)?
+final class MicTapManager: @unchecked Sendable {
+    var onLevel: (@Sendable (Double) -> Void)?
 
     private let engine = AVAudioEngine()
     private let queue = DispatchQueue(label: "org.sonicfield.oida.mic-tap")
@@ -42,7 +42,14 @@ final class MicTapManager {
             self?.ingest(buffer)
         }
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            engine.stop()
+            queue.sync { ringSamples.removeAll(keepingCapacity: true) }
+            throw error
+        }
         isCapturing = true
     }
 
@@ -104,9 +111,10 @@ final class MicTapManager {
         for value in mono { energy += Double(value * value) }
         let rms = (energy / Double(frames)).squareRoot()
         onLevel?(min(1.0, rms * 3.2))
+        let capturedMono = mono
         queue.async { [weak self] in
             guard let self else { return }
-            self.ringSamples.append(contentsOf: mono)
+            self.ringSamples.append(contentsOf: capturedMono)
             let maxFrames = max(1, Int(round(self.ringSampleRate * self.ringMaxSeconds)))
             if self.ringSamples.count > maxFrames {
                 self.ringSamples.removeFirst(self.ringSamples.count - maxFrames)

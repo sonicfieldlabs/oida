@@ -54,7 +54,6 @@ class MpsMossEngine(MossEngine):
         if model_id in self._models:
             return self._models[model_id], self._processors[model_id]
         try:
-            import torch
             from src.audio_io import load_audio  # noqa: F401
             from src.modeling_moss_audio import MossAudioModel
             from src.processing_moss_audio import MossAudioProcessor
