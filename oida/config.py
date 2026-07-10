@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,7 @@ class OidaConfig:
     hf_hub_offline: bool
     auth_token: str | None
     sonicfield_root: Path | None
+    trusted_hosts: tuple[str, ...]
 
 
 def _optional_path(value: str | None) -> Path | None:
@@ -102,6 +104,27 @@ def default_sonicfield_root() -> Path | None:
     return None
 
 
+def integration_settings_path() -> Path:
+    return data_dir() / "integrations.json"
+
+
+def _trusted_hosts() -> tuple[str, ...]:
+    values: list[str] = []
+    configured = _env("OIDA_TRUSTED_HOSTS", "HMM_TRUSTED_HOSTS", "AEAR_TRUSTED_HOSTS")
+    if configured:
+        values.extend(part.strip().lower().rstrip(".") for part in configured.split(",") if part.strip())
+    path = integration_settings_path()
+    if path.exists():
+        try:
+            settings = json.loads(path.read_text(encoding="utf-8"))
+            remote = settings.get("remote") if isinstance(settings, dict) and isinstance(settings.get("remote"), dict) else {}
+            hosts = remote.get("trusted_hosts") if isinstance(remote.get("trusted_hosts"), list) else []
+            values.extend(str(host).strip().lower().rstrip(".") for host in hosts if str(host).strip())
+        except (OSError, json.JSONDecodeError):
+            pass
+    return tuple(dict.fromkeys(values))
+
+
 def _truthy_env(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -156,4 +179,5 @@ def load_config(profile: str | None = None, host: str | None = None, port: int |
         hf_hub_offline=hf_hub_offline,
         auth_token=_env("OIDA_AUTH_TOKEN", "HMM_AUTH_TOKEN", "AEAR_AUTH_TOKEN"),
         sonicfield_root=default_sonicfield_root(),
+        trusted_hosts=_trusted_hosts(),
     )

@@ -87,6 +87,7 @@ def map_report_to_claims(
     model_name = str(report.get("engine", {}).get("model") or "MOSS-Audio")
 
     _map_dsp(report, claims)
+    _map_host_observations(report, claims)
     _map_signal_interpretation(report, claims)
     _map_transcript(report, claims, model_name)
     _map_events(report, claims, model_name)
@@ -94,7 +95,7 @@ def map_report_to_claims(
     _map_speech(report, claims, model_name)
     _map_music(report, claims, model_name)
     _map_uncertainty(report, claims)
-    _map_forbidden_query(question, claims)
+    _map_forbidden_query(question, claims, report)
     _filter_permissions(claims, permissions)
 
     if permissions.get("must_include_undetermined", True) and not claims["undetermined"]:
@@ -106,6 +107,57 @@ def map_report_to_claims(
             }
         )
     return claims
+
+
+def _map_host_observations(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
+    """Preserve claims supplied by an audio-capable host without laundering them.
+
+    A model-written number is not a measurement. A host may use ``measured``
+    only when it identifies DSP, metadata, or human measurement as the source;
+    other attempted measurements are demoted and made explicit.
+    """
+    observations = report.get("host_observations")
+    if not isinstance(observations, list):
+        return
+    for item in observations:
+        if not isinstance(item, dict) or not item.get("statement"):
+            continue
+        category = str(item.get("category") or "heard")
+        source = str(item.get("source") or "model")
+        basis = str(item.get("basis") or "host audio perception")
+        confidence = str(item.get("confidence") or "medium")
+        time_range = item.get("time_range") if isinstance(item.get("time_range"), dict) else None
+        if category == "measured" and source not in {"dsp", "metadata", "human"}:
+            _add(
+                claims,
+                "inferred",
+                str(item["statement"]),
+                confidence,
+                f"{basis}; demoted because model perception is not measurement",
+                source=source,
+                time_range=time_range,
+            )
+            _add(
+                claims,
+                "undetermined",
+                f"Measurement status is unsupported for host claim: {item['statement']}",
+                "undetermined",
+                "No DSP, metadata, or declared human measurement source was supplied.",
+                source="context",
+                time_range=time_range,
+            )
+            continue
+        if category not in CLAIM_CATEGORIES:
+            category = "undetermined"
+        _add(
+            claims,
+            category,
+            str(item["statement"]),
+            confidence,
+            basis,
+            source=source,
+            time_range=time_range,
+        )
 
 
 def _map_dsp(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
@@ -157,9 +209,9 @@ def _map_dsp(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) ->
 
 
 def _map_signal_interpretation(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]) -> None:
-    add = partial(_add, source="dsp")
     """Deterministic signal-listener deductions. These are logical inferences from
     measured features (never cultural readings), so they belong in `inferred`."""
+    add = partial(_add, source="dsp")
     signal = report.get("signal_interpretation") if isinstance(report.get("signal_interpretation"), dict) else {}
     if not signal:
         return
@@ -211,7 +263,7 @@ def _map_events(report: dict[str, Any], claims: dict[str, list[dict[str, str]]],
         time_range = None
         if isinstance(event.get("t0"), (int, float)) and isinstance(event.get("t1"), (int, float)):
             time_range = {"start_s": max(0.0, float(event["t0"])), "end_s": max(0.0, float(event["t1"]))}
-        forbidden_reason = _forbidden_output_reason(f"{label} {description or ''}")
+        forbidden_reason = _forbidden_output_reason(f"{label} {description or ''}", report)
         if forbidden_reason:
             add(
                 claims,
@@ -230,7 +282,7 @@ def _map_caption(report: dict[str, Any], claims: dict[str, list[dict[str, str]]]
     caption = report.get("caption") if isinstance(report.get("caption"), dict) else {}
     dense = caption.get("dense") or caption.get("brief")
     if isinstance(dense, str) and dense.strip():
-        forbidden_reason = _forbidden_output_reason(dense)
+        forbidden_reason = _forbidden_output_reason(dense, report)
         if forbidden_reason:
             add(
                 claims,
@@ -253,7 +305,7 @@ def _map_speech(report: dict[str, Any], claims: dict[str, list[dict[str, str]]],
         text = str(value).strip()
         if not text:
             continue
-        forbidden_reason = _forbidden_output_reason(text)
+        forbidden_reason = _forbidden_output_reason(text, report)
         if forbidden_reason:
             add(
                 claims,
@@ -280,7 +332,7 @@ def _map_music(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], 
         return
     description = music.get("description")
     if isinstance(description, str) and description.strip():
-        forbidden_reason = _forbidden_output_reason(description)
+        forbidden_reason = _forbidden_output_reason(description, report)
         if forbidden_reason:
             add(
                 claims,
@@ -323,36 +375,74 @@ def _map_uncertainty(report: dict[str, Any], claims: dict[str, list[dict[str, st
             add(claims, "undetermined", note.strip(), "undetermined", "oida forbidden topic guard")
 
 
-def _map_forbidden_query(question: str | None, claims: dict[str, list[dict[str, str]]]) -> None:
+def _map_forbidden_query(
+    question: str | None,
+    claims: dict[str, list[dict[str, str]]],
+    report: dict[str, Any],
+) -> None:
     add = partial(_add, source="context")
     if not question:
         return
     lowered = question.lower()
     for term, statement in FORBIDDEN_QUERY_TERMS:
         if term in lowered:
+            if _term_is_supported(term, report):
+                continue
             add(claims, "undetermined", statement, "undetermined", "MOSS-Audio 16 kHz mono input limitation")
 
 
-def _forbidden_output_reason(text: str) -> str | None:
+def _forbidden_output_reason(text: str, report: dict[str, Any] | None = None) -> str | None:
     lowered = text.lower()
     for term, statement in FORBIDDEN_QUERY_TERMS:
         if term in lowered:
+            if report is not None and _term_is_supported(term, report):
+                continue
             return statement
     for term, message in _FORBIDDEN_OUTPUT_PHRASES:
         if term in lowered:
+            if report is not None and _term_is_supported(term, report):
+                continue
             return message
-    if _STEREO_RE.search(lowered):
+    if _STEREO_RE.search(lowered) and not (report is not None and _term_is_supported("stereo", report)):
         return _SPATIAL_REASON
-    if _SPL_RE.search(lowered):
+    if _SPL_RE.search(lowered) and not (report is not None and _term_is_supported("absolute level", report)):
         return _LEVEL_REASON
     khz_match = _KHZ_RE.search(lowered)
     if khz_match:
         try:
-            if float(khz_match.group(1)) > 8.0:
+            if float(khz_match.group(1)) > 8.0 and not (
+                report is not None and _supports_frequency(report, float(khz_match.group(1)) * 1000)
+            ):
                 return _HIGHFREQ_REASON
         except ValueError:
             pass
     return None
+
+
+def _term_is_supported(term: str, report: dict[str, Any]) -> bool:
+    """Whether the declared perception apparatus supports this claim family."""
+    model = str((report.get("engine") if isinstance(report.get("engine"), dict) else {}).get("model") or "")
+    # MOSS always receives 16 kHz mono regardless of the native file metadata.
+    if "moss" in model.lower():
+        return False
+    apparatus = report.get("apparatus") if isinstance(report.get("apparatus"), dict) else {}
+    lowered = term.lower()
+    if any(token in lowered for token in ("stereo", "spatial", "panned", "panning", "channel", "soundstage", "binaural", "surround")):
+        return isinstance(apparatus.get("channels"), (int, float)) and int(apparatus["channels"]) >= 2
+    if any(token in lowered for token in ("above 8", ">8", "ultrasonic", "khz")):
+        return isinstance(apparatus.get("bandwidth_limit_hz"), (int, float)) and float(apparatus["bandwidth_limit_hz"]) > 8000
+    if any(token in lowered for token in ("absolute", "sound pressure", "playback level", "physical level", "capture level", "spl")):
+        return bool(apparatus.get("absolute_level_calibrated"))
+    return False
+
+
+def _supports_frequency(report: dict[str, Any], frequency_hz: float) -> bool:
+    model = str((report.get("engine") if isinstance(report.get("engine"), dict) else {}).get("model") or "")
+    if "moss" in model.lower():
+        return False
+    apparatus = report.get("apparatus") if isinstance(report.get("apparatus"), dict) else {}
+    bandwidth = apparatus.get("bandwidth_limit_hz")
+    return isinstance(bandwidth, (int, float)) and float(bandwidth) >= frequency_hz
 
 
 def _filter_permissions(claims: dict[str, list[dict[str, str]]], permissions: dict[str, bool]) -> None:

@@ -5,12 +5,13 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import secrets
 import subprocess
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -46,9 +47,10 @@ from oida.conversation import ConversationStore
 from oida.contracts import AudioSegment, AudioSourceDescriptor, PrivacyMode, RawAudioPolicy, SourceType, audio_segment_from_path, source_for_path
 from oida.engine import build_engine
 from oida.generation import GenerationStore
+from oida.gateway import GATEWAY_CONTRACT, gateway_manifest, harness_host_perception
 from oida.listening import listening_event_dict
 from oida.live import LiveManager
-from oida.memory import AkousmataStore
+from oida.memory import AkousmataStore, earworm_context_for_event
 from oida.metrics import process_metrics
 from oida.native_temp_audio import (
     apply_native_temp_audio_retention_after_analysis,
@@ -219,6 +221,30 @@ class ListenEventRequest(PathRequest):
     source_label: str | None = None
     device_id: str | None = None
     raw_audio_policy: str | None = None
+
+
+class GatewayListenRequest(ListenEventRequest):
+    remember: bool = False
+    user_notes: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class GatewayHarnessRequest(BaseModel):  # type: ignore[misc,valid-type]
+    perception: dict[str, Any]
+    route_preset: str = "basic"
+    command: str | None = None
+    question: str | None = None
+    remember: bool = False
+    privacy_mode: str = "session"
+    raw_audio_policy: str = "not_stored"
+    enabled_skill_ids: list[str] | None = None
+    disabled_skill_ids: list[str] | None = None
+
+
+class GatewayRouteRequest(BaseModel):  # type: ignore[misc,valid-type]
+    object_listened_to: str = "audio input"
+    command: str = "/route"
+    evidence_level: str = "audio_available"
 
 
 class ListenEventRerunRequest(BaseModel):  # type: ignore[misc,valid-type]
@@ -411,6 +437,18 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     generations = GenerationStore()
     broadcaster = EventBroadcaster()
     sonicfield = SonicFieldBridge(config.sonicfield_root)
+    navigator_watcher: Any | None = None
+    navigator_load_settings: Any | None = None
+    mcp_http_app: Any | None = None
+    mcp_session_manager: Any | None = None
+    try:
+        from oida.mcp_server import MCP as _gateway_mcp
+        from oida.mcp_server import streamable_http_app as _streamable_http_app
+
+        mcp_http_app = _streamable_http_app()
+        mcp_session_manager = _gateway_mcp.session_manager
+    except ImportError as exc:
+        LOGGER.warning("MCP gateway is unavailable: %s", exc)
     try:
         uploads_dir().mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -474,23 +512,61 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
     @asynccontextmanager
     async def lifespan(_app: Any):
-        broadcaster.bind_loop(asyncio.get_running_loop())
-        if config.prewarm:
-            start_prewarm()
-        yield
-        # Honor the default delete_after_session native-temp retention policy on shutdown.
-        try:
-            finalize_native_temp_audio_session(background.config.native_temp_audio_retention)
-        except Exception as exc:
-            LOGGER.warning("native temp-audio shutdown cleanup failed: %s", exc)
-        try:
-            finalize_upload_audio_session(background.config.upload_audio_retention)
-        except Exception as exc:
-            LOGGER.warning("upload-audio shutdown cleanup failed: %s", exc)
+        async with AsyncExitStack() as stack:
+            if mcp_session_manager is not None:
+                await stack.enter_async_context(mcp_session_manager.run())
+            broadcaster.bind_loop(asyncio.get_running_loop())
+            if navigator_watcher is not None and navigator_load_settings is not None:
+                try:
+                    navigator_settings = navigator_load_settings().get("watcher") or {}
+                    if os.getenv("AKOUSMATA_WATCHER", "1") != "0" and navigator_settings.get("enabled", True):
+                        navigator_watcher.start(
+                            ingest_seconds=float(navigator_settings.get("ingest_seconds", 60)),
+                            lint_minutes=float(navigator_settings.get("lint_minutes", 30)),
+                        )
+                except Exception as exc:
+                    LOGGER.warning("akousmata watcher startup failed: %s", exc)
+            if config.prewarm:
+                start_prewarm()
+            try:
+                yield
+            finally:
+                if navigator_watcher is not None:
+                    try:
+                        navigator_watcher.stop()
+                    except Exception as exc:
+                        LOGGER.warning("akousmata watcher shutdown failed: %s", exc)
+                # Honor the default delete_after_session native-temp retention policy on shutdown.
+                try:
+                    finalize_native_temp_audio_session(background.config.native_temp_audio_retention)
+                except Exception as exc:
+                    LOGGER.warning("native temp-audio shutdown cleanup failed: %s", exc)
+                try:
+                    finalize_upload_audio_session(background.config.upload_audio_retention)
+                except Exception as exc:
+                    LOGGER.warning("upload-audio shutdown cleanup failed: %s", exc)
 
-    app = FastAPI(title="oida", version="0.1.0", lifespan=lifespan)
+    from oida import __version__
+
+    app = FastAPI(title="oida", version=__version__, lifespan=lifespan)
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    if mcp_http_app is not None:
+        app.mount("/mcp", mcp_http_app, name="oida-mcp")
+
+    # The complete Akousmata navigator is part of the Oída distribution. It is
+    # mounted rather than forked, so standalone and embedded use share one app,
+    # one store, and one watcher implementation.
+    try:
+        from akousmata_app import watcher as _navigator_watcher
+        from akousmata_app.server import app as navigator_app
+        from akousmata_app.settings import load as _navigator_load_settings
+
+        navigator_watcher = _navigator_watcher
+        navigator_load_settings = _navigator_load_settings
+        app.mount("/library", navigator_app, name="akousmata-navigator")
+    except ImportError as exc:
+        LOGGER.warning("akousmata navigator is unavailable: %s", exc)
 
     # oída→germ bridge (three buttons) over the shared akousma store; optional.
     try:
@@ -519,6 +595,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     allowed_hostnames = set(_LOOPBACK_HOSTNAMES)
     if config.host:
         allowed_hostnames.add(str(config.host).strip().lower())
+    allowed_hostnames.update(config.trusted_hosts)
 
     @app.middleware("http")
     async def _loopback_guard(request: Request, call_next: Any) -> Any:
@@ -586,6 +663,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         return {
             "ok": True,
             "name": "oida",
+            "pid": os.getpid(),
             "legacy_name": "hmm, aear",
             "profile": config.profile,
             "host": config.host,
@@ -683,6 +761,12 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "health": "/health",
             "endpoints": [
                 "/oida/status",
+                "/gateway",
+                "/gateway/capabilities",
+                "/gateway/schema/host-perception",
+                "/gateway/route",
+                "/gateway/listen",
+                "/gateway/harness",
                 "/engine/status",
                 "/engine/warm",
                 "/engine/model",
@@ -749,6 +833,10 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "/live/stop",
                 "/germ/handoff",
                 "/germ/link",
+                "/akousmata/records",
+                "/akousmata/tags",
+                "/akousmata/records/{akousma_id}",
+                "/akousmata/audio/{akousma_id}",
                 "/qa",
                 "/think",
                 "/report",
@@ -783,6 +871,41 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "generation_default_adapter": "prompt_only",
             },
         }
+
+    @app.get("/gateway")
+    def gateway_manifest_endpoint() -> dict[str, object]:
+        return gateway_manifest(version=__version__)
+
+    @app.get("/gateway/capabilities")
+    def gateway_capabilities_endpoint() -> dict[str, object]:
+        manifest = gateway_manifest(version=__version__)
+        return {
+            "contract": GATEWAY_CONTRACT,
+            "gateway": manifest,
+            "engine": engine_status(),
+            "akouo": akouo_manifest(),
+            "memory": {"available": True, "trace_count": len(memory.list(limit=None))},
+            "host_perception_schema": "/gateway/schema/host-perception",
+        }
+
+    @app.get("/gateway/schema/host-perception")
+    def gateway_host_schema_endpoint() -> dict[str, object]:
+        path = REPO_ROOT / "oida" / "schemas" / "host-perception.schema.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @app.post("/gateway/route")
+    def gateway_route_endpoint(req: GatewayRouteRequest) -> dict[str, object]:
+        try:
+            return {
+                "contract": GATEWAY_CONTRACT,
+                "routing_plan": routing_plan(
+                    req.object_listened_to,
+                    command=req.command,
+                    evidence_level=req.evidence_level,
+                ),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/sources")
     def sources_endpoint() -> dict[str, object]:
@@ -1015,6 +1138,56 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             broadcaster.publish("listen_failed", {"detail": str(exc)})
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"listening_event": event, "perception_report": perception_dict, "command_output": command_output, "background": background.status()}
+
+    @app.post("/gateway/listen")
+    def gateway_listen_endpoint(req: GatewayListenRequest) -> dict[str, object]:
+        result = listen_event_endpoint(req)
+        event = result["listening_event"]
+        trace = None
+        if req.remember and req.privacy_mode != "incognito":
+            trace = memory.remember(event, user_notes=req.user_notes, tags=req.tags)
+            event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
+        earworm = trace.get("earworm") if isinstance(trace, dict) else earworm_context_for_event(event)
+        return {
+            "contract": GATEWAY_CONTRACT,
+            "perception_path": "oida_owned",
+            **result,
+            "earworm": earworm,
+            "trace": trace,
+        }
+
+    @app.post("/gateway/harness")
+    def gateway_harness_endpoint(req: GatewayHarnessRequest) -> dict[str, object]:
+        schema_path = REPO_ROOT / "oida" / "schemas" / "host-perception.schema.json"
+        try:
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            jsonschema.Draft202012Validator(schema).validate(req.perception)
+            result = harness_host_perception(
+                req.perception,
+                route_preset_id=req.route_preset,
+                command=req.command,
+                question=req.question,
+                remember=req.remember,
+                memory=memory,
+                privacy_mode=_privacy_mode(req.privacy_mode),
+                raw_audio_policy=_raw_audio_policy(req.raw_audio_policy),
+                enabled_skill_ids=req.enabled_skill_ids,
+                disabled_skill_ids=req.disabled_skill_ids,
+            )
+            background.finish_action(result["listening_event"])
+            broadcaster.publish(
+                "host_listen_completed",
+                {
+                    "listening_event": result["listening_event"],
+                    "host": req.perception.get("host"),
+                    "route_preset": req.route_preset,
+                },
+            )
+            return result
+        except jsonschema.ValidationError as exc:
+            raise HTTPException(status_code=422, detail=f"host perception failed schema validation: {exc.message}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/listen-event/rerun")
     def listen_event_rerun_endpoint(req: ListenEventRerunRequest) -> dict[str, object]:

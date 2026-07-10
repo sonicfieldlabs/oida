@@ -1,10 +1,12 @@
 # oída
 
-`oida` is a local listening agent for machine ears. It listens to audio files,
-the microphone, and the computer's own output, routes sound through MOSS-Audio
-and AKOÚŌ listening paths, extracts measured signal features, and normalizes
-everything into listening events that can be remembered, questioned, handed to
-germ as akousmata, or explored in the Sonic Field wiki.
+`oida` is the unified local agentic listening stack: the AKOÚŌ listening
+harness, Earworm provenance and memory protocol, and Akousmata listening
+library behind one agent, CLI, gateway, and install. It can listen through its
+own optional local engine (including MOSS-Audio plus deterministic DSP), or it
+can harness the audio perception already produced by Hermes, Codex, Claude, or
+another audio-input-capable host. Both paths produce the same accountable
+AKOÚŌ claims, Earworm session context, and optional durable Akousmata memory.
 
 This project was previously named **AEAR**, then **hmm**; it is now **oída**.
 The Python package and primary CLI are `oida`; `hmm` and `aear` remain as
@@ -14,6 +16,22 @@ name **oída**.
 
 ## What Is Implemented
 
+- **Unified gateway contract** (`oida/gateway/v0.2`) with two honest perception
+  paths: Oída-owned audio through `POST /gateway/listen`, and host-owned model
+  perception through `POST /gateway/harness`. `GET /gateway` advertises the
+  installed AKOÚŌ, Earworm, and Akousmata contracts; `GET
+  /gateway/schema/host-perception` publishes the host envelope.
+- **One lifecycle**: `oida start` ensures a singleton background gateway,
+  `oida agent` starts it and opens the listening agent, and every stdio MCP
+  adapter can ensure/reuse that gateway itself. The same process serves the
+  dashboard, REST API, streamable HTTP MCP at `/mcp`, and the complete
+  Akousmata navigator at `/library/`.
+- **Local host integrations** installed by `oida integrate`: a native Hermes
+  plugin, Codex and Claude plugins, and a mobile-responsive private private-network
+  surface. Their generated MCP configs are pinned to the active Oída runtime,
+  so they do not depend on shell `PATH` or require a second app. Host adapters
+  start the gateway without prewarming MOSS; the host-perception path stays
+  lightweight until Oída-owned listening actually needs the local model.
 - FastAPI daemon (default `127.0.0.1:8765`) with task endpoints
   (`/transcribe`, `/events`, `/caption`, `/speech`, `/music`, `/qa`, `/think`,
   `/report`), the listening-event pipeline (`/listen-event`,
@@ -45,7 +63,7 @@ name **oída**.
 - **germ handoff** (shared akousmata store): after a listen, three actions —
   *Sound*, *Prompt*, *Lineage* — persist the listen as an **akousma** in the
   shared store (`~/workspace/akousmata`, via earworm's `py-akousma`) and
-  deep-link germ (`OIDA_GERM_URL`, default `http://127.0.0.1:5178/import`).
+  deep-link germ's `/import` route (`OIDA_GERM_URL`, default `http://127.0.0.1:5178`).
   Opt-in song identification (`OIDA_SONGID=1`, ShazamIO) enriches the record's
   `extensions.songid`.
 - **Sonic Field bridge**: "Explore in the wiki" searches the wiki, topics,
@@ -68,27 +86,45 @@ name **oída**.
   controls float just outside the box and appear on hover. Global hotkeys
   default to ⌃⌥L (listen) and ⌃⌥H (show/hide it).
 - CLI (`oida listen/live/background/memory/chat/sweep/corpus-qa/bench`), `ear`
-  and `akoe` helper CLIs, and an MCP server exposing `oida_*` tools (legacy
-  `hmm_*`/`aear_*`/`ear_*` aliases kept).
-- 113 unit tests that run without model weights.
+  and `akoe` helper CLIs, and an official MCP server exposing compact
+  `oida_*` listening, harness, memory, and live tools (legacy aliases kept on
+  the HTTP compatibility surface).
+- A dependency-light test suite that runs without model weights.
 
 ## Quick Start
 
-Prerequisites: Python 3.12+, `uv`, `ffmpeg` for non-WAV uploads or browser
-recordings, and a sibling checkout of `earworm` (the `akousma` dependency is an
-editable path source at `../earworm/packages/py-akousma`).
+Prerequisites: Python 3.12+, `uv`, and `ffmpeg` for non-WAV uploads or browser
+recordings. From this source workspace, one sync installs Oída together with
+the canonical AKOÚŌ, Earworm/akousma, and Akousmata packages:
 
 ```bash
-uv sync --extra dev
+uv sync --extra dev --extra moss
 ```
 
-Run the daemon (MOSS-Audio on Apple Silicon is the default profile):
+Start the singleton gateway, then open the agent or library:
 
 ```bash
-uv run oida --host 127.0.0.1 --port 8765   # add --profile stub for a model-free dev run
+uv run oida start                         # add --profile stub for model-free use
+uv run oida agent
+uv run oida agent --library
 ```
 
-Open the dashboard at `http://127.0.0.1:8765`.
+`oida` or `oida serve` still runs the same system in the foreground. The local
+dashboard is `http://127.0.0.1:8765`, the library is `/library/`, REST gateway
+discovery is `/gateway`, and streamable HTTP MCP is `/mcp`.
+
+Install the local adapters (each host can then start/reuse Oída automatically):
+
+```bash
+uv run oida integrate hermes
+uv run oida integrate codex
+uv run oida integrate claude
+uv run oida integrate remote --serve     # private responsive UI via private-network
+uv run oida doctor
+```
+
+No native iOS or cloud service is required: open the reported private-network URL on
+the phone to use it as the microphone, speaker, screen, and remote control.
 
 Generate a normalized listening event:
 
@@ -97,6 +133,11 @@ curl -s http://127.0.0.1:8765/listen-event \
   -H 'content-type: application/json' \
   -d '{"path":"/path/to/clip.wav","route_preset":"basic"}'
 ```
+
+An audio-capable host can keep perception in its own model and send a declared
+report to `/gateway/harness`; see [the gateway contract](docs/gateway-contract.md)
+for the schema and examples. MOSS is therefore an optimized local backend, not
+a requirement for the harness path.
 
 Routed local session, live ring buffer, and background runtime:
 
@@ -204,7 +245,11 @@ akousmata store is written only by the explicit germ handoff actions.
   (`PLAN.md` keeps the historical OIDA phases).
 - `docs/release-readiness.md` — what `scripts/run_local_checks.sh release`
   validates.
+- `docs/gateway-contract.md` — lifecycle, host-perception envelope, and local
+  integration boundaries.
+- `integrations/` — the bundled Hermes, Codex, Claude, and remote adapters.
 - CI (`.github/workflows/ci.yml`) runs pytest, compileall, a JS syntax check,
   the Swift build (including strict concurrency), packaging, and the stub
-  daemon release smoke. The `akousma` path dependency requires `earworm`
-  checked out as a sibling.
+  daemon release smoke. Development uses canonical sibling sources; the Oída
+  distribution declares them as versioned dependencies so they are installed
+  as one stack rather than copied into divergent forks.

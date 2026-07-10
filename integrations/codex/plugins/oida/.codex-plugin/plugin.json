@@ -1,0 +1,19 @@
+{
+  "name": "oida",
+  "version": "0.2.0",
+  "description": "Give Codex accountable local ears through the complete Oída listening stack.",
+  "author": {
+    "name": "Sonic Field Labs"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Oída Listening",
+    "shortDescription": "Accountable local audio listening and sonic memory.",
+    "longDescription": "Connects Codex to Oída's provider-neutral gateway: AKOÚŌ routing, Oída or host-model perception, Earworm provenance, and Akousmata memory.",
+    "developerName": "Sonic Field Labs",
+    "category": "Developer Tools",
+    "capabilities": ["MCP tools", "MCP resources", "MCP prompts", "Skills"],
+    "defaultPrompt": "Listen through Oída, choose the correct perception path, and keep evidence categories distinct."
+  },
+  "mcpServers": "./.mcp.json"
+}

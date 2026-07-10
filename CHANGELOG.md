@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.2.0 - Unreleased
+## 0.2.0 - 2026-07-10
+
+- **Oída is now the complete listening distribution and gateway**: installing
+  it resolves AKOÚŌ (`akouo-contract`), Earworm's `akousma`, and the Akousmata
+  navigator. One FastAPI process exposes the agent/dashboard, REST gateway,
+  official streamable HTTP MCP at `/mcp`, and full library at `/library/`.
+- **Provider-neutral host perception**: `oida/gateway/v0.2` accepts either
+  Oída-owned audio (`/gateway/listen`) or a declared report from an
+  audio-capable host (`/gateway/harness`). Host-model observations cannot be
+  silently promoted to DSP measurements; apparatus limits and unknowns remain
+  explicit, while MOSS keeps its 16 kHz mono restrictions.
+- **Gateway lifecycle and local adapters**: `start`, `stop`, `status`, `doctor`,
+  `agent`, `gateway`, and `integrate` commands manage a singleton daemon and
+  install bundled Hermes, Codex, Claude, and private-network-remote integrations.
+  MCP processes ensure or reuse the gateway and pin the active Python runtime.
+- **Earworm on every pass, durable memory only by consent**: session-scoped
+  Earworm context is emitted for all gateway listens and host harness passes;
+  Akousmata writes still require an explicit remember action.
 
 - **Akousmata history embedded in the dashboard**: a new left-side
   "Akousmata" section browses the shared store natively inside oída (search,

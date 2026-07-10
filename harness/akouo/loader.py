@@ -21,6 +21,14 @@ def default_akouo_root() -> Path:
     for candidate in DEFAULT_AKOUO_CANDIDATES:
         if candidate and candidate.expanduser().exists():
             return candidate.expanduser().resolve()
+    try:
+        from akouo_contract import root as installed_root
+
+        packaged = installed_root()
+        if packaged.exists():
+            return packaged
+    except (ImportError, OSError):
+        pass
     return Path.home() / "Documents" / "SFL" / "akouo"
 
 

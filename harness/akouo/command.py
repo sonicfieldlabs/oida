@@ -11,9 +11,18 @@ AKOUO_OUTPUT_VERSION = "0.6"
 
 
 def build_apparatus(report: dict[str, Any] | None = None) -> dict[str, Any]:
-    """AKOÚŌ v0.6 apparatus declaration for the oída stack: name the substrate and
-    its structural blind spots so claim limits derive from the declared apparatus."""
+    """AKOÚŌ apparatus declaration for Oída or a host audio model."""
     report = report if isinstance(report, dict) else {}
+    declared = report.get("apparatus") if isinstance(report.get("apparatus"), dict) else None
+    if declared:
+        apparatus = dict(declared)
+        apparatus.setdefault("substrate", "host_audio_model")
+        apparatus.setdefault("perception_sources", ["host-supplied audio perception"])
+        apparatus.setdefault(
+            "known_blind_spots",
+            ["The host did not declare complete acoustic preprocessing and calibration details."],
+        )
+        return apparatus
     engine = report.get("engine") if isinstance(report.get("engine"), dict) else {}
     perception_sources = ["oida DSP feature block (deterministic measurement)"]
     for key, label in (
@@ -54,18 +63,20 @@ def build_listening_output(
     recommended_next_mode: str = "undetermined",
     report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    apparatus = build_apparatus(report)
+    sources = ", ".join(str(source) for source in apparatus.get("perception_sources", [])[:2]) or "machine perception"
     risks = empty_risks()
-    risks["hallucination"].append("MOSS-Audio can overstate acoustic evidence; retain time anchors and uncertainty notes.")
+    risks["hallucination"].append("Audio models can overstate acoustic evidence; retain time anchors and uncertainty notes.")
     risks["over_identification"].append("Source, speaker identity, age, accent, and emotion claims require caution.")
     mediations = empty_mediations()
-    mediations["technical"].append("MOSS-Audio receives 16 kHz mono audio; DSP supplies measured signal features.")
-    mediations["computational"].append("PerceptionReport evidence is model output plus deterministic DSP, not direct human listening.")
+    mediations["technical"].append(f"Declared perception apparatus: {sources}.")
+    mediations["computational"].append("PerceptionReport evidence is model output plus any declared measurements, not direct human listening.")
     return {
         "object_listened_to": object_listened_to,
         "input_type": "model_output",
         "listening_mode": mode,
         "akouo_version": AKOUO_OUTPUT_VERSION,
-        "apparatus": build_apparatus(report),
+        "apparatus": apparatus,
         "listener": {"type": "agent", "process": "agent_automated"},
         "listening_claims": claims,
         "what_appears": summarize_visible_claims(claims),
@@ -99,7 +110,7 @@ def build_command_output(report: dict[str, Any], command: str = "/listen", quest
     return {
         "command": command,
         "object_listened_to": object_listened_to,
-        "input_type": "audio_file",
+        "input_type": "model_output" if report.get("host") else "audio_file",
         "akouo_version": AKOUO_OUTPUT_VERSION,
         "skills_called": skills_called,
         "execution_order": skills_called,
@@ -108,8 +119,8 @@ def build_command_output(report: dict[str, Any], command: str = "/listen", quest
         "synthesis": synthesize_claims(claims, command),
         "claim_summary": claims,
         "risks": [
-            "MOSS captions and paralinguistics are machine-heard evidence, not measurements.",
-            "Contradictions between DSP and MOSS remain undetermined.",
+            "Model captions and paralinguistics are machine-heard evidence, not measurements.",
+            "Contradictions between declared measurements and model perception remain undetermined.",
         ],
         "recommended_next_mode": route.recommended_next_mode,
     }

@@ -1,0 +1,9 @@
+manifest_version: 1
+name: oida
+version: 0.2.0
+description: "Local Oída listening gateway: AKOÚŌ routing, Earworm provenance, and Akousmata sonic memory."
+author: "Sonic Field Labs"
+commands:
+  - oida
+skills:
+  - oida-listening

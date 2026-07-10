@@ -1,0 +1,11 @@
+{
+  "name": "oída — local listening agent",
+  "short_name": "oída",
+  "description": "Remote microphone, listening agent, AKOÚŌ routes, and Akousmata sonic memory over a private local network.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#161616",
+  "theme_color": "#161616",
+  "orientation": "any"
+}

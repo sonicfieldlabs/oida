@@ -11,6 +11,8 @@ export OIDA_MOSS_AUDIO_REPO="${OIDA_MOSS_AUDIO_REPO:-${AEAR_MOSS_AUDIO_REPO:-$RO
 export OIDA_MOSS_INSTRUCT_MODEL="${OIDA_MOSS_INSTRUCT_MODEL:-${AEAR_MOSS_INSTRUCT_MODEL:-$ROOT_DIR/weights/MOSS-Audio-4B-Instruct}}"
 export OIDA_MOSS_THINKING_MODEL="${OIDA_MOSS_THINKING_MODEL:-${AEAR_MOSS_THINKING_MODEL:-$ROOT_DIR/weights/MOSS-Audio-4B-Thinking}}"
 export OIDA_MOSS_RESIDENT="${OIDA_MOSS_RESIDENT:-${AEAR_MOSS_RESIDENT:-single}}"
-export DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-/opt/homebrew/lib}"
+TORCH_LIB="$(uv run --no-sync python -c 'import pathlib, torch; print(pathlib.Path(torch.__file__).parent / "lib")')"
+FFMPEG_LIB="$(brew --prefix ffmpeg)/lib"
+export DYLD_LIBRARY_PATH="$TORCH_LIB:$FFMPEG_LIB${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 
-exec uv run oida --profile mac-mps --host "${OIDA_HOST:-${AEAR_HOST:-127.0.0.1}}" --port "${OIDA_PORT:-${AEAR_PORT:-8765}}"
+exec uv run --no-sync oida --profile mac-mps --host "${OIDA_HOST:-${AEAR_HOST:-127.0.0.1}}" --port "${OIDA_PORT:-${AEAR_PORT:-8765}}"

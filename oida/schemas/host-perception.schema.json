@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oida.local/schemas/host-perception.schema.json",
+  "title": "Oída host perception input",
+  "description": "Structured audio perception supplied by Hermes, Codex, Claude, or another audio-capable host.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["host", "source", "observations"],
+  "properties": {
+    "contract": {"const": "oida/host-perception/v0.1"},
+    "host": {
+      "type": "object",
+      "required": ["id", "model"],
+      "properties": {
+        "id": {"enum": ["hermes", "codex", "claude", "generic"]},
+        "model": {"type": "string", "minLength": 1},
+        "provider": {"type": ["string", "null"]},
+        "session_id": {"type": ["string", "null"]},
+        "audio_input_capable": {"type": "boolean"},
+        "thinking_budget": {"type": ["integer", "null"]},
+        "wall_ms": {"type": ["integer", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["label"],
+      "properties": {
+        "label": {"type": "string", "minLength": 1},
+        "type": {"enum": ["live_input", "system_output", "file", "buffer", "generated", "external_stream"]},
+        "uri": {"type": ["string", "null"]},
+        "path": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"]},
+        "duration_s": {"type": ["number", "null"], "minimum": 0},
+        "sample_rate": {"type": ["integer", "null"], "minimum": 0},
+        "channels": {"type": ["integer", "null"], "minimum": 0},
+        "audio_available_to_oida": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "apparatus": {
+      "type": "object",
+      "properties": {
+        "substrate": {"type": "string"},
+        "perception_sources": {"type": "array", "items": {"type": "string"}},
+        "model_ids": {"type": "array", "items": {"type": "string"}},
+        "sample_rate_hz": {"type": ["integer", "null"]},
+        "channels": {"type": ["integer", "null"]},
+        "bandwidth_limit_hz": {"type": ["integer", "null"]},
+        "absolute_level_calibrated": {"type": "boolean"},
+        "known_blind_spots": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"type": "string", "minLength": 1},
+          {
+            "type": "object",
+            "required": ["statement"],
+            "properties": {
+              "statement": {"type": "string", "minLength": 1},
+              "category": {"enum": ["heard", "measured", "inferred", "interpreted", "speculative", "undetermined"]},
+              "confidence": {"enum": ["high", "medium", "low", "undetermined"]},
+              "basis": {"type": "string"},
+              "source": {"enum": ["audio", "dsp", "metadata", "model", "transcript", "context", "memory", "human"]},
+              "time_range": {
+                "type": ["object", "null"],
+                "properties": {"start_s": {"type": "number"}, "end_s": {"type": "number"}},
+                "required": ["start_s", "end_s"],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "measurements": {"type": "object"},
+    "caption": {"oneOf": [{"type": "string"}, {"type": "object"}]},
+    "transcript": {"oneOf": [{"type": "string"}, {"type": "object"}]},
+    "events": {"type": "array"},
+    "speech": {"type": "object"},
+    "music": {"type": "object"},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "raw_report": {}
+  }
+}

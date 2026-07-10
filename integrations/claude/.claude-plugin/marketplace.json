@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "oida-local",
+  "description": "Local Sonic Field Labs integrations",
+  "owner": {
+    "name": "Sonic Field Labs"
+  },
+  "plugins": [
+    {
+      "name": "oida",
+      "description": "Accountable local listening through AKOÚŌ, Earworm, and Akousmata.",
+      "author": {
+        "name": "Sonic Field Labs"
+      },
+      "category": "development",
+      "source": "./plugins/oida"
+    }
+  ]
+}

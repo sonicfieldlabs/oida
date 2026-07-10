@@ -36,6 +36,37 @@ FEATURE_KEYS = [
 MIN_SIMILARITY_SHARED_FEATURES = 3
 
 
+def earworm_context_for_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Build a session-scoped Earworm envelope without persisting a trace.
+
+    Every gateway listen is traceable; only an explicit remember action writes
+    that context into durable Akousmata memory.
+    """
+    event_id = str(event.get("id") or new_id("evt"))
+    aggregate = event.get("aggregate") if isinstance(event.get("aggregate"), dict) else {}
+    raw_audio_policy = str(event.get("raw_audio_policy") or "not_stored")
+    trace = {
+        "id": f"session_{event_id}",
+        "listeningEventId": event_id,
+        "createdAt": str(event.get("created_at") or now_iso()),
+        "title": str(aggregate.get("title") or "Listening event"),
+        "tags": event.get("tags") if isinstance(event.get("tags"), list) else [],
+        "privacyMode": str(event.get("privacy_mode") or "session"),
+        "retentionPolicy": "session",
+        "rawAudioPolicy": raw_audio_policy,
+        "audioStored": raw_audio_policy == "saved",
+        "audioPolicy": {
+            "rawAudioPolicy": raw_audio_policy,
+            "audioStored": raw_audio_policy == "saved",
+            "note": _audio_policy_note(raw_audio_policy),
+        },
+    }
+    surface = _earworm_surface(trace, event)
+    surface["persistence"] = "session_only"
+    surface["remember_required_for_durable_trace"] = True
+    return surface
+
+
 @dataclass(frozen=True)
 class AkousmataStore:
     root: Path = field(default_factory=lambda: data_dir() / "akousmata")
@@ -324,18 +355,18 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
         ),
         _earworm_event(
             session_id,
-            "agent.action.applied",
+            "agent.action.proposed" if trace.get("retentionPolicy") == "session" else "agent.action.applied",
             created_at,
             "agent",
             {
                 "action_id": f"remember_{trace_id}",
-                "action": "akousmata.remember",
-                "trace_id": trace_id,
+                "action": "akousmata.remember.available" if trace.get("retentionPolicy") == "session" else "akousmata.remember",
+                "trace_id": None if trace.get("retentionPolicy") == "session" else trace_id,
                 "listening_event_id": event_id,
                 "retention_policy": trace.get("retentionPolicy"),
                 "audio_policy": trace.get("audioPolicy"),
             },
-            reversible=True,
+            reversible=trace.get("retentionPolicy") != "session",
             parent_event_ids=[f"analysis_{event_id}"],
             provenance_id=provenance_id,
         ),
@@ -376,7 +407,7 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
     }
     return {
         "protocol": "earworm",
-        "version": "0.1.0",
+        "version": "0.2.2",
         "akousmata_surface": ["remember", "list", "search", "similarity", "export", "forget"],
         "session": session,
         "context_bundle": context_bundle,
@@ -414,7 +445,11 @@ def _earworm_event(
 def _earworm_policy(trace: dict[str, Any]) -> dict[str, Any]:
     raw_audio_policy = str(trace.get("rawAudioPolicy") or "")
     privacy_mode = str(trace.get("privacyMode") or "")
-    mode = "ephemeral" if raw_audio_policy == "temp" or privacy_mode == "incognito" else "project_lifetime"
+    mode = (
+        "ephemeral"
+        if raw_audio_policy == "temp" or privacy_mode == "incognito" or trace.get("retentionPolicy") == "session"
+        else "project_lifetime"
+    )
     return {
         "mode": mode,
         "local_only": True,

@@ -1,15 +1,18 @@
 [project]
 name = "oida"
-version = "0.1.0"
-description = "oída local listening agent: MOSS-Audio daemon, AKOUO routing, live buffers, and Akousmata memory."
+version = "0.2.0"
+description = "oída unified local listening agent and gateway: AKOÚŌ, Earworm, Akousmata, and optional local audio engines."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Sonic Field Labs" }]
 dependencies = [
-  "akousma>=0.1.0",
+  "akouo-contract>=0.6.2",
+  "akousma>=0.2.2",
+  "akousmata>=0.2.0",
   "fastapi>=0.115",
   "jsonschema>=4.22",
+  "mcp>=1.27,<2",
   "numpy>=1.26",
   "pydantic>=2.8",
   "scipy>=1.12",
@@ -19,12 +22,15 @@ dependencies = [
 
 [tool.uv.sources]
 akousma = { path = "../earworm/packages/py-akousma", editable = true }
+akouo-contract = { path = "../akouo", editable = true }
+akousmata = { path = "../akousmata", editable = true }
 
 [project.optional-dependencies]
 moss = [
-  "torch>=2.9",
+  "torch==2.9.1",
+  "torchaudio==2.9.1",
   "transformers==4.57.1",
-  "torchcodec>=0.9,<1.0"
+  "torchcodec==0.8.1"
 ]
 dev = [
   "httpx>=0.27",
@@ -37,6 +43,7 @@ songid = [
 [project.scripts]
 oida = "oida.cli:main"
 oida-daemon = "oida.server:main"
+oida-mcp = "oida.mcp_server:main"
 ear = "harness.ear_cli.cli:main"
 akoe = "harness.akoe_cli:main"
 # backward-compat aliases (previous names: AEAR, then hmm)
@@ -52,3 +59,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["oida", "harness", "bench_adapter"]
 artifacts = ["oida/static/*", "oida/schemas/*"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"integrations" = "oida/integration_assets"

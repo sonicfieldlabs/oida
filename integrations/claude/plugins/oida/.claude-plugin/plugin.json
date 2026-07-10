@@ -1,0 +1,10 @@
+{
+  "name": "oida",
+  "version": "0.2.0",
+  "description": "Accountable local listening through AKOÚŌ, Earworm, and Akousmata.",
+  "author": {
+    "name": "Sonic Field Labs"
+  },
+  "homepage": "https://github.com/sonicfieldlabs/oida",
+  "repository": "https://github.com/sonicfieldlabs/oida"
+}

@@ -1,3 +1,9 @@
+"""Legacy hand-rolled JSON-RPC MCP shim.
+
+Deprecated: superseded by the official FastMCP server in ``oida/mcp_server.py``
+(console script ``oida-mcp``; stdio via ``oida gateway --stdio`` or streamable
+HTTP at ``/mcp``). Kept only for old ``hmm_*``/``aear_*`` tool-name clients.
+"""
 from __future__ import annotations
 
 import json

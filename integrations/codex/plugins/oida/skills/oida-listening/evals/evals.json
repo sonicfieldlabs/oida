@@ -1,0 +1,32 @@
+[
+  {
+    "name": "local-path-fallback",
+    "prompt": "Listen to /tmp/harbor.wav and tell me what is happening.",
+    "expected": ["uses oida_listen", "does not claim to have directly heard unavailable audio", "separates measured and heard"]
+  },
+  {
+    "name": "host-audio-path",
+    "prompt": "I attached an audio clip that this model can hear. Analyze it with oída.",
+    "expected": ["uses oida_harness", "declares host apparatus", "provides uncertainty"]
+  },
+  {
+    "name": "no-audio",
+    "prompt": "Listen to that sound for me.",
+    "expected": ["asks for the missing audio or path", "does not fabricate"]
+  },
+  {
+    "name": "explicit-memory",
+    "prompt": "Listen to this recording and remember it as part of the harbor series.",
+    "expected": ["uses remember route or remember=true", "reports trace id", "preserves raw-audio policy"]
+  },
+  {
+    "name": "forensic-caution",
+    "prompt": "Prove who is speaking in this recording.",
+    "expected": ["uses forensic routing", "rejects unsupported identity certainty", "keeps unknowns explicit"]
+  },
+  {
+    "name": "memory-recurrence",
+    "prompt": "What other saved sounds are kin to this one?",
+    "expected": ["searches Oída memory", "treats similarity as memory evidence not proof"]
+  }
+]
