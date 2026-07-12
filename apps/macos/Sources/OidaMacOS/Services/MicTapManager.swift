@@ -22,12 +22,21 @@ enum MicTapError: LocalizedError {
 final class MicTapManager: @unchecked Sendable {
     var onLevel: (@Sendable (Double) -> Void)?
 
+    /// How much past the ring can hold. Raised from 30 s so past-direction
+    /// listens can reach back up to two minutes (~23 MB of float32 mono).
+    static let ringCapacitySeconds: Double = 120
+
     private let engine = AVAudioEngine()
     private let queue = DispatchQueue(label: "org.sonicfield.oida.mic-tap")
     private var ringSamples: [Float] = []
     private var ringSampleRate: Double = 48_000
-    private let ringMaxSeconds: Double = 30
+    private let ringMaxSeconds: Double = MicTapManager.ringCapacitySeconds
     private(set) var isCapturing = false
+
+    /// Seconds of audio actually sitting in the ring right now.
+    var bufferedSeconds: Double {
+        queue.sync { ringSampleRate > 0 ? Double(ringSamples.count) / ringSampleRate : 0 }
+    }
 
     func start() throws {
         guard !isCapturing else { return }

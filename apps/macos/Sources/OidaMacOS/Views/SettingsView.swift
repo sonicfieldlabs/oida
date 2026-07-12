@@ -21,6 +21,17 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Listening") {
+                Picker("Direction", selection: $store.selectedDirection) {
+                    Text("Past — what was just heard").tag("past")
+                    Text("Future — record after the trigger").tag("future")
+                }
+                .pickerStyle(.radioGroup)
+                Text("Past slices the ring buffer that is already listening (up to \(Int(MicTapManager.ringCapacitySeconds)) s); future records the window after you press Listen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Global Hotkeys") {
                 LabeledContent("Listen (capture system audio)") {
                     TextField("control+option+l", text: $store.listenHotkey)

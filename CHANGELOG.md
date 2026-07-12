@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.0 - 2026-07-11
+
+- **The remote ear (`/remote`)**: a phone-first capture surface served by the
+  daemon itself. Wherever, whenever — the phone records (PCM in the page, WAV
+  encoded on-device), attaches its GPS fix when granted, and posts to the new
+  `POST /remote/listen`; the server runs the full listening pipeline, keeps
+  the WAV, **writes the akousma (the sound + its listening file) into the
+  shared store** with `location` and `capture`, and answers with the
+  listening event rendered in the remote UI. Reached over the operator's
+  private network (private-network), same loopback-guard rules as the dashboard.
+- **Future / past listening (spec v1.2 `capture`)**: every listen surface can
+  now declare its temporal direction. *Past* slices the ring buffer that was
+  already listening when the trigger fired; *future* records the window after
+  it. The floating listener gains a ⟲/⟳ direction pill (persisted), Settings
+  gains the default, the native mic ring grows from 30 s to 120 s with real
+  `bufferedSeconds` accounting, the remote ear implements both modes with an
+  on-phone ring buffer that overwrites itself (nothing accumulates), and
+  `/listen-event` accepts `capture_direction` / `capture_seconds` /
+  `capture_trigger` — carried on the event, its segment metadata, memory
+  traces, and akousmata records.
+- **Geolocated listening (spec v1.2 `location`)**: `/listen-event`,
+  `/gateway/listen`, the germ handoff, and `oida_listen` (MCP) accept an
+  optional consent-scoped `location {lat, lon, accuracy_m, altitude_m, label,
+  source}`; it rides the listening event and lands in the akousma, where the
+  akousmata navigator's new listening map plots it.
+- **MCP**: `oida_live` gains the `capture` action (slice the last N seconds
+  from a live ring — the past direction made callable, with optional
+  analysis); `oida_listen` gains `location`.
+- **Contracts**: gateway manifest components move to `earworm/v0.3` and
+  `akousmata/v0.3` (spec v1.2); the gateway contract itself stays
+  `oida/gateway/v0.2` — every addition is optional and additive. New
+  `remote_ear` transport advertised.
+- 150 tests (5 new: capture/location validation and plumbing, the complete
+  remote-ear flow into a temp shared store, bridge-level spec v1.2 blocks).
+
 ## 0.2.0 - 2026-07-10
 
 - **Oída is now the complete listening distribution and gateway**: installing

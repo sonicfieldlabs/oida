@@ -104,6 +104,35 @@ def _derive_summary(listening: dict[str, Any]) -> str | None:
     return None
 
 
+def _checked_location(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate a spec v1.2 location dict through the akousma builder."""
+    if not value:
+        return None
+    label = value.get("label")
+    return akousma.location(
+        value.get("lat"),
+        value.get("lon"),
+        accuracy_m=value.get("accuracy_m"),
+        altitude_m=value.get("altitude_m"),
+        label=str(label).strip() or None if label is not None else None,
+        source=value.get("source") or "gps",
+        captured_at=value.get("captured_at"),
+    )
+
+
+def _checked_capture(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate a spec v1.2 capture dict through the akousma builder."""
+    if not value:
+        return None
+    return akousma.capture(
+        value.get("direction"),
+        seconds=value.get("seconds"),
+        trigger=value.get("trigger"),
+        armed_at=value.get("armed_at"),
+        triggered_at=value.get("triggered_at"),
+    )
+
+
 def build_akousma_from_listen(
     *,
     audio: dict[str, Any],
@@ -113,13 +142,16 @@ def build_akousma_from_listen(
     session_id: str | None = None,
     tags: list[str] | None = None,
     summary: str | None = None,
+    location: dict[str, Any] | None = None,
+    capture: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a valid akousma record from an oída listen result.
 
     ``audio`` needs at least ``asset_id`` (and ideally ``uri``/``content_hash``/duration).
     ``listening`` is namespaced per producer, e.g. ``{"oida.signal": {...}, "akouo.describe": {...}}``;
     entries are wrapped in the spec v1.1 envelope with akouo.* entries pinned to the
-    ``akouo/v0.6`` contract.
+    ``akouo/v0.6`` contract. ``location`` (where it was heard — consent-scoped) and
+    ``capture`` (past/future direction + window seconds) are spec v1.2 blocks.
     """
     origin = _normalize_origin(origin)
     enveloped = _envelope_listening(listening or {})
@@ -133,6 +165,8 @@ def build_akousma_from_listen(
         tags=tags,
         session_id=session_id,
         summary=summary or _derive_summary(enveloped),
+        location=_checked_location(location),
+        capture=_checked_capture(capture),
     )
     if device:
         record["provenance"]["device"] = device
@@ -178,6 +212,23 @@ def _maybe_enrich_songid(record: dict[str, Any], audio: dict[str, Any]) -> None:
         pass
 
 
+def persist_akousma(
+    record: dict[str, Any],
+    *,
+    store: "akousma.AkousmataStore | None" = None,
+) -> str:
+    """Persist ``record`` to the shared akousmata store (with recurrence
+    linking) and return its id. Used by the germ handoff and the remote ear."""
+    owns_store = store is None
+    store = store or akousma.AkousmataStore()
+    try:
+        _maybe_link_recurrence(record, store)
+        return store.put(record)
+    finally:
+        if owns_store:
+            store.close()
+
+
 def handoff_to_germ(
     record: dict[str, Any],
     mode: str,
@@ -190,14 +241,7 @@ def handoff_to_germ(
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
-    owns_store = store is None
-    store = store or akousma.AkousmataStore()
-    try:
-        _maybe_link_recurrence(record, store)
-        akousma_id = store.put(record)
-    finally:
-        if owns_store:
-            store.close()
+    akousma_id = persist_akousma(record, store=store)
     return {"akousma_id": akousma_id, "mode": mode, "germ_url": germ_deep_link(akousma_id, mode)}
 
 
@@ -221,6 +265,8 @@ def build_germ_router():
         session_id: str | None = None
         tags: list[str] | None = None
         summary: str | None = None
+        location: dict[str, Any] | None = None
+        capture: dict[str, Any] | None = None
 
     router = APIRouter(prefix="/germ", tags=["germ"])
 
@@ -235,6 +281,8 @@ def build_germ_router():
                 session_id=req.session_id,
                 tags=req.tags,
                 summary=req.summary,
+                location=req.location,
+                capture=req.capture,
             )
             _maybe_enrich_songid(record, req.audio)
             return handoff_to_germ(record, req.mode)

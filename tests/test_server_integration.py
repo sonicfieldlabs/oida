@@ -189,6 +189,115 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertEqual(event["raw_audio_policy"], "temp")
         self.assertTrue(event["segment"]["ephemeral"])
 
+    def test_listen_event_carries_capture_and_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+            clear=False,
+        ):
+            path = _write_tone(Path(tmp) / "walk.wav")
+            response = TestClient(
+                create_app(profile="stub"), base_url="http://127.0.0.1"
+            ).post(
+                "/listen-event",
+                json={
+                    "path": str(path),
+                    "source_type": "live_input",
+                    "capture_direction": "past",
+                    "capture_seconds": 30,
+                    "capture_trigger": "floating-listener",
+                    "location": {"lat": 6.2442, "lon": -75.5812, "accuracy_m": 12, "source": "gps"},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        event = response.json()["listening_event"]
+        self.assertEqual(event["capture"]["direction"], "past")
+        self.assertEqual(event["capture"]["seconds"], 30)
+        self.assertEqual(event["capture"]["trigger"], "floating-listener")
+        self.assertIn("triggered_at", event["capture"])
+        self.assertEqual(event["location"]["lat"], 6.2442)
+        self.assertEqual(event["segment"]["metadata"]["capture"]["direction"], "past")
+        self.assertEqual(event["segment"]["metadata"]["location"]["lon"], -75.5812)
+
+    def test_listen_event_rejects_bad_capture_and_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_tone(Path(tmp) / "tone.wav")
+            client = _client()
+            sideways = client.post(
+                "/listen-event", json={"path": str(path), "capture_direction": "sideways"}
+            )
+            off_planet = client.post(
+                "/listen-event", json={"path": str(path), "location": {"lat": 123, "lon": 0}}
+            )
+        self.assertEqual(sideways.status_code, 400)
+        self.assertIn("capture_direction", sideways.json()["detail"])
+        self.assertEqual(off_planet.status_code, 400)
+        self.assertIn("location.lat", off_planet.json()["detail"])
+
+    def test_remote_ear_page_and_listen_flow(self) -> None:
+        import io
+        import wave as wave_module
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {
+                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                "AKOUSMATA_WATCHER": "0",
+            },
+            clear=False,
+        ):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            page = client.get("/remote")
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("remote ear", page.text)
+
+            buffer = io.BytesIO()
+            with wave_module.open(buffer, "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(16_000)
+                handle.writeframes(b"\x00\x01" * 16_000)
+            response = client.post(
+                "/remote/listen",
+                files={"file": ("remote-capture.wav", buffer.getvalue(), "audio/wav")},
+                data={
+                    "direction": "past",
+                    "seconds": "30",
+                    "lat": "6.2442",
+                    "lon": "-75.5812",
+                    "accuracy_m": "9",
+                    "location_label": "río Medellín",
+                    "tags": "night,walk",
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            remote = body["remote"]
+            self.assertEqual(remote["direction"], "past")
+            self.assertNotIn("akousma_error", remote)
+            self.assertIn("akousma_id", remote)
+            self.assertTrue(str(remote["audio_uri"]).startswith("akousmata://objects/"))
+            self.assertEqual(body["listening_event"]["location"]["label"], "río Medellín")
+
+            import akousma
+
+            store = akousma.AkousmataStore(Path(tmp) / "akousmata")
+            try:
+                record = store.get(remote["akousma_id"])
+                self.assertIsNotNone(record)
+                self.assertEqual(record["location"]["lat"], 6.2442)
+                self.assertEqual(record["capture"]["direction"], "past")
+                self.assertEqual(record["capture"]["trigger"], "remote-ear")
+                self.assertIn("remote-ear", record["tags"])
+                self.assertEqual(record["provenance"]["origin"], "live-input")
+                audio_path = store.resolve_uri(record["audio"]["uri"])
+                self.assertTrue(audio_path is not None and audio_path.exists())
+            finally:
+                store.close()
+
     def test_generation_relisten_honors_signal_preset_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             "os.environ",

@@ -182,6 +182,7 @@ def _install_remote(*, serve: bool, https_port: int) -> dict[str, Any]:
             "https_port": https_port,
             "url": f"https://{dns_name}:{https_port}/",
             "library_url": f"https://{dns_name}:{https_port}/library/",
+            "remote_ear_url": f"https://{dns_name}:{https_port}/remote",
         }
     )
     settings["remote"] = remote
@@ -205,6 +206,7 @@ def _install_remote(*, serve: bool, https_port: int) -> dict[str, Any]:
         "configured": True,
         "url": remote["url"],
         "library_url": remote["library_url"],
+        "remote_ear_url": remote["remote_ear_url"],
         "serve": serve_result,
         "restart_required": True,
         "security": "Oída remains loopback-bound; private-network ACLs are the remote authorization boundary.",

@@ -125,6 +125,10 @@ uv run oida doctor
 
 No native iOS or cloud service is required: open the reported private-network URL on
 the phone to use it as the microphone, speaker, screen, and remote control.
+The `/remote` page is the dedicated remote ear: past/future capture with an
+on-phone ring buffer, optional GPS, and the akousma (sound + listening file)
+filed into the shared store by the server — see
+`integrations/remote/README.md`.
 
 Generate a normalized listening event:
 

@@ -90,6 +90,9 @@ struct ListenEventPayload: Codable {
     let deviceId: String?
     let privacyMode: String?
     let rawAudioPolicy: String?
+    let captureDirection: String?
+    let captureSeconds: Double?
+    let captureTrigger: String?
 
     enum CodingKeys: String, CodingKey {
         case path
@@ -99,6 +102,9 @@ struct ListenEventPayload: Codable {
         case deviceId = "device_id"
         case privacyMode = "privacy_mode"
         case rawAudioPolicy = "raw_audio_policy"
+        case captureDirection = "capture_direction"
+        case captureSeconds = "capture_seconds"
+        case captureTrigger = "capture_trigger"
     }
 }
 
@@ -138,6 +144,7 @@ struct BackgroundConfigModel: Codable {
     let showFloatingAgent: Bool?
     let floatingAgent: FloatingAgentConfig?
     let defaultCaptureSeconds: Double?
+    let defaultCaptureDirection: String?
     let defaultRoutePreset: String?
     let incognito: Bool?
     let saveEventsByDefault: Bool?
@@ -152,6 +159,7 @@ struct BackgroundConfigModel: Codable {
         case showFloatingAgent = "show_floating_agent"
         case floatingAgent = "floating_agent"
         case defaultCaptureSeconds = "default_capture_seconds"
+        case defaultCaptureDirection = "default_capture_direction"
         case defaultRoutePreset = "default_route_preset"
         case incognito
         case saveEventsByDefault = "save_events_by_default"

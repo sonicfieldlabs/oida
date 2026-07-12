@@ -72,6 +72,14 @@ final class ShellStore: ObservableObject {
             UserDefaults.standard.set(selectedPreset, forKey: Defaults.routePreset)
         }
     }
+    /// Temporal direction of the listen gesture (spec v1.2 capture):
+    /// "past" slices what the ring buffer already heard before the trigger;
+    /// "future" records the window after it.
+    @Published var selectedDirection: String {
+        didSet {
+            UserDefaults.standard.set(selectedDirection, forKey: Defaults.listenDirection)
+        }
+    }
 
     private var client: DaemonClient
     private let supervisor = DaemonSupervisor()
@@ -91,6 +99,7 @@ final class ShellStore: ObservableObject {
         toggleHotkey = UserDefaults.standard.string(forKey: Defaults.toggleHotkey) ?? "control+option+h"
         selectedSource = UserDefaults.standard.string(forKey: Defaults.listenSource) ?? "system"
         selectedPreset = UserDefaults.standard.string(forKey: Defaults.routePreset) ?? "basic"
+        selectedDirection = UserDefaults.standard.string(forKey: Defaults.listenDirection) ?? "past"
         client = DaemonClient(baseURLString: url)
         micTap.onLevel = { [weak self] level in
             Task { @MainActor in
@@ -396,17 +405,32 @@ final class ShellStore: ObservableObject {
         }
     }
 
+    /// Direction-aware wait before slicing the ring (spec v1.2 capture):
+    /// - past: take what the buffer already heard — wait only a short grace
+    ///   when the tap just opened and holds nothing yet (an ear that just
+    ///   opened has no past).
+    /// - future: the window starts at the trigger — wait the full length,
+    ///   then the last N seconds are exactly [trigger, trigger + N].
+    private func waitForDirection(_ direction: String, captureSeconds: Double, buffered: Double) async -> Bool {
+        let missing: Double
+        if direction == "future" {
+            missing = captureSeconds
+        } else {
+            let grace = min(captureSeconds, 1.0)
+            missing = buffered >= grace ? 0 : grace - buffered
+        }
+        if missing > 0 {
+            guard (try? await Task.sleep(nanoseconds: UInt64(missing * 1_000_000_000))) != nil else { return false }
+        }
+        return !Task.isCancelled
+    }
+
     private func listenFromSystem(captureSeconds: Double, preset: String?) async {
         if !nativeSystemAudioActive {
             await startNativeSystemAudioTap()
             guard nativeSystemAudioActive else { return }
         }
-        let buffered = bufferedSeconds()
-        if buffered < captureSeconds {
-            let missing = captureSeconds - buffered
-            guard (try? await Task.sleep(nanoseconds: UInt64(max(0, missing) * 1_000_000_000))) != nil else { return }
-        }
-        guard !Task.isCancelled else { return }
+        guard await waitForDirection(selectedDirection, captureSeconds: captureSeconds, buffered: bufferedSeconds()) else { return }
         await analyzeNativeSystemAudio(seconds: captureSeconds, preset: preset)
     }
 
@@ -420,12 +444,8 @@ final class ShellStore: ObservableObject {
                 return
             }
         }
-        let buffered = micTapStartedAt.map { min(30, Date().timeIntervalSince($0)) } ?? 0
-        if buffered < captureSeconds {
-            let missing = captureSeconds - buffered
-            guard (try? await Task.sleep(nanoseconds: UInt64(max(0, missing) * 1_000_000_000))) != nil else { return }
-        }
-        guard !Task.isCancelled else { return }
+        let direction = selectedDirection
+        guard await waitForDirection(direction, captureSeconds: captureSeconds, buffered: micTap.bufferedSeconds) else { return }
         do {
             let output = try micTap.writeRecentAudio(seconds: captureSeconds)
             let response = try await client.listenEvent(
@@ -434,7 +454,10 @@ final class ShellStore: ObservableObject {
                 sourceType: "live_input",
                 sourceLabel: "Native microphone",
                 privacyMode: "ephemeral",
-                rawAudioPolicy: "temp"
+                rawAudioPolicy: "temp",
+                captureDirection: direction,
+                captureSeconds: captureSeconds,
+                captureTrigger: "floating-listener"
             )
             latestRouteComparison = nil
             latestEvent = response.listeningEvent ?? latestEvent
@@ -484,12 +507,12 @@ final class ShellStore: ObservableObject {
         nativeSystemAudioUpdatedAt == nil ? 0 : ringBufferedSecondsEstimate
     }
 
-    // The tap keeps up to 30 s; after the first snapshot we assume the ring is
-    // filling in real time from tap start.
+    // The tap keeps up to MicTapManager.ringCapacitySeconds; after the first
+    // snapshot we assume the ring is filling in real time from tap start.
     private var tapStartedAt: Date?
     private var ringBufferedSecondsEstimate: Double {
         guard let tapStartedAt else { return 0 }
-        return min(30, Date().timeIntervalSince(tapStartedAt))
+        return min(MicTapManager.ringCapacitySeconds, Date().timeIntervalSince(tapStartedAt))
     }
 
     func startDaemon() async {
@@ -981,4 +1004,5 @@ private enum Defaults {
     static let toggleHotkey = "oida.toggleHotkey"
     static let listenSource = "oida.listenSource"
     static let routePreset = "oida.routePreset"
+    static let listenDirection = "oida.listenDirection"
 }

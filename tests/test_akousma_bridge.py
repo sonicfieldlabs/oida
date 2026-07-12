@@ -25,6 +25,32 @@ class TestGermDeepLinks(unittest.TestCase):
         self.assertEqual(rec["provenance"]["origin"], "live-input")
         self.assertEqual(rec["provenance"]["originating_app"], "oida")
 
+    def test_location_and_capture_ride_the_record(self):
+        rec = akousma_bridge.build_akousma_from_listen(
+            audio={"asset_id": "a1"},
+            origin="live-input",
+            location={"lat": 6.2442, "lon": -75.5812, "accuracy_m": 12, "label": "río Medellín"},
+            capture={"direction": "past", "seconds": 30, "trigger": "remote-ear"},
+        )
+        self.assertEqual(akousma.validation_errors(rec), [])
+        self.assertEqual(rec["location"]["lat"], 6.2442)
+        self.assertEqual(rec["location"]["source"], "gps")  # remote captures default to gps
+        self.assertEqual(rec["capture"]["direction"], "past")
+        self.assertEqual(rec["capture"]["seconds"], 30)
+        self.assertIn("triggered_at", rec["capture"])
+
+    def test_bad_location_is_rejected_before_the_store(self):
+        with self.assertRaises(ValueError):
+            akousma_bridge.build_akousma_from_listen(
+                audio={"asset_id": "a1"},
+                location={"lat": 123.0, "lon": 0.0},
+            )
+        with self.assertRaises(ValueError):
+            akousma_bridge.build_akousma_from_listen(
+                audio={"asset_id": "a1"},
+                capture={"direction": "sideways"},
+            )
+
 
 class TestCrossAppRoundTrip(unittest.TestCase):
     def setUp(self):

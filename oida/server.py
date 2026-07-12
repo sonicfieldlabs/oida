@@ -221,6 +221,13 @@ class ListenEventRequest(PathRequest):
     source_label: str | None = None
     device_id: str | None = None
     raw_audio_policy: str | None = None
+    # spec v1.2 capture semantics: how this listen was triggered relative to
+    # time (past = ring-buffer slice before the trigger, future = window
+    # recorded after it, live = open-ended) and where it was heard.
+    capture_direction: str | None = None
+    capture_seconds: float | None = None
+    capture_trigger: str | None = None
+    location: dict[str, Any] | None = None
 
 
 class GatewayListenRequest(ListenEventRequest):
@@ -750,6 +757,12 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         # after an upgrade (assets are ?v= versioned, the document is not)
         return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
 
+    @app.get("/remote")
+    def remote_ear_page() -> FileResponse:
+        # The remote ear: a phone-first capture surface served by the same
+        # daemon (reached over the operator's private network, e.g. private-network).
+        return FileResponse(static_dir / "remote.html", headers={"Cache-Control": "no-cache"})
+
     @app.get("/api")
     def api_root() -> dict[str, object]:
         return {
@@ -1102,6 +1115,13 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             raw_audio_policy = _raw_audio_policy(
                 req.raw_audio_policy or ("temp" if source_type in {"live_input", "system_output", "buffer"} else "external_ref")
             )
+            capture_info = _capture_info(req)
+            location = _validated_location(req.location)
+            metadata: dict[str, object] = {"raw_audio_policy": raw_audio_policy}
+            if capture_info:
+                metadata["capture"] = capture_info
+            if location:
+                metadata["location"] = location
             segment = audio_segment_from_path(
                 path,
                 source=source_for_path(
@@ -1112,7 +1132,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 ),
                 privacy_mode=privacy_mode,
                 ephemeral=raw_audio_policy in {"temp", "not_stored"},
-                metadata={"raw_audio_policy": raw_audio_policy},
+                metadata=metadata,
             )
             broadcaster.publish(
                 "listen_started",
@@ -1131,6 +1151,10 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 privacy_mode=privacy_mode,
                 raw_audio_policy=raw_audio_policy,
             )
+            if capture_info:
+                event["capture"] = capture_info
+            if location:
+                event["location"] = location
             event = memory.enrich_event(event)
             background.finish_action(event)
             broadcaster.publish("listen_completed", {"listening_event": event, "route_preset": preset.id})
@@ -1155,6 +1179,121 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "earworm": earworm,
             "trace": trace,
         }
+
+    @app.post("/remote/listen")
+    def remote_listen_endpoint(
+        file: UploadFile = File(...),
+        direction: str = Form("past"),
+        seconds: float = Form(30.0),
+        route_preset_name: str = Form("basic"),
+        lat: float | None = Form(None),
+        lon: float | None = Form(None),
+        accuracy_m: float | None = Form(None),
+        altitude_m: float | None = Form(None),
+        location_label: str | None = Form(None),
+        notes: str | None = Form(None),
+        tags: str | None = Form(None),
+        remember: bool = Form(True),
+        device: str | None = Form(None),
+        armed_at: str | None = Form(None),
+    ) -> dict[str, object]:
+        """The remote ear: a phone records (past ring slice or future window),
+        uploads the sound with its optional GPS fix, and gets the listening
+        back. The server keeps the WAV, writes the akousma — the sound plus
+        its listening file — into the shared store, and returns the results
+        for the remote UI."""
+        saved = save_upload(file)
+        location: dict[str, Any] | None = None
+        if lat is not None and lon is not None:
+            location = {"lat": lat, "lon": lon, "source": "gps"}
+            if accuracy_m is not None:
+                location["accuracy_m"] = accuracy_m
+            if altitude_m is not None:
+                location["altitude_m"] = altitude_m
+            if location_label:
+                location["label"] = location_label
+        tag_list = [tag.strip() for tag in (tags or "").split(",") if tag.strip()]
+        request = GatewayListenRequest(
+            path=str(saved["path"]),
+            route_preset=route_preset_name,
+            privacy_mode="session",
+            source_type="live_input",
+            source_label="oída remote ear",
+            raw_audio_policy="external_ref",
+            capture_direction=direction,
+            capture_seconds=seconds,
+            capture_trigger="remote-ear",
+            location=location,
+            remember=remember,
+            user_notes=notes,
+            tags=["remote-ear", *tag_list],
+        )
+        result = gateway_listen_endpoint(request)
+        event = result["listening_event"] if isinstance(result.get("listening_event"), dict) else {}
+        remote_info: dict[str, object] = {
+            "direction": direction,
+            "seconds": seconds,
+            "stored_path": str(saved["path"]),
+        }
+        try:
+            import akousma as _akousma
+
+            from .akousma_bridge import build_akousma_from_listen, persist_akousma
+
+            store = _akousma.AkousmataStore()
+            try:
+                wav_path = Path(str(saved["path"]))
+                uri = store.put_audio(wav_path.read_bytes(), ext=wav_path.suffix.lstrip(".") or "wav")
+                features = event.get("features") if isinstance(event.get("features"), dict) else {}
+                aggregate = event.get("aggregate") if isinstance(event.get("aggregate"), dict) else {}
+                audio: dict[str, Any] = {
+                    "asset_id": f"remote_{event.get('id') or _akousma.new_id('cap')}",
+                    "type": "capture",
+                    "uri": uri,
+                    "content_hash": f"sha256:{saved['sha256']}",
+                }
+                if isinstance(features.get("duration_s"), (int, float)):
+                    audio["duration_seconds"] = float(features["duration_s"])
+                if isinstance(features.get("sample_rate"), (int, float)):
+                    audio["sample_rate"] = int(features["sample_rate"])
+                if isinstance(features.get("channels"), (int, float)):
+                    audio["channels"] = int(features["channels"])
+                perception_dict = result.get("perception_report") if isinstance(result.get("perception_report"), dict) else {}
+                command_output = result.get("command_output") if isinstance(result.get("command_output"), dict) else {}
+                listening: dict[str, Any] = {}
+                signal = perception_dict.get("signal_interpretation")
+                if isinstance(signal, dict) and signal:
+                    listening["oida.signal"] = signal
+                listening["oida.remote"] = {
+                    "summary": aggregate.get("short_summary") or aggregate.get("title"),
+                    "aggregate": aggregate,
+                    "claim_summary": command_output.get("claim_summary"),
+                    "route_preset": route_preset_name,
+                    "event_id": event.get("id"),
+                }
+                record = build_akousma_from_listen(
+                    audio=audio,
+                    listening=listening,
+                    origin="live-input",
+                    device=device or "phone microphone via oída remote ear",
+                    tags=["remote-ear", *tag_list],
+                    summary=str(aggregate.get("short_summary") or aggregate.get("title") or "") or None,
+                    location=location,
+                    capture={"direction": direction, "seconds": seconds, "trigger": "remote-ear", "armed_at": armed_at},
+                )
+                akousma_id = persist_akousma(record, store=store)
+                remote_info["akousma_id"] = akousma_id
+                remote_info["audio_uri"] = uri
+                if isinstance(event, dict):
+                    event.setdefault("memory", {})["akousma_id"] = akousma_id
+            finally:
+                store.close()
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — the listen already succeeded; report the store miss honestly
+            LOGGER.warning("remote listen: akousma write failed: %s", exc)
+            remote_info["akousma_error"] = str(exc)
+        return {**result, "remote": remote_info}
 
     @app.post("/gateway/harness")
     def gateway_harness_endpoint(req: GatewayHarnessRequest) -> dict[str, object]:
@@ -1737,6 +1876,44 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         return {"version": "0.1", "similar": similar}
 
     return app
+
+
+_CAPTURE_DIRECTIONS = {"past", "future", "live"}
+
+
+def _capture_info(req: "ListenEventRequest") -> dict[str, object] | None:
+    """Normalize the spec v1.2 capture block from a listen request."""
+    if req.capture_direction is None and req.capture_seconds is None and not req.capture_trigger:
+        return None
+    info: dict[str, object] = {}
+    if req.capture_direction is not None:
+        direction = str(req.capture_direction).strip().lower()
+        if direction not in _CAPTURE_DIRECTIONS:
+            raise ValueError(f"capture_direction must be one of {sorted(_CAPTURE_DIRECTIONS)}, got {direction!r}")
+        info["direction"] = direction
+    if req.capture_seconds is not None:
+        seconds = float(req.capture_seconds)
+        if seconds < 0:
+            raise ValueError("capture_seconds must be >= 0")
+        info["seconds"] = seconds
+    if req.capture_trigger:
+        info["trigger"] = str(req.capture_trigger)
+    info["triggered_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return info
+
+
+def _validated_location(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Light spec v1.2 location validation; extra keys pass through."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("location must be an object with lat/lon")
+    lat, lon = value.get("lat"), value.get("lon")
+    if not isinstance(lat, (int, float)) or not -90.0 <= float(lat) <= 90.0:
+        raise ValueError("location.lat must be a number in [-90, 90]")
+    if not isinstance(lon, (int, float)) or not -180.0 <= float(lon) <= 180.0:
+        raise ValueError("location.lon must be a number in [-180, 180]")
+    return {**value, "lat": float(lat), "lon": float(lon)}
 
 
 def save_upload(file: UploadFile) -> dict[str, object]:

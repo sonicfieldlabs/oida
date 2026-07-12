@@ -17,6 +17,11 @@ struct FloatingListenerView: View {
         ("file", "File", "folder", "Listen to an audio file"),
     ]
 
+    private let directions: [(id: String, icon: String, hint: String)] = [
+        ("past", "gobackward", "Past: capture the seconds the ear already heard before the trigger"),
+        ("future", "goforward", "Future: record the seconds after the trigger"),
+    ]
+
     var body: some View {
         VStack(spacing: 9) {
             topControls
@@ -110,6 +115,7 @@ struct FloatingListenerView: View {
     private var bottomControls: some View {
         HStack(spacing: 8) {
             sourcePill
+            directionPill
             Spacer(minLength: 0)
             listenButton
             controlCenterButton
@@ -194,6 +200,31 @@ struct FloatingListenerView: View {
         .frost(cornerRadius: 13)
     }
 
+    /// Past ⟲ / future ⟳ — the temporal direction of the next listen.
+    private var directionPill: some View {
+        HStack(spacing: 3) {
+            ForEach(directions, id: \.id) { direction in
+                Button {
+                    store.selectedDirection = direction.id
+                } label: {
+                    Image(systemName: direction.icon)
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(width: 30, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(store.selectedDirection == direction.id ? Color.primary : Color.clear)
+                        )
+                        .foregroundStyle(store.selectedDirection == direction.id ? Color(nsColor: .windowBackgroundColor) : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(direction.hint)
+                .disabled(store.isListening)
+            }
+        }
+        .padding(3)
+        .frost(cornerRadius: 13)
+    }
+
     private var listenButton: some View {
         Button {
             if store.isListening {
@@ -217,7 +248,7 @@ struct FloatingListenerView: View {
             .foregroundStyle(Color(nsColor: .windowBackgroundColor))
         }
         .buttonStyle(.plain)
-        .help(store.isListening ? "Stop listening" : "Listen to the \(store.selectedSource) source in \(currentPresetName) mode (\(store.listenHotkey))")
+        .help(store.isListening ? "Stop listening" : "Listen \(store.selectedDirection == "future" ? "forward" : "back") on the \(store.selectedSource) source in \(currentPresetName) mode (\(store.listenHotkey))")
     }
 
     private var controlCenterButton: some View {

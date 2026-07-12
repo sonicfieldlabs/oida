@@ -42,6 +42,7 @@ class BackgroundConfig:
         }
     )
     default_capture_seconds: float = 10.0
+    default_capture_direction: str = "past"  # past = ring slice before the trigger; future = window after it
     default_route_preset: str = "basic"
     incognito: bool = False
     save_events_by_default: bool = False

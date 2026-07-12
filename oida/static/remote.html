@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f6f6f4" />
+  <title>oída — remote ear</title>
+  <link rel="manifest" href="static/manifest.webmanifest" />
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f6f4; --ctl: #ffffff; --well: #eeeeea; --sel: #e6e6e1;
+      --ink: #1d1d1b; --muted: #6b6b64; --faint: #90908a; --line: #e3e3de;
+      --primary: #2b2b27; --warn: #a9762f; --bad: #a2453a; --ok: #5a6e4a;
+      --radius: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, Inter, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171716; --ctl: #1f1f1e; --well: #242422; --sel: #2c2c2a;
+        --ink: #ecece8; --muted: #a8a8a0; --faint: #7c7c74; --line: #2e2e2b;
+        --primary: #ecece8;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink); font-size: 16px; line-height: 1.5;
+      -webkit-font-smoothing: antialiased; padding: max(14px, env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+      max-width: 560px; margin-inline: auto;
+    }
+    h1 { font-size: 19px; margin: 4px 0 2px; font-weight: 650; letter-spacing: 0.02em; }
+    .sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .seg { display: flex; background: var(--well); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+    .seg button {
+      border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px;
+      padding: 7px 16px; border-radius: 999px; cursor: pointer; touch-action: manipulation;
+    }
+    .seg button.active { background: var(--ctl); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chips button {
+      border: 1px solid var(--line); background: var(--ctl); color: var(--muted); font: inherit;
+      font-size: 13.5px; padding: 5px 13px; border-radius: 999px; cursor: pointer; touch-action: manipulation;
+    }
+    .chips button.active { background: var(--sel); color: var(--ink); }
+    .panel { background: var(--ctl); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin: 10px 0; }
+    label.opt { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+    input[type="text"] {
+      background: var(--bg); border: 1px solid var(--line); border-radius: 9px; color: var(--ink);
+      padding: 8px 11px; font: inherit; font-size: 14px; width: 100%;
+    }
+    select { background: var(--ctl); border: 1px solid var(--line); border-radius: 9px; color: var(--ink); padding: 7px 10px; font: inherit; font-size: 14px; }
+    .listen-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 0 8px; }
+    #listen {
+      width: 128px; height: 128px; border-radius: 50%; border: 1px solid var(--line); cursor: pointer;
+      background: radial-gradient(circle at 50% 42%, var(--ctl), var(--well));
+      color: var(--ink); font: inherit; font-size: 15.5px; font-weight: 600; touch-action: manipulation;
+      transition: transform 0.08s ease, box-shadow 0.2s ease;
+    }
+    #listen:active { transform: scale(0.97); }
+    #listen.armed { box-shadow: 0 0 0 5px rgba(169, 118, 47, 0.18); border-color: var(--warn); }
+    #listen.busy { box-shadow: 0 0 0 5px rgba(169, 118, 47, 0.3); border-color: var(--warn); color: var(--warn); }
+    #meter { width: 128px; height: 4px; background: var(--well); border-radius: 2px; overflow: hidden; }
+    #meter i { display: block; height: 100%; width: 0; background: var(--warn); border-radius: 2px; transition: width 0.08s linear; }
+    .status { min-height: 20px; color: var(--muted); font-size: 13.5px; text-align: center; }
+    .status.bad { color: var(--bad); }
+    .result h2, .history h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); margin: 0 0 8px; font-weight: 600; }
+    .result .title { font-weight: 640; font-size: 16px; }
+    .result .summary { color: var(--muted); font-size: 14px; margin-top: 3px; }
+    .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .badge {
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; border-radius: 4px;
+      padding: 2px 7px; background: var(--well); color: var(--muted); border: 1px solid var(--line);
+    }
+    .badge.warn { color: var(--warn); border-color: var(--warn); }
+    .facts { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; }
+    .hist-item { padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+    .hist-item .when { color: var(--faint); font-size: 12px; }
+    a { color: var(--warn); }
+    .note { color: var(--faint); font-size: 12.5px; }
+    details summary { color: var(--muted); font-size: 14px; cursor: pointer; padding: 4px 0; }
+  </style>
+</head>
+<body>
+  <h1>oída · remote ear</h1>
+  <p class="sub">wherever you are, whenever you listen — the sound and its listening file land on the server</p>
+
+  <div class="panel">
+    <div class="row" style="justify-content: space-between">
+      <div class="seg" id="direction">
+        <button data-dir="past" class="active">⟲ past</button>
+        <button data-dir="future">future ⟳</button>
+      </div>
+      <select id="preset">
+        <option value="basic" selected>basic</option>
+        <option value="field">field</option>
+        <option value="signal">signal</option>
+        <option value="voice">voice</option>
+        <option value="music">music</option>
+        <option value="recall">recall</option>
+      </select>
+    </div>
+    <div class="chips" id="seconds" style="margin-top: 10px">
+      <button data-s="10">10s</button>
+      <button data-s="30" class="active">30s</button>
+      <button data-s="60">60s</button>
+      <button data-s="120">120s</button>
+    </div>
+    <p class="note" id="mode-note" style="margin: 10px 0 0"></p>
+  </div>
+
+  <div class="listen-wrap">
+    <button id="listen">listen</button>
+    <div id="meter"><i></i></div>
+    <div class="status" id="status">the ear is quiet</div>
+  </div>
+
+  <div class="panel">
+    <label class="opt"><input type="checkbox" id="use-location" checked /> attach my location (GPS, stays in your store)</label>
+    <details style="margin-top: 8px">
+      <summary>notes · tags · place</summary>
+      <div style="display: grid; gap: 8px; margin-top: 8px">
+        <input type="text" id="notes" placeholder="notes (optional)" />
+        <input type="text" id="tags" placeholder="tags, comma, separated (optional)" />
+        <input type="text" id="place" placeholder="place name (optional)" />
+      </div>
+    </details>
+  </div>
+
+  <div class="panel result" id="result" hidden>
+    <h2>last listening</h2>
+    <div id="result-body"></div>
+  </div>
+
+  <div class="panel history" id="history" hidden>
+    <h2>this session</h2>
+    <div id="history-body"></div>
+  </div>
+
+  <p class="note">past mode keeps only the last N seconds in memory on this phone and forgets the rest as it goes; nothing leaves the device until you trigger a listen. served by your own oída daemon over your private network.</p>
+
+  <script src="static/remote.js"></script>
+</body>
+</html>

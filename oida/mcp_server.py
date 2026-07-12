@@ -71,8 +71,12 @@ async def oida_listen(
     raw_audio_policy: str | None = None,
     tags: list[str] | None = None,
     user_notes: str | None = None,
+    location: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Listen to a local audio file with Oída's configured engine and complete stack."""
+    """Listen to a local audio file with Oída's configured engine and complete stack.
+
+    ``location`` (optional, spec v1.2): ``{lat, lon, accuracy_m?, label?, source?}`` —
+    where the sound was heard; attach only with the listener's consent."""
     return await asyncio.to_thread(
         post_json,
         _server(),
@@ -85,6 +89,7 @@ async def oida_listen(
             "raw_audio_policy": raw_audio_policy,
             "tags": tags or [],
             "user_notes": user_notes,
+            "location": location,
         },
     )
 
@@ -185,12 +190,19 @@ async def oida_forget(trace_id: str) -> dict[str, Any]:
 
 @MCP.tool(structured_output=True)
 async def oida_live(
-    action: Literal["start", "status", "stop"],
+    action: Literal["start", "status", "stop", "capture"],
     session_id: str | None = None,
     ring_seconds: float = 60.0,
     vad_threshold_dbfs: float = -45.0,
+    seconds: float = 10.0,
+    analyze: bool = False,
+    route_preset: str = "basic",
 ) -> dict[str, Any]:
-    """Start, inspect, or stop an Oída live local listening buffer."""
+    """Start, inspect, capture from, or stop an Oída live listening buffer.
+
+    ``capture`` is the past direction made callable: it slices the last
+    ``seconds`` already sitting in the ring buffer — the sound from before
+    the trigger — and optionally analyzes it (``analyze`` + ``route_preset``)."""
     if action == "start":
         return await asyncio.to_thread(
             post_json,
@@ -199,7 +211,14 @@ async def oida_live(
             {"ring_seconds": ring_seconds, "vad_threshold_dbfs": vad_threshold_dbfs},
         )
     if not session_id:
-        raise ValueError("session_id is required for live status or stop")
+        raise ValueError("session_id is required for live status, capture, or stop")
+    if action == "capture":
+        return await asyncio.to_thread(
+            post_json,
+            _server(),
+            "/live/capture",
+            {"session_id": session_id, "seconds": seconds, "analyze": analyze, "route_preset": route_preset},
+        )
     return await asyncio.to_thread(
         post_json,
         _server(),

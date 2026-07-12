@@ -161,7 +161,10 @@ struct DaemonClient {
         sourceLabel: String? = nil,
         deviceId: String? = nil,
         privacyMode: String? = nil,
-        rawAudioPolicy: String? = nil
+        rawAudioPolicy: String? = nil,
+        captureDirection: String? = nil,
+        captureSeconds: Double? = nil,
+        captureTrigger: String? = nil
     ) async throws -> ListenEventResponse {
         let payload = ListenEventPayload(
             path: path,
@@ -170,7 +173,10 @@ struct DaemonClient {
             sourceLabel: sourceLabel,
             deviceId: deviceId,
             privacyMode: privacyMode,
-            rawAudioPolicy: rawAudioPolicy
+            rawAudioPolicy: rawAudioPolicy,
+            captureDirection: captureDirection,
+            captureSeconds: captureSeconds,
+            captureTrigger: captureTrigger
         )
         return try await post("/listen-event", payload: payload)
     }

@@ -98,7 +98,9 @@ class IntegrationAssetTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("listening navigator", page.text.lower())
         self.assertEqual(health.status_code, 200)
-        self.assertEqual(health.json()["contract"], "akousmata/v0.2")
+        from akousmata_app import AKOUSMATA_CONTRACT
+
+        self.assertEqual(health.json()["contract"], AKOUSMATA_CONTRACT)
 
 
 class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
