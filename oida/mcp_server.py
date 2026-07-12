@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 
 from mcp.server.fastmcp import FastMCP
 
-from harness.http_client import get_json, post_json
+from harness.http_client import get_json, post_json, put_json
 from oida.lifecycle import ensure_gateway, server_url
 
 INSTRUCTIONS = """
@@ -186,6 +186,41 @@ async def oida_forget(trace_id: str) -> dict[str, Any]:
         "/memory/forget",
         {"trace_id": trace_id},
     )
+
+
+@MCP.tool(structured_output=True)
+async def oida_covenant(
+    action: Literal["status", "read", "set", "activate", "deactivate"],
+    name: str | None = None,
+    text: str | None = None,
+    activate: bool = False,
+) -> dict[str, Any]:
+    """Inspect, write, or switch the listening covenant — Oída's sovereignty layer.
+
+    A covenant is a small human-written declaration (plain text) of what this
+    ear will not listen to, will release after hearing, will not reveal, will
+    not retain, will blur, or will refuse at certain hours. Executable rules
+    are enforced at the daemon's gates; every other line is carried verbatim
+    as a commitment. The layer is empty by default; ``status`` shows the
+    active covenant and what it enforces. Agents may propose covenants with
+    ``set``, but activation is the operator's act — surface it, don't assume it."""
+    if action == "status":
+        return await asyncio.to_thread(get_json, _server(), "/covenant")
+    if action == "read":
+        if not name:
+            raise ValueError("name is required to read a covenant")
+        return await asyncio.to_thread(get_json, _server(), f"/covenant/{name}")
+    if action == "set":
+        if not name or text is None:
+            raise ValueError("name and text are required to set a covenant")
+        return await asyncio.to_thread(
+            put_json, _server(), "/covenant", {"name": name, "text": text, "activate": activate}
+        )
+    if action == "deactivate":
+        return await asyncio.to_thread(post_json, _server(), "/covenant/activate", {"name": None})
+    if not name:
+        raise ValueError("name is required to activate a covenant")
+    return await asyncio.to_thread(post_json, _server(), "/covenant/activate", {"name": name})
 
 
 @MCP.tool(structured_output=True)

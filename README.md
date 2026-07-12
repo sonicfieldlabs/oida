@@ -130,6 +130,19 @@ on-phone ring buffer, optional GPS, and the akousma (sound + listening file)
 filed into the shared store by the server — see
 `integrations/remote/README.md`.
 
+Every listen surface can run under a **listening covenant** — the sovereignty
+layer (v0.4, AKOÚŌ v0.7). A covenant is a plain-text declaration (English or
+Spanish) of what this ear will not listen to, will release after hearing,
+will not reveal, will not retain, will blur, or will refuse at certain hours;
+rules the daemon can execute are enforced at its input/content/output/
+retention gates, every line it cannot execute is carried verbatim as a
+commitment, and withholding lands on the record as counted, attributed
+absence — never silence. Write and activate covenants from the dashboard's
+Covenant panel, `PUT /covenant` + `POST /covenant/activate`, or the
+`oida_covenant` MCP tool. The layer is **empty by default**: sovereignty is
+opted into, never imposed, and a covenant governs the listener that adopted
+it — it protects the listened-to.
+
 Generate a normalized listening event:
 
 ```bash

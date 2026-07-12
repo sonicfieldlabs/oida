@@ -289,6 +289,12 @@ function renderResult(result, { heardSeconds, located }) {
   if (remote.akousma_id) meta.append(el("span", "badge", "akousma filed"));
   if (remote.akousma_error) meta.append(el("span", "badge", "store miss"));
   if (result.trace?.id) meta.append(el("span", "badge", "remembered"));
+  if (event.covenant?.id) {
+    meta.append(el("span", "badge warn", `under ${event.covenant.name || event.covenant.id}`));
+    const withheldCount = (event.covenant.withheld || []).length;
+    if (withheldCount) meta.append(el("span", "badge", `${withheldCount} withheld`));
+  }
+  if (remote.akousma_withheld) meta.append(el("span", "badge", "not retained — covenant"));
   body.append(meta);
   const facts = (aggregate.signal_facts || []).slice(0, 4);
   if (facts.length) {

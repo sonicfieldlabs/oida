@@ -26,3 +26,11 @@ def post_json(server: str, endpoint: str, payload: dict[str, object], timeout: i
     req = request.Request(url, data=data, headers=_headers({"Content-Type": "application/json"}), method="POST")
     with request.urlopen(req, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def put_json(server: str, endpoint: str, payload: dict[str, object], timeout: int = 600) -> dict[str, object]:
+    url = f"{server.rstrip('/')}/{endpoint.lstrip('/')}"
+    data = json.dumps(payload).encode("utf-8")
+    req = request.Request(url, data=data, headers=_headers({"Content-Type": "application/json"}), method="PUT")
+    with request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))

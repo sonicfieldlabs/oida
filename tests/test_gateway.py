@@ -113,7 +113,7 @@ class GatewayContractTests(unittest.TestCase):
         response = client.get("/gateway")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["contract"], GATEWAY_CONTRACT)
-        self.assertEqual(response.json()["components"]["akouo"]["contract"], "akouo/v0.6")
+        self.assertEqual(response.json()["components"]["akouo"]["contract"], "akouo/v0.7")
         self.assertEqual(set(response.json()["perception_paths"]), {"oida_owned", "host_supplied"})
 
 

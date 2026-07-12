@@ -42,11 +42,12 @@ def _report() -> dict:
 
 
 class TestAkouoV06Contract(unittest.TestCase):
-    def test_contract_version_is_v06(self) -> None:
-        self.assertEqual(AKOUO_CONTRACT_VERSION, "v0.6")
+    def test_contract_version_is_v07(self) -> None:
+        self.assertEqual(AKOUO_CONTRACT_VERSION, "v0.7")
         manifest = akouo_manifest()
-        self.assertEqual(manifest["version"], "0.6-oida.1")
+        self.assertEqual(manifest["version"], "0.7-oida.1")
         self.assertIn("/remember", manifest["public_commands"])
+        self.assertIn("/covenant", manifest["public_commands"])
         self.assertEqual(manifest["errors"], [])
 
     def test_remember_preset_exists(self) -> None:
@@ -139,7 +140,7 @@ class TestEarwormV02Bridge(unittest.TestCase):
         self.assertEqual(signal_entry["payload"]["class"], "music-like")
         self.assertIn("created_at", signal_entry)
         akouo_entry = record["listening"]["akouo.memory-lineage-listening"]
-        self.assertEqual(akouo_entry["contract"], "akouo/v0.6")
+        self.assertEqual(akouo_entry["contract"], "akouo/v0.7")
         self.assertEqual(akouo_entry["summary"], "recurrence of the hum")
 
     def test_recurrence_relation_on_same_hash(self) -> None:

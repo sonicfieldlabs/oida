@@ -32,7 +32,8 @@ COMMAND_ROUTES: dict[str, CommandRoute] = {
     "/route": CommandRoute("/route", ["acoulogical-object-listening"], "none", "Router-only handoff plan for another agent or app."),
     "/forensic": CommandRoute("/forensic", ["signal-inspection-listening", "forensic-archival-listening", "critical-political-listening"], "critical-political-listening", "Strict evidentiary route; paralinguistic speculation is suppressed."),
     "/remember": CommandRoute("/remember", ["memory-lineage-listening", "acoulogical-object-listening", "signal-inspection-listening"], "none", "Memory route: compare against stored akousmata and register the listening."),
-    "/one-sound-many-ears": CommandRoute("/one-sound-many-ears", LISTENING_MODES, "undetermined", "Comparative flagship: all fourteen listening modes read one PerceptionReport."),
+    "/covenant": CommandRoute("/covenant", ["sovereign-listening", "acoulogical-object-listening", "signal-inspection-listening"], "none", "Sovereignty route: apply the listening covenant and report enforcement, withholding, and commitments."),
+    "/one-sound-many-ears": CommandRoute("/one-sound-many-ears", LISTENING_MODES, "undetermined", "Comparative flagship: all fifteen listening modes read one PerceptionReport."),
 }
 
 

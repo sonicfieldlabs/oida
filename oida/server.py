@@ -45,6 +45,7 @@ from oida.akouo_skills import akouo_manifest, route_preset
 from oida.background import BackgroundRuntime
 from oida.conversation import ConversationStore
 from oida.contracts import AudioSegment, AudioSourceDescriptor, PrivacyMode, RawAudioPolicy, SourceType, audio_segment_from_path, source_for_path
+from oida.covenant import CovenantStore, parse_covenant
 from oida.engine import build_engine
 from oida.generation import GenerationStore
 from oida.gateway import GATEWAY_CONTRACT, gateway_manifest, harness_host_perception
@@ -228,6 +229,9 @@ class ListenEventRequest(PathRequest):
     capture_seconds: float | None = None
     capture_trigger: str | None = None
     location: dict[str, Any] | None = None
+    # spec v1.3 sovereignty: pin a named covenant for this listen; None uses
+    # the active covenant; the layer is empty by default.
+    covenant: str | None = None
 
 
 class GatewayListenRequest(ListenEventRequest):
@@ -299,6 +303,16 @@ class LiveCaptureRequest(BaseModel):  # type: ignore[misc,valid-type]
     route_preset: str = "basic"
     enabled_skill_ids: list[str] | None = None
     disabled_skill_ids: list[str] | None = None
+
+
+class CovenantSaveRequest(BaseModel):  # type: ignore[misc,valid-type]
+    name: str
+    text: str
+    activate: bool = False
+
+
+class CovenantActivateRequest(BaseModel):  # type: ignore[misc,valid-type]
+    name: str | None = None
 
 
 class MemoryRememberRequest(BaseModel):  # type: ignore[misc,valid-type]
@@ -439,6 +453,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     engine = build_engine(config)
     live = LiveManager()
     memory = AkousmataStore()
+    covenant_store = CovenantStore(config.data_dir)
     background = BackgroundRuntime()
     conversations = ConversationStore()
     generations = GenerationStore()
@@ -762,6 +777,56 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         # The remote ear: a phone-first capture surface served by the same
         # daemon (reached over the operator's private network, e.g. private-network).
         return FileResponse(static_dir / "remote.html", headers={"Cache-Control": "no-cache"})
+
+    # ── the sovereignty layer: covenants (spec v1.3) ─────────────────────
+    # Empty by default. Documents are plain local text under
+    # data_dir()/covenants/; activating one turns the layer on for every
+    # listen surface (dashboard, gateway, remote ear, MCP) until deactivated.
+
+    @app.get("/covenant")
+    def covenant_status() -> dict[str, object]:
+        active = covenant_store.active()
+        return {
+            "active": active.to_dict() if active else None,
+            "available": covenant_store.list(),
+            "default": "no covenant — sovereignty is opted into, never imposed",
+        }
+
+    @app.get("/covenant/{name}")
+    def covenant_read(name: str) -> dict[str, object]:
+        text = covenant_store.read(name)
+        if text is None:
+            raise HTTPException(status_code=404, detail=f"no covenant named {name!r}")
+        return {"name": name, "text": text, "parsed": parse_covenant(text, fallback_name=name).to_dict()}
+
+    @app.put("/covenant")
+    def covenant_save(body: CovenantSaveRequest) -> dict[str, object]:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="a covenant needs a name")
+        parsed = covenant_store.save(name, body.text)
+        if body.activate:
+            covenant_store.activate(name)
+        broadcaster.publish("covenant_changed", {"name": name, "active": covenant_store.active_name()})
+        return {"name": name, "parsed": parsed.to_dict(), "active": covenant_store.active_name()}
+
+    @app.post("/covenant/activate")
+    def covenant_activate(body: CovenantActivateRequest) -> dict[str, object]:
+        try:
+            covenant_store.activate(body.name)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        broadcaster.publish("covenant_changed", {"name": body.name, "active": covenant_store.active_name()})
+        active = covenant_store.active()
+        return {"active": active.to_dict() if active else None}
+
+    @app.delete("/covenant/{name}")
+    def covenant_delete(name: str) -> dict[str, object]:
+        removed = covenant_store.delete(name)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"no covenant named {name!r}")
+        broadcaster.publish("covenant_changed", {"name": None, "active": covenant_store.active_name()})
+        return {"deleted": name, "active": covenant_store.active_name()}
 
     @app.get("/api")
     def api_root() -> dict[str, object]:
@@ -1117,6 +1182,43 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             )
             capture_info = _capture_info(req)
             location = _validated_location(req.location)
+
+            # The sovereignty layer (spec v1.3): empty by default; the active
+            # covenant — or one pinned by name on this request — gates what is
+            # listened to, revealed, and retained. Withholding is honest,
+            # attributed absence, carried on the event's covenant block.
+            try:
+                covenant_engine = covenant_store.engine(override_name=req.covenant)
+            except FileNotFoundError as exc:
+                raise ValueError(str(exc)) from exc
+            covenant_rules_applied: list[str] = []
+            covenant_withheld: list[dict[str, object]] = []
+            passes = list(preset.moss_passes)
+            if covenant_engine is not None:
+                refusal = covenant_engine.refuse_source(source_type) or covenant_engine.refuse_quiet_hours()
+                if refusal:
+                    broadcaster.publish(
+                        "listen_withheld",
+                        {"covenant": covenant_engine.covenant.id, "rule": refusal, "source": source_type},
+                    )
+                    raise HTTPException(
+                        status_code=423,
+                        detail=f"withheld under covenant {covenant_engine.covenant.id}: {refusal}",
+                    )
+                if capture_info and capture_info.get("seconds") is not None:
+                    clamped, window_rule = covenant_engine.clamp_window(float(capture_info["seconds"]))
+                    if window_rule:
+                        capture_info["seconds"] = clamped
+                        covenant_rules_applied.append(window_rule)
+                passes, pass_rules = covenant_engine.filter_passes(passes)
+                covenant_rules_applied.extend(pass_rules)
+                location, location_withheld = covenant_engine.apply_location(location)
+                covenant_withheld.extend(location_withheld)
+                if covenant_engine.forbids_retention("raw-audio") and source_type in {"live_input", "system_output", "buffer"}:
+                    if raw_audio_policy in {"keep", "external_ref"}:
+                        raw_audio_policy = _raw_audio_policy("temp")
+                        covenant_rules_applied.append("do_not_retain:raw-audio")
+
             metadata: dict[str, object] = {"raw_audio_policy": raw_audio_policy}
             if capture_info:
                 metadata["capture"] = capture_info
@@ -1138,9 +1240,15 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "listen_started",
                 {"path": str(path), "route_preset": preset.id, "source": source_type},
             )
-            perception = report(engine, str(path), "oida", passes=preset.moss_passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
+            perception = report(engine, str(path), "oida", passes=passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
             perception_dict = report_to_dict(perception)
+            if covenant_engine is not None:
+                perception_dict, perception_withheld = covenant_engine.redact_perception(perception_dict)
+                covenant_withheld.extend(perception_withheld)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
+            if covenant_engine is not None:
+                command_output, claim_withheld = covenant_engine.redact_command_output(command_output)
+                covenant_withheld.extend(claim_withheld)
             event = listening_event_dict(
                 perception_dict,
                 command_output=command_output,
@@ -1155,6 +1263,10 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 event["capture"] = capture_info
             if location:
                 event["location"] = location
+            if covenant_engine is not None:
+                event["covenant"] = covenant_engine.event_block(
+                    rules_applied=covenant_rules_applied, withheld=covenant_withheld
+                )
             event = memory.enrich_event(event)
             background.finish_action(event)
             broadcaster.publish("listen_completed", {"listening_event": event, "route_preset": preset.id})
@@ -1168,7 +1280,17 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         result = listen_event_endpoint(req)
         event = result["listening_event"]
         trace = None
-        if req.remember and req.privacy_mode != "incognito":
+        memory_retention_rule = None
+        if isinstance(event, dict) and event.get("covenant"):
+            checker = covenant_store.engine(override_name=req.covenant)
+            if checker is not None:
+                memory_retention_rule = checker.forbids_retention("memory")
+        if req.remember and memory_retention_rule:
+            # Retention refused under the covenant: reported, never silent.
+            event.setdefault("covenant", {}).setdefault("withheld", []).append(
+                {"rule": "do_not_retain", "subject": "memory", "count": 1}
+            )
+        elif req.remember and req.privacy_mode != "incognito":
             trace = memory.remember(event, user_notes=req.user_notes, tags=req.tags)
             event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
         earworm = trace.get("earworm") if isinstance(trace, dict) else earworm_context_for_event(event)
@@ -1235,6 +1357,21 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "seconds": seconds,
             "stored_path": str(saved["path"]),
         }
+        event_covenant = event.get("covenant") if isinstance(event.get("covenant"), dict) else None
+        retention_checker = covenant_store.engine() if event_covenant else None
+        if retention_checker is not None and retention_checker.forbids_retention("raw-audio"):
+            # The sound is heard and released: uploaded audio is removed and
+            # the akousma (if any) will carry no uri — attributed, not silent.
+            cleanup_failed_upload(Path(str(saved["raw_path"])))
+            remote_info.pop("stored_path", None)
+            remote_info["raw_audio_withheld"] = "do_not_retain:raw-audio"
+        if retention_checker is not None and retention_checker.forbids_retention("memory"):
+            remote_info["akousma_withheld"] = "do_not_retain:memory"
+            if isinstance(event, dict):
+                event.setdefault("covenant", {}).setdefault("withheld", []).append(
+                    {"rule": "do_not_retain", "subject": "memory", "count": 1}
+                )
+            return {**result, "remote": remote_info}
         try:
             import akousma as _akousma
 
@@ -1243,15 +1380,18 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             store = _akousma.AkousmataStore()
             try:
                 wav_path = Path(str(saved["path"]))
-                uri = store.put_audio(wav_path.read_bytes(), ext=wav_path.suffix.lstrip(".") or "wav")
+                uri: str | None = None
+                if wav_path.exists():
+                    uri = store.put_audio(wav_path.read_bytes(), ext=wav_path.suffix.lstrip(".") or "wav")
                 features = event.get("features") if isinstance(event.get("features"), dict) else {}
                 aggregate = event.get("aggregate") if isinstance(event.get("aggregate"), dict) else {}
                 audio: dict[str, Any] = {
                     "asset_id": f"remote_{event.get('id') or _akousma.new_id('cap')}",
                     "type": "capture",
-                    "uri": uri,
                     "content_hash": f"sha256:{saved['sha256']}",
                 }
+                if uri:
+                    audio["uri"] = uri
                 if isinstance(features.get("duration_s"), (int, float)):
                     audio["duration_seconds"] = float(features["duration_s"])
                 if isinstance(features.get("sample_rate"), (int, float)):
@@ -1271,6 +1411,9 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                     "route_preset": route_preset_name,
                     "event_id": event.get("id"),
                 }
+                # the covenant may have withheld or coarsened the location and
+                # attached its identity — the record carries the event's truth
+                event_location = event.get("location") if isinstance(event.get("location"), dict) else None
                 record = build_akousma_from_listen(
                     audio=audio,
                     listening=listening,
@@ -1278,12 +1421,14 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                     device=device or "phone microphone via oída remote ear",
                     tags=["remote-ear", *tag_list],
                     summary=str(aggregate.get("short_summary") or aggregate.get("title") or "") or None,
-                    location=location,
+                    location=event_location,
                     capture={"direction": direction, "seconds": seconds, "trigger": "remote-ear", "armed_at": armed_at},
+                    covenant=event_covenant,
                 )
                 akousma_id = persist_akousma(record, store=store)
                 remote_info["akousma_id"] = akousma_id
-                remote_info["audio_uri"] = uri
+                if uri:
+                    remote_info["audio_uri"] = uri
                 if isinstance(event, dict):
                     event.setdefault("memory", {})["akousma_id"] = akousma_id
             finally:

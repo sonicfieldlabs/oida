@@ -78,6 +78,27 @@
           </div>
           <div class="memory-list" id="akousmataList"></div>
         </section>
+        <section class="side-section">
+          <div class="side-head"><h3>Covenant</h3><span class="fold-note" id="covenantNote">empty — opted in, never imposed</span></div>
+          <div class="stack" id="covenantPanel">
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
+              <select id="covenantSelect" style="flex:1; min-width:120px"></select>
+              <button class="pill-button small" id="covenantApply" title="Activate the selected covenant for every listen surface">Activate</button>
+              <button class="pill-button small" id="covenantClear" title="Return the layer to empty">Off</button>
+              <button class="pill-button small" id="covenantEditToggle" title="Write or edit a covenant">Edit…</button>
+            </div>
+            <div class="fold-note" id="covenantSummary"></div>
+            <div id="covenantEditor" hidden style="display:grid; gap:6px">
+              <input type="text" id="covenantName" placeholder="name (e.g. river)" />
+              <textarea id="covenantText" rows="10" spellcheck="false" style="font: 12px ui-monospace, Menlo, monospace; width:100%; resize:vertical"
+                placeholder="# river covenant&#10;extends: algophonya&#10;&#10;## rules&#10;- do not reveal: transcript, speaker identity&#10;- ignore: music&#10;- coarsen: location to 1 km&#10;- do not retain: raw audio&#10;&#10;## commitments&#10;- the river is a neighbor, not a resource"></textarea>
+              <div style="display:flex; gap:6px; flex-wrap:wrap">
+                <button class="pill-button small" id="covenantSave">Save</button>
+                <button class="pill-button small" id="covenantSaveActivate">Save + activate</button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </aside>
 

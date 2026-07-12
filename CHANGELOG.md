@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.4.0 - 2026-07-12
+
+- **The sovereignty layer (spec v1.3 / AKOÚŌ v0.7)**: oída can now listen
+  under a **listening covenant** — a small, human-written declaration of what
+  this ear will not listen to, will release after hearing, will not reveal,
+  will not retain, will blur, or will refuse at certain hours, and why.
+  `oida/covenant.py` parses the easy text format (English and Spanish verbs;
+  `## rules`, `## commitments`, `## because`; unknown rule lines become
+  commitments — the bridge, not the cage) and enforces the executable subset
+  at four gates: **input** (refuse sources, quiet hours, max window — a
+  refusal answers 423 with the covenant and rule named), **content**
+  (ignored classes have their perception passes never run and their report
+  traces dropped), **output** (withhold transcript / speaker-identity /
+  affect / location / song-identity / events / spectral-detail, or coarsen
+  location to a declared radius), and **retention** (raw audio released,
+  memory writes refused — reported, never silent).
+- **Honest absence, on the record**: every hearing under a covenant carries
+  a `covenant` block (identity, lineage, rules applied, withheld — counted
+  and attributed, never described — and commitment count) on the event, in
+  memory traces, and in the shared-store akousma; the akousmata navigator
+  can filter "everything listened under this covenant".
+- **Surfaces**: `GET/PUT /covenant`, `POST /covenant/activate`,
+  `GET|DELETE /covenant/{name}`; a Covenant panel on the dashboard (list,
+  activate, plain-text editor); the `oida_covenant` MCP tool (agents may
+  propose covenants; activation stays the operator's act); a per-listen
+  `covenant` pin on `/listen-event`. The remote ear reports "under
+  <covenant>" and withholding counts on its result card. **Empty by
+  default**: sovereignty is opted into, never imposed.
+- Contracts: AKOÚŌ pin moves to `akouo/v0.7` (sovereign-listening mode +
+  `/covenant` command mirrored in the harness registries), components to
+  `earworm/v0.4` + `akousmata/v0.4`; gateway contract stays
+  `oida/gateway/v0.2` (all additive). 163 tests (13 new).
+
 ## 0.3.0 - 2026-07-11
 
 - **The remote ear (`/remote`)**: a phone-first capture surface served by the

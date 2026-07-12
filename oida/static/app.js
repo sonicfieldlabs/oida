@@ -1384,6 +1384,106 @@ if (akousmataUi.go) {
   akousmataUi.modal?.querySelector("[data-close]")?.addEventListener("click", () => akousmataUi.modal.close());
 }
 
+/* ─────────────────────── covenant (the sovereignty layer) ───────────────
+   Empty by default. The panel lists local covenant documents, activates one
+   for every listen surface, and lets the operator write them in plain text.
+   Withholding shows up on events as attributed absence, never silence. */
+
+const covenantUi = {
+  note: el("covenantNote"),
+  select: el("covenantSelect"),
+  apply: el("covenantApply"),
+  clear: el("covenantClear"),
+  editToggle: el("covenantEditToggle"),
+  editor: el("covenantEditor"),
+  name: el("covenantName"),
+  text: el("covenantText"),
+  save: el("covenantSave"),
+  saveActivate: el("covenantSaveActivate"),
+  summary: el("covenantSummary"),
+};
+
+async function refreshCovenant() {
+  if (!covenantUi.select) return;
+  try {
+    const data = await fetchJson("covenant");
+    const active = data.active;
+    covenantUi.select.innerHTML = "";
+    for (const name of data.available) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      covenantUi.select.append(option);
+    }
+    if (!data.available.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "no covenants yet — Edit… to write one";
+      covenantUi.select.append(option);
+    }
+    if (active) {
+      covenantUi.note.textContent = `under ${active.name || active.id}`;
+      const rules = active.rules.length;
+      const commitments = active.commitments.length;
+      covenantUi.summary.textContent =
+        `${rules} enforceable rule${rules === 1 ? "" : "s"} · ${commitments} commitment${commitments === 1 ? "" : "s"} carried` +
+        (active.extends.length ? ` · stands on ${active.extends.join(", ")}` : "");
+    } else {
+      covenantUi.note.textContent = "empty — opted in, never imposed";
+      covenantUi.summary.textContent = "";
+    }
+  } catch (error) {
+    covenantUi.note.textContent = String(error.message || error);
+  }
+}
+
+function wireCovenant() {
+  if (!covenantUi.select) return;
+  covenantUi.apply.addEventListener("click", async () => {
+    const name = covenantUi.select.value;
+    if (!name) return;
+    await fetchJson("covenant/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    refreshCovenant();
+  });
+  covenantUi.clear.addEventListener("click", async () => {
+    await fetchJson("covenant/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: null }),
+    });
+    refreshCovenant();
+  });
+  covenantUi.editToggle.addEventListener("click", async () => {
+    covenantUi.editor.hidden = !covenantUi.editor.hidden;
+    if (!covenantUi.editor.hidden && covenantUi.select.value && !covenantUi.text.value) {
+      try {
+        const data = await fetchJson(`covenant/${encodeURIComponent(covenantUi.select.value)}`);
+        covenantUi.name.value = data.name;
+        covenantUi.text.value = data.text;
+      } catch (_) { /* a blank editor is fine */ }
+    }
+  });
+  const saveCovenant = async (activate) => {
+    const name = covenantUi.name.value.trim();
+    const text = covenantUi.text.value;
+    if (!name || !text.trim()) return;
+    await fetchJson("covenant", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, text, activate }),
+    });
+    covenantUi.editor.hidden = true;
+    refreshCovenant();
+  };
+  covenantUi.save.addEventListener("click", () => saveCovenant(false));
+  covenantUi.saveActivate.addEventListener("click", () => saveCovenant(true));
+}
+wireCovenant();
+
 /* ────────────────────────────── boot ────────────────────────────── */
 
 refreshHealth().finally(() => {
@@ -1392,6 +1492,7 @@ refreshHealth().finally(() => {
 loadManifest();
 refreshMemory();
 refreshAkousmata();
+refreshCovenant();
 refreshMicDevices(false); // load input devices by default, no permission prompt
 connectStream();
 setInterval(refreshHealth, 20000);

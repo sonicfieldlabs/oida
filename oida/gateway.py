@@ -52,8 +52,8 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
                 "contract": f"akouo/{akouo['akouo_contract_version']}",
                 "host_profile_version": akouo["version"],
             },
-            "earworm": {"role": "event/provenance and context protocol", "contract": "earworm/v0.3"},
-            "akousmata": {"role": "local sonic-memory store and navigator", "contract": "akousmata/v0.3"},
+            "earworm": {"role": "event/provenance and context protocol", "contract": "earworm/v0.4"},
+            "akousmata": {"role": "local sonic-memory store and navigator", "contract": "akousmata/v0.4"},
         },
         "perception_paths": {
             "oida_owned": {
@@ -72,6 +72,7 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
             "dashboard": "/",
             "library": "/library/",
             "remote_ear": "/remote",
+            "covenant": "/covenant",
         },
         "privacy": {
             "local_first": True,

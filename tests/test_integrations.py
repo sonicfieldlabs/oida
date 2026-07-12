@@ -74,6 +74,7 @@ class IntegrationAssetTests(unittest.TestCase):
                 "oida_memory_get",
                 "oida_remember",
                 "oida_forget",
+                "oida_covenant",
                 "oida_live",
             },
         )

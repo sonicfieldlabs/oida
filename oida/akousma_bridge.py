@@ -61,7 +61,7 @@ def _origin_to_source_type(origin: str) -> str:
     }.get(origin, "unknown")
 
 
-AKOUO_CONTRACT = "akouo/v0.6"
+AKOUO_CONTRACT = "akouo/v0.7"
 
 
 def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
@@ -133,6 +133,25 @@ def _checked_capture(value: dict[str, Any] | None) -> dict[str, Any] | None:
     )
 
 
+def _checked_covenant(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate a spec v1.3 covenant dict through the akousma builder. The
+    block carries identity and honest absence — never the covenant's text."""
+    if not value:
+        return None
+    return akousma.covenant(
+        value.get("id"),
+        name=value.get("name"),
+        version=value.get("version"),
+        contract=value.get("contract") or AKOUO_CONTRACT,
+        sha256_hex=value.get("sha256"),
+        extends=value.get("extends"),
+        rules_applied=value.get("rules_applied"),
+        withheld=value.get("withheld"),
+        commitments=value.get("commitments"),
+        note=value.get("note"),
+    )
+
+
 def build_akousma_from_listen(
     *,
     audio: dict[str, Any],
@@ -144,13 +163,14 @@ def build_akousma_from_listen(
     summary: str | None = None,
     location: dict[str, Any] | None = None,
     capture: dict[str, Any] | None = None,
+    covenant: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a valid akousma record from an oída listen result.
 
     ``audio`` needs at least ``asset_id`` (and ideally ``uri``/``content_hash``/duration).
     ``listening`` is namespaced per producer, e.g. ``{"oida.signal": {...}, "akouo.describe": {...}}``;
     entries are wrapped in the spec v1.1 envelope with akouo.* entries pinned to the
-    ``akouo/v0.6`` contract. ``location`` (where it was heard — consent-scoped) and
+    ``akouo/v0.7`` contract. ``location`` (where it was heard — consent-scoped) and
     ``capture`` (past/future direction + window seconds) are spec v1.2 blocks.
     """
     origin = _normalize_origin(origin)
@@ -167,6 +187,7 @@ def build_akousma_from_listen(
         summary=summary or _derive_summary(enveloped),
         location=_checked_location(location),
         capture=_checked_capture(capture),
+        covenant=_checked_covenant(covenant),
     )
     if device:
         record["provenance"]["device"] = device
@@ -267,6 +288,7 @@ def build_germ_router():
         summary: str | None = None
         location: dict[str, Any] | None = None
         capture: dict[str, Any] | None = None
+        covenant: dict[str, Any] | None = None
 
     router = APIRouter(prefix="/germ", tags=["germ"])
 
@@ -283,6 +305,7 @@ def build_germ_router():
                 summary=req.summary,
                 location=req.location,
                 capture=req.capture,
+                covenant=req.covenant,
             )
             _maybe_enrich_songid(record, req.audio)
             return handoff_to_germ(record, req.mode)
