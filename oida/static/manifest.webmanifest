@@ -5,6 +5,20 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "icons": [
+    {
+      "src": "/static/icons/oida-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/oida-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
   "background_color": "#161616",
   "theme_color": "#161616",
   "orientation": "any"

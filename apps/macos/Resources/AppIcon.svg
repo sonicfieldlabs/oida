@@ -1,6 +1,6 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <!-- oída — the listening point.
-       One small warm dot (the akousma, the heard thing) and three incomplete
+       One small white dot (the akousma, the heard thing) and three incomplete
        arcs around it: an ear's folds, a sound arriving, a point on the
        listening map. The arcs open toward the lower left — the gap is the
        part the ear does not claim to have heard. -->
@@ -16,5 +16,5 @@
     <path d="M 609.0 766.9 A 262 262 0 1 0 251.1 409.0" stroke-width="38" opacity="0.82"/>
     <path d="M 692.5 846.4 A 374 374 0 1 0 171.6 325.5" stroke-width="30" opacity="0.62"/>
   </g>
-  <circle cx="478" cy="540" r="62" fill="#a9762f"/>
+  <circle cx="478" cy="540" r="62" fill="#ffffff"/>
 </svg>

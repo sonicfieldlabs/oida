@@ -1,0 +1,10 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title">
+  <title id="title">oída logo — dark</title>
+  <rect width="1024" height="1024" fill="#232320"/>
+  <g fill="none" stroke="#f4f3ee" stroke-linecap="round">
+    <path d="M 541.4 675.9 A 150 150 0 1 0 342.1 476.6" stroke-width="48"/>
+    <path d="M 609.0 766.9 A 262 262 0 1 0 251.1 409.0" stroke-width="38" opacity="0.82"/>
+    <path d="M 692.5 846.4 A 374 374 0 1 0 171.6 325.5" stroke-width="30" opacity="0.62"/>
+  </g>
+  <circle cx="478" cy="540" r="62" fill="#ffffff"/>
+</svg>
