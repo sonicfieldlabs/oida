@@ -13,10 +13,10 @@ struct MenuBarView: View {
 
             Divider()
 
-            Button(store.isListening ? "Listening…" : "Listen now") {
+            Button(store.isListening ? "Listening…" : (store.isProcessing ? "Operating listening…" : "Listen now")) {
                 Task { await store.listenNow() }
             }
-            .disabled(store.isListening || !store.daemonOnline)
+            .disabled(store.isListenBusy || !store.daemonOnline)
             .keyboardShortcut("l", modifiers: [.command, .option])
 
             Button("Show/Hide Floating Listener") {
@@ -64,6 +64,7 @@ struct MenuBarView: View {
     private var statusIcon: String {
         if store.isPaused { return "pause.circle" }
         if store.isListening { return "waveform.circle.fill" }
+        if store.isProcessing { return "hourglass.circle" }
         if store.nativeSystemAudioActive { return "speaker.wave.2.circle" }
         if !store.daemonOnline { return "exclamationmark.triangle" }
         return "waveform"

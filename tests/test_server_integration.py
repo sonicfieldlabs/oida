@@ -44,6 +44,70 @@ def _write_tone(path: Path) -> Path:
 
 
 class ServerSecurityTests(unittest.TestCase):
+    def test_phone_remote_status_and_local_configuration_surface(self) -> None:
+        ready = {
+            "available": True,
+            "configured": True,
+            "enabled": True,
+            "served": True,
+            "secure": True,
+            "microphone_ready": True,
+            "private-network_host": "private-host.example",
+            "remote_ear_url": "https://private-host.example:8443/remote",
+        }
+        with patch("oida.server.remote_status", return_value=ready), patch(
+            "oida.server.install_integration", return_value={"configured": True}
+        ) as install_remote:
+            client = _client()
+            status = client.get("/remote/status")
+            configured = client.post("/remote/configure")
+
+        self.assertEqual(status.status_code, 200)
+        self.assertTrue(status.json()["microphone_ready"])
+        self.assertEqual(configured.status_code, 200)
+        self.assertEqual(configured.json()["remote_ear_url"], ready["remote_ear_url"])
+        install_remote.assert_called_once_with("remote", serve=True, https_port=8443)
+
+    def test_embedded_memory_can_be_renamed_and_forgotten_without_deleting_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {
+                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                "AKOUSMATA_WATCHER": "0",
+            },
+            clear=False,
+        ):
+            import akousma
+            from oida.akousma_bridge import build_akousma_from_listen
+
+            record = build_akousma_from_listen(
+                audio={"asset_id": "asset_memory_menu", "type": "capture"},
+                listening={"oida.listen": {"event_id": "evt_memory_menu", "summary": "Original"}},
+                session_id="session_memory_menu",
+                summary="Original memory name",
+            )
+            store = akousma.AkousmataStore(Path(tmp) / "akousmata")
+            try:
+                memory_id = store.put(record)
+            finally:
+                store.close()
+
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            listed = client.get("/akousmata/records")
+            renamed = client.patch(f"/akousmata/records/{memory_id}", json={"summary": "Renamed memory"})
+            forgotten = client.delete(f"/akousmata/records/{memory_id}")
+            missing = client.get(f"/akousmata/records/{memory_id}")
+
+        card = next(item for item in listed.json()["records"] if item["akousma_id"] == memory_id)
+        self.assertEqual(card["session_id"], "session_memory_menu")
+        self.assertEqual(card["event_id"], "evt_memory_menu")
+        self.assertEqual(renamed.json()["record"]["summary"], "Renamed memory")
+        self.assertTrue(forgotten.json()["forgotten"])
+        self.assertFalse(forgotten.json()["audio_deleted"])
+        self.assertEqual(missing.status_code, 404)
+
     def test_health_reports_oida(self) -> None:
         response = _client().get("/health")
         self.assertEqual(response.status_code, 200)
@@ -189,6 +253,36 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertEqual(event["raw_audio_policy"], "temp")
         self.assertTrue(event["segment"]["ephemeral"])
 
+    def test_music_id_is_opt_in_and_gated_to_music_mode(self) -> None:
+        match = {
+            "provider": "shazamio",
+            "matched": True,
+            "title": "Test Track",
+            "artist": "Test Artist",
+            "checked_at": "2026-07-13T00:00:00Z",
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+            clear=False,
+        ), patch("oida.server.identify_song", return_value=match) as identify:
+            path = _write_tone(Path(tmp) / "music.wav")
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            music = client.post(
+                "/listen-event",
+                json={"path": str(path), "route_preset": "music", "song_id": True},
+            )
+            general = client.post(
+                "/listen-event",
+                json={"path": str(path), "route_preset": "basic", "song_id": True},
+            )
+
+        self.assertEqual(music.status_code, 200)
+        self.assertEqual(music.json()["listening_event"]["music_id"]["title"], "Test Track")
+        self.assertIn("music-id", music.json()["listening_event"]["tags"])
+        self.assertNotIn("music_id", general.json()["listening_event"])
+        identify.assert_called_once_with(path.resolve(), enabled=True)
+
     def test_listen_event_carries_capture_and_location(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             "os.environ",
@@ -219,6 +313,71 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertEqual(event["location"]["lat"], 6.2442)
         self.assertEqual(event["segment"]["metadata"]["capture"]["direction"], "past")
         self.assertEqual(event["segment"]["metadata"]["location"]["lon"], -75.5812)
+
+    def test_session_and_capture_contracts_drive_the_shared_listener_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+            clear=False,
+        ):
+            path = _write_tone(Path(tmp) / "session.wav")
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            created = client.post("/sessions", json={"name": "Street session"})
+            listened = client.post(
+                "/listen-event",
+                json={
+                    "path": str(path),
+                    "source_type": "live_input",
+                    "capture_direction": "future",
+                    "capture_seconds": 10,
+                    "capture_trigger": "dashboard",
+                },
+            )
+            renamed = client.patch(
+                f"/sessions/{created.json()['session']['id']}/events/{listened.json()['listening_event']['id']}",
+                json={"title": "Edited street listen"},
+            )
+            sessions = client.get("/sessions")
+            archived = client.post(f"/sessions/{created.json()['session']['id']}/archive")
+            restored = client.post(f"/sessions/{created.json()['session']['id']}/restore")
+            deleted_event = client.delete(
+                f"/sessions/{created.json()['session']['id']}/events/{listened.json()['listening_event']['id']}"
+            )
+            disposable = client.post("/sessions", json={"name": "Disposable session"})
+            disposable_session_id = disposable.json()["session"]["id"]
+            deleted_session = client.delete(f"/sessions/{disposable_session_id}")
+            capture = client.post(
+                "/background/capture-request",
+                json={
+                    "seconds": 10,
+                    "route_preset": "music",
+                    "direction": "future",
+                    "source": "mic",
+                    "enabled_skill_ids": ["musicological-listener"],
+                    "song_id": True,
+                },
+            )
+
+        self.assertEqual(created.status_code, 200)
+        session_id = created.json()["session"]["id"]
+        self.assertEqual(listened.status_code, 200)
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(renamed.json()["listening_event"]["aggregate"]["title"], "Edited street listen")
+        self.assertEqual(listened.json()["listening_event"]["session"]["id"], session_id)
+        self.assertEqual(sessions.json()["sessions"][0]["event_count"], 1)
+        self.assertEqual(sessions.json()["sessions"][0]["events"][0]["aggregate"]["title"], "Edited street listen")
+        self.assertEqual(archived.status_code, 200)
+        self.assertEqual(archived.json()["archived_sessions"][0]["event_count"], 1)
+        self.assertEqual(restored.status_code, 200)
+        self.assertTrue(deleted_event.json()["deleted"])
+        self.assertTrue(deleted_session.json()["deleted"])
+        self.assertNotIn(disposable_session_id, {session["id"] for session in deleted_session.json()["sessions"]})
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()["archived_sessions"], [])
+        self.assertEqual(capture.json()["capture_request"]["direction"], "future")
+        self.assertEqual(capture.json()["capture_request"]["source"], "mic")
+        self.assertEqual(capture.json()["capture_request"]["enabled_skill_ids"], ["musicological-listener"])
+        self.assertTrue(capture.json()["capture_request"]["song_id"])
 
     def test_listen_event_rejects_bad_capture_and_location(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

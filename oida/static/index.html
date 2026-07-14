@@ -8,9 +8,12 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="oída" />
   <title>oída</title>
+  <script>
+    document.documentElement.dataset.theme = localStorage.getItem("oida.theme") === "dark" ? "dark" : "light";
+  </script>
   <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/styles.css?v=12" />
+  <link rel="stylesheet" href="/static/styles.css?v=23" />
   <link rel="manifest" href="/static/manifest.webmanifest" />
 </head>
 <body>
@@ -18,16 +21,16 @@
 
   <div class="shell">
 
-    <!-- ───────────── LEFT RAIL: source icons, Recent, Memory ───────────── -->
-    <aside class="side side-left" id="sideLeft" aria-label="Sources, recent, and memory">
+    <!-- ───────────── LEFT RAIL: source icons, Sessions, Memory ───────────── -->
+    <aside class="side side-left" id="sideLeft" aria-label="Sources, sessions, archive, and memory">
       <div class="side-resize" id="leftResize" aria-hidden="true"></div>
-      <div class="side-top">
-        <button class="side-toggle" id="leftToggle" aria-label="Toggle left sidebar" title="Toggle sidebar">
+      <div class="side-top browser-rail-top">
+        <button class="side-toggle web-side-toggle" id="leftToggle" aria-label="Toggle left sidebar" title="Toggle sidebar">
           <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></svg>
         </button>
         <div class="sources" role="radiogroup" aria-label="Sound source">
           <button class="source active" role="radio" aria-checked="true" tabindex="0" data-source="system" id="sourceSystem" title="System — listen to what the computer is playing" aria-label="System">
-            <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><path d="M11 5 6.5 9H3.5v6h3L11 19V5Z"/><path d="M15 9.5a3.6 3.6 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10"/></svg></button>
+            <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><path d="M11 5.5 6.5 9H4v6h2.5l4.5 3.5Z"/><path d="M15.5 9.5a3.6 3.6 0 0 1 0 5"/></svg></button>
           <button class="source" role="radio" aria-checked="false" tabindex="-1" data-source="mic" id="sourceMic" title="Mic — listen to the microphone" aria-label="Mic">
             <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><rect x="9.5" y="3.5" width="5" height="10" rx="2.5"/><path d="M6 11.5a6 6 0 0 0 12 0M12 17.5v3"/></svg></button>
           <button class="source" role="radio" aria-checked="false" tabindex="-1" data-source="file" id="sourceFile" title="File — listen to an audio file" aria-label="File">
@@ -35,8 +38,157 @@
         </div>
       </div>
       <div class="side-body">
-        <div class="source-config stack" id="systemPanel">
-          <label class="cfg"><span class="cfg-label">Buffer:</span>
+        <details class="side-section" id="recentSection" open>
+          <summary class="side-head"><h3>Sessions</h3><span class="side-head-actions"><button class="section-add" id="newSession" title="Start a new listening session" aria-label="New listening session">+</button><span class="section-caret" aria-hidden="true"></span></span></summary>
+          <div class="history-list" id="historyList"></div>
+        </details>
+        <details class="side-section" id="archiveSection" open hidden>
+          <summary class="side-head"><h3>Archive</h3><span class="section-caret" aria-hidden="true"></span></summary>
+          <div class="history-list" id="archiveList"></div>
+        </details>
+        <details class="side-section" id="memorySection" open>
+          <summary class="side-head"><h3>Memory</h3><span class="section-caret" aria-hidden="true"></span></summary>
+          <div class="memory-search">
+            <input type="text" id="memorySearch" placeholder="search Akousmata memory…" />
+            <button class="memory-search-icon" id="memoryGo" aria-label="Search memory" title="Search memory">
+              <svg class="ci" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg></button>
+          </div>
+          <div class="memory-list" id="memoryList"></div>
+        </details>
+      </div>
+    </aside>
+
+    <!-- ───────────── CENTER: the listening result box ───────────── -->
+    <section class="center">
+      <div class="result-card" id="resultCard" aria-label="Result">
+        <div class="result-scroll" id="resultScroll">
+          <div class="session-context-row" id="sessionContextRow">
+            <div class="session-context" id="sessionTitle">Current session</div>
+            <div class="tag-filter-bar" id="tagFilterBar" aria-label="Active tag filters" hidden>
+              <span class="tag-filter-label">Filtered</span>
+              <div class="tag-filter-chips" id="tagFilterChips"></div>
+              <div class="dropdown tag-filter-dropdown" id="tagFilterDropdown">
+                <button class="tag-filter-add" id="tagFilterAdd" aria-haspopup="true" aria-expanded="false" aria-label="Add tag filter" title="Add tag filter">+</button>
+                <div class="drop-menu tag-filter-menu" id="tagFilterMenu" hidden></div>
+              </div>
+              <button class="tag-filter-reset" id="tagFilterReset" aria-label="Reset tag filters" title="Reset tag filters">×</button>
+            </div>
+          </div>
+          <div class="result-entries" id="resultEntries">
+            <article class="result-entry placeholder-entry">
+              <div class="result-head"><h2>Ready</h2></div>
+              <p class="result-summary placeholder">Pick a source and press Listen. Results from the current session appear here; details on the right.</p>
+            </article>
+          </div>
+          <p class="germ-note" id="germNote" hidden></p>
+        </div>
+
+        <div class="result-footer-shell">
+          <div class="listen-control-box">
+            <div class="listen-progress" id="listenProgress" hidden>
+              <span class="phase-dot" id="phaseDot"></span>
+              <span class="phase-label" id="listenPhaseText">Hearing</span>
+              <span class="progress-track"><span class="progress-fill" id="listenProgressFill"></span></span>
+            </div>
+            <div class="result-foot">
+              <span class="listen-status" id="listenStatus" aria-live="polite"></span>
+              <span class="foot-spacer"></span>
+              <div class="dropdown" id="rulesDrop">
+                <button class="foot-icon" id="rulesButton" aria-haspopup="true" aria-expanded="false" title="Rules" aria-label="Rules">
+                  <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><path d="M7 5h10v14l-5-3-5 3Z"/></svg></button>
+                <div class="drop-menu rules-menu" id="rulesMenu" hidden>
+                  <div class="rules-head"><strong>Rules</strong><label class="switch"><input type="checkbox" id="covenantToggle"><span></span></label></div>
+                  <span class="fold-note" id="covenantNote">Off — opted in, never imposed</span>
+                  <select id="covenantSelect" class="quiet-select" aria-label="Rules document"></select>
+                  <div class="rules-summary" id="covenantSummary"></div>
+                  <details class="rules-editor-fold">
+                    <summary>Edit rules</summary>
+                    <div id="covenantEditor" class="rules-editor">
+                      <input type="text" id="covenantName" placeholder="name (e.g. river)" />
+                      <textarea id="covenantText" rows="9" spellcheck="false"
+                        placeholder="# river rules&#10;&#10;## rules&#10;- do not reveal: transcript, speaker identity&#10;- do not retain: raw audio&#10;&#10;## commitments&#10;- listen like a guest"></textarea>
+                      <div class="rules-actions">
+                        <button class="pill-button small" id="covenantSave">Save</button>
+                        <button class="pill-button small" id="covenantSaveActivate">Save + activate</button>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </div>
+              <button class="foot-icon music-id-toggle" id="musicIdToggle" aria-pressed="false" title="Music ID off" aria-label="Toggle Music ID" hidden>
+                <span aria-hidden="true">ID</span></button>
+              <div class="dropdown" id="modeDrop">
+                <button class="mode-quiet" id="modeButton" aria-haspopup="true" aria-expanded="false" title="Listening mode">
+                  <span class="mode-icon" id="modeIcon"></span>
+                  <span id="modeName">General</span>
+                  <svg class="ci chev" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                <div class="drop-menu" id="modeMenu" role="listbox" hidden></div>
+              </div>
+              <button class="listen-send" id="listenButton" title="Listen">
+                <svg class="ic-listen-app" viewBox="88 150 780 780" aria-hidden="true">
+                  <path d="M541.4 675.9A150 150 0 1 0 342.1 476.6"/>
+                  <path d="M609 766.9A262 262 0 1 0 251.1 409" opacity=".82"/>
+                  <path d="M692.5 846.4A374 374 0 1 0 171.6 325.5" opacity=".62"/>
+                  <circle cx="478" cy="540" r="62" class="glyph-core"/>
+                </svg>
+                <svg class="ic-stop" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>
+                <span id="listenLabel" class="sr-only">Listen</span>
+              </button>
+            </div>
+          </div>
+          <details class="activity-console" id="activityConsole">
+            <summary><span>Console</span><span class="console-note" id="consoleNote"></span></summary>
+            <div class="console-toolbar">
+              <button class="console-action" id="consoleCopy" title="Copy console" aria-label="Copy console"><svg class="ci" viewBox="0 0 24 24" width="14" height="14"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg></button>
+              <button class="console-action" id="consoleClear" title="Clear console" aria-label="Clear console"><svg class="ci" viewBox="0 0 24 24" width="14" height="14"><path d="M5 7h14M9 7V4h6v3M8 7l1 13h6l1-13"/></svg></button>
+            </div>
+            <pre class="console-output" id="consoleOutput"></pre>
+          </details>
+        </div>
+      </div>
+
+      <section class="center-modal" id="akousmataModal" role="region" aria-labelledby="akousmataTitle" hidden>
+        <div class="center-modal-surface">
+          <div class="modal-head memory-detail-head"><h3 id="akousmataTitle">Memory</h3></div>
+          <div class="modal-content memory-detail"><div id="akousmataDetail"></div></div>
+        </div>
+      </section>
+    </section>
+
+    <!-- ───────────── RIGHT RAIL: claim breakdown sections ───────────── -->
+    <aside class="side side-right" id="sideRight" aria-label="Claim breakdown">
+      <div class="side-resize" id="rightResize" aria-hidden="true"></div>
+      <div class="side-top">
+        <div class="top-actions">
+          <button class="rail-action" id="floatingRail" data-shell="floating" title="Show or hide the floating listener" aria-label="Floating listener">
+            <svg class="ci floating-listener-glyph" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 16a4 4 0 1 0-4-4"/><path d="M12 20a8 8 0 1 0-8-8"/><circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none"/></svg>
+          </button>
+          <button class="rail-action" id="configButton" title="Settings" aria-label="Settings">
+            <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg>
+          </button>
+        </div>
+        <span class="foot-spacer"></span>
+        <button class="side-toggle web-side-toggle" id="rightToggle" aria-label="Toggle right sidebar" title="Toggle sidebar">
+          <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></svg>
+        </button>
+      </div>
+      <div class="side-body">
+        <div class="result-body" id="resultBody"></div>
+      </div>
+    </aside>
+
+  </div>
+
+  <input type="file" id="fileInput" accept="audio/*,video/*" hidden />
+
+  <!-- ────────────── Source configuration modal ───────────── -->
+  <dialog class="modal source-modal" id="sourceModal" aria-label="Audio input">
+    <div class="modal-head"><h3 id="sourceModalTitle">System audio</h3><button class="modal-close" data-close aria-label="Close">×</button></div>
+    <div class="modal-content source-modal-content">
+      <div class="source-config stack" id="systemPanel">
+        <div class="config-line">
+          <label class="cfg"><span class="cfg-label">Buffer</span>
             <select id="captureSeconds" class="quiet-select" aria-label="Buffer length">
               <option value="5">5sec</option>
               <option value="10" selected>10sec</option>
@@ -44,184 +196,99 @@
               <option value="60">60sec</option>
             </select>
           </label>
+          <div class="direction-toggle" role="radiogroup" aria-label="System listening direction">
+            <button class="direction-button active" data-direction="past" role="radio" aria-checked="true" title="Past — use the preceding buffer" aria-label="Past">
+              <svg class="ci" viewBox="0 0 24 24" width="14" height="14"><path d="M8 7H4v-4"/><path d="M4.5 7.5A8 8 0 1 1 4 15"/></svg></button>
+            <button class="direction-button" data-direction="future" role="radio" aria-checked="false" title="Future — record after Listen" aria-label="Future">
+              <svg class="ci" viewBox="0 0 24 24" width="14" height="14"><path d="M16 7h4v-4"/><path d="M19.5 7.5A8 8 0 1 0 20 15"/></svg></button>
+          </div>
         </div>
-        <div class="source-config stack" id="micPanel" hidden>
+      </div>
+      <div class="source-config stack" id="micPanel" hidden>
+        <div class="config-line">
           <select id="micDevice" class="quiet-select" aria-label="Microphone"><option value="">default input</option></select>
-          <div class="mic-row">
-            <button class="pill-button small icon-only" id="micMonitor" aria-pressed="false" aria-label="Monitor input level" title="Monitor input level">
-              <svg class="ci" viewBox="0 0 24 24" width="15" height="15"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg></button>
-            <div class="meter" id="micMeter" role="meter" aria-label="Input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="meter-fill" id="micMeterFill"></div><div class="meter-peak" id="micMeterPeak"></div></div>
+          <div class="direction-toggle" role="radiogroup" aria-label="Microphone listening direction">
+            <button class="direction-button active" data-direction="past" role="radio" aria-checked="true" title="Past — use the preceding buffer" aria-label="Past">
+              <svg class="ci" viewBox="0 0 24 24" width="14" height="14"><path d="M8 7H4v-4"/><path d="M4.5 7.5A8 8 0 1 1 4 15"/></svg></button>
+            <button class="direction-button" data-direction="future" role="radio" aria-checked="false" title="Future — record after Listen" aria-label="Future">
+              <svg class="ci" viewBox="0 0 24 24" width="14" height="14"><path d="M16 7h4v-4"/><path d="M19.5 7.5A8 8 0 1 0 20 15"/></svg></button>
           </div>
         </div>
-        <div class="source-config stack" id="filePanel" hidden>
-          <button class="pill-button small" id="browseFile">Choose file…</button>
-        </div>
-
-        <section class="side-section">
-          <div class="side-head"><h3>Recent</h3><span class="fold-note" id="historyNote"></span></div>
-          <div class="history-list" id="historyList"></div>
-        </section>
-        <section class="side-section">
-          <div class="side-head"><h3>Memory</h3></div>
-          <div class="memory-search">
-            <input type="text" id="memorySearch" placeholder="hum, drone, tag…" />
-            <button class="pill-button small icon-only" id="memoryGo" aria-label="Search memory" title="Search memory">
-              <svg class="ci" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg></button>
-          </div>
-          <div class="memory-list" id="memoryList"></div>
-        </section>
-        <section class="side-section">
-          <div class="side-head"><h3>Akousmata</h3><span class="fold-note" id="akousmataNote"></span></div>
-          <div class="memory-search">
-            <input type="text" id="akousmataSearch" placeholder="the shared library…" />
-            <button class="pill-button small icon-only" id="akousmataGo" aria-label="Search the shared akousmata" title="Search the shared akousmata">
-              <svg class="ci" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg></button>
-          </div>
-          <div class="memory-list" id="akousmataList"></div>
-        </section>
-        <section class="side-section">
-          <div class="side-head"><h3>Covenant</h3><span class="fold-note" id="covenantNote">empty — opted in, never imposed</span></div>
-          <div class="stack" id="covenantPanel">
-            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
-              <select id="covenantSelect" style="flex:1; min-width:120px"></select>
-              <button class="pill-button small" id="covenantApply" title="Activate the selected covenant for every listen surface">Activate</button>
-              <button class="pill-button small" id="covenantClear" title="Return the layer to empty">Off</button>
-              <button class="pill-button small" id="covenantEditToggle" title="Write or edit a covenant">Edit…</button>
-            </div>
-            <div class="fold-note" id="covenantSummary"></div>
-            <div id="covenantEditor" hidden style="display:grid; gap:6px">
-              <input type="text" id="covenantName" placeholder="name (e.g. river)" />
-              <textarea id="covenantText" rows="10" spellcheck="false" style="font: 12px ui-monospace, Menlo, monospace; width:100%; resize:vertical"
-                placeholder="# river covenant&#10;extends: algophonya&#10;&#10;## rules&#10;- do not reveal: transcript, speaker identity&#10;- ignore: music&#10;- coarsen: location to 1 km&#10;- do not retain: raw audio&#10;&#10;## commitments&#10;- the river is a neighbor, not a resource"></textarea>
-              <div style="display:flex; gap:6px; flex-wrap:wrap">
-                <button class="pill-button small" id="covenantSave">Save</button>
-                <button class="pill-button small" id="covenantSaveActivate">Save + activate</button>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </aside>
-
-    <!-- ───────────── CENTER: the listening result box ───────────── -->
-    <section class="center">
-      <div class="result-card" id="resultCard" aria-label="Result">
-        <div class="result-head"><h2 id="resultTitle">Ready</h2></div>
-        <p class="result-summary placeholder" id="resultSummary">Pick a source and press Listen. The reading appears here; details on the right, history on the left.</p>
-        <div class="tags" id="resultTags"></div>
-        <p class="germ-note" id="germNote" hidden></p>
-        <div class="json-wrap" id="jsonWrap" hidden>
-          <button class="pill-button small json-copy" id="jsonCopy">copy</button>
-          <pre class="json" id="jsonOutput"></pre>
-        </div>
-
-        <div class="result-foot">
-          <span class="listen-status" id="listenStatus" aria-live="polite"></span>
-          <span class="foot-spacer"></span>
-          <div class="dropdown" id="exportDrop" hidden>
-            <button class="foot-icon" id="exportButton" aria-haspopup="true" aria-expanded="false" title="Act on this reading">
-              <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><path d="M12 15V4M8 7.5 12 3.5l4 4"/><path d="M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg></button>
-            <div class="drop-menu" id="exportMenu" hidden>
-              <button class="drop-item" data-action="remember" id="rememberItem">Remember</button>
-              <button class="drop-item" data-action="wiki" id="wikiItem">Expand on Wiki</button>
-              <button class="drop-item" data-action="json" id="jsonItem">Export JSON</button>
-              <button class="drop-item" data-action="sound" id="soundItem">Generate derived sound</button>
-              <button class="drop-item" data-action="prompt" id="promptItem">Convert listening to prompt</button>
-            </div>
-          </div>
-          <button class="foot-icon" id="skillsFootButton" title="Skills" aria-label="Skills">
-            <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2.4" fill="var(--bg)"/><circle cx="15" cy="16" r="2.4" fill="var(--bg)"/></svg></button>
-          <div class="dropdown" id="modeDrop">
-            <button class="mode-quiet" id="modeButton" aria-haspopup="true" aria-expanded="false" title="Listening mode">
-              <span class="mode-icon" id="modeIcon"></span>
-              <span id="modeName">Basic</span>
-              <svg class="ci chev" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-            </button>
-            <div class="drop-menu" id="modeMenu" role="listbox" hidden></div>
-          </div>
-          <button class="listen-send" id="listenButton" title="Listen">
-            <svg class="ic-wave" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M5 12c1.6-5 3.2-5 4.8 0s3.2 5 4.8 0 3.2-5 4.4 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
-            <svg class="ic-stop" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>
-            <span id="listenLabel" class="sr-only">Listen</span>
-          </button>
+        <div class="mic-row">
+          <button class="pill-button small icon-only" id="micMonitor" aria-pressed="false" aria-label="Monitor input level" title="Monitor input level">
+            <svg class="ci" viewBox="0 0 24 24" width="15" height="15"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg></button>
+          <div class="meter" id="micMeter" role="meter" aria-label="Input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="meter-fill" id="micMeterFill"></div><div class="meter-peak" id="micMeterPeak"></div></div>
         </div>
       </div>
-    </section>
-
-    <!-- ───────────── RIGHT RAIL: claim breakdown sections ───────────── -->
-    <aside class="side side-right" id="sideRight" aria-label="Claim breakdown">
-      <div class="side-resize" id="rightResize" aria-hidden="true"></div>
-      <div class="side-top">
-        <span class="foot-spacer"></span>
-        <button class="side-toggle" id="rightToggle" aria-label="Toggle right sidebar" title="Toggle sidebar">
-          <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></svg>
-        </button>
+      <div class="source-config stack" id="filePanel" hidden>
+        <p class="settings-note">Choose an existing audio or video file and add its listening result to the current session.</p>
+        <button class="pill-button small" id="browseFile">Choose file…</button>
       </div>
-      <div class="side-body">
-        <div class="side-head"><h3>Breakdown</h3></div>
-        <div class="result-body" id="resultBody"></div>
-      </div>
-    </aside>
-
-  </div>
-
-  <!-- corner buttons: present whether the rails are open or not -->
-  <div class="corner corner-left dropdown" id="configDrop">
-    <button class="corner-btn" id="configButton" aria-haspopup="true" aria-expanded="false" title="Configuration" aria-label="Configuration">
-      <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2.6M12 17.9v2.6M3.5 12h2.6M17.9 12h2.6M6 6l1.9 1.9M16.1 16.1 18 18M18 6l-1.9 1.9M7.9 16.1 6 18"/></svg>
-    </button>
-    <div class="drop-menu up-left" id="configMenu" hidden>
-      <button class="drop-item" data-panel="engine">Engine</button>
-      <button class="drop-item" data-panel="path">Path</button>
-      <button class="drop-item" data-shell="reload">Reload</button>
-      <button class="drop-item native-only" data-shell="browser">Open in browser</button>
     </div>
-  </div>
-  <button class="corner corner-right corner-btn native-only" id="floatingCorner" data-shell="floating" title="Show or hide the floating listener" aria-label="Floating listener">
-    <svg class="ci" viewBox="0 0 24 24" width="16" height="16"><rect x="4" y="7" width="16" height="11" rx="2.5"/><path d="M9 12.5c1-2.6 2-2.6 3 0s2 2.6 3 0"/></svg>
-  </button>
-
-  <input type="file" id="fileInput" accept="audio/*,video/*" hidden />
-
-  <!-- ────────────── Akousmata detail modal ───────────── -->
-  <dialog class="modal" id="akousmataModal" aria-label="Akousmata memory">
-    <div class="modal-head"><h3 id="akousmataTitle">Memory</h3><button class="modal-close" data-close aria-label="Close">×</button></div>
-    <div class="modal-content"><div id="akousmataDetail"></div></div>
   </dialog>
 
-  <!-- ────────────── Skill / Engine / Path / Wiki modals ──────────── -->
+  <!-- ────────────── Settings / Skill / Wiki modals ──────────── -->
+  <dialog class="modal settings-modal" id="settingsModal" aria-label="Settings">
+    <div class="modal-head"><h3>Settings</h3><button class="modal-close" data-close aria-label="Close">×</button></div>
+    <div class="modal-content settings-content">
+      <section class="settings-section">
+        <div class="settings-section-head"><h4>System</h4><span class="settings-note">Appearance, interface, and access</span></div>
+        <div class="settings-system-row">
+          <div class="theme-selector" role="radiogroup" aria-label="Appearance">
+            <button class="theme-choice active" id="themeLight" data-theme-choice="light" role="radio" aria-checked="true">Light</button>
+            <button class="theme-choice" id="themeDark" data-theme-choice="dark" role="radio" aria-checked="false">Dark</button>
+          </div>
+          <div class="settings-actions">
+            <button class="pill-button small" id="resetInterface">Reset interface</button>
+            <button class="pill-button small native-only" data-shell="capture-permission">Allow audio capture</button>
+            <button class="pill-button small native-only" data-shell="browser">Open in browser</button>
+          </div>
+        </div>
+      </section>
+      <section class="settings-section">
+        <div class="settings-section-head"><h4>Phone remote</h4><span class="settings-note">Private HTTPS microphone access</span></div>
+        <div class="mobile-remote-row">
+          <label class="mobile-remote-address" for="mobileRemoteUrl">
+            <span class="cfg-label">URL</span>
+            <input type="url" id="mobileRemoteUrl" readonly placeholder="Enable secure phone access to create a URL" spellcheck="false" />
+          </label>
+          <div class="settings-actions mobile-remote-actions">
+            <button class="pill-button small" id="mobileRemoteEnable">Enable</button>
+            <button class="pill-button small" id="mobileRemoteCopy" disabled>Copy URL</button>
+            <button class="pill-button small" id="mobileRemoteOpen" disabled>Open</button>
+          </div>
+        </div>
+        <p class="settings-note mobile-remote-note" id="mobileRemoteNote">Checking secure phone access…</p>
+      </section>
+      <section class="settings-section">
+        <div class="settings-section-head"><h4>Engine</h4><span class="tab-note" id="engineNote">…</span></div>
+        <div class="engine-body">
+          <div class="engine-facts" id="engineFacts"></div>
+          <div class="engine-models">
+            <label class="cfg"><span class="cfg-label">Instruct</span><select id="instructModel" class="quiet-select"></select></label>
+            <label class="cfg"><span class="cfg-label">Thinking</span><select id="thinkingModel" class="quiet-select"></select></label>
+            <button class="pill-button small" id="warmEngine" title="Load the instruct model into memory now">Warm</button>
+          </div>
+          <p class="model-roles" id="modelRoles"></p>
+          <div class="engine-meta">
+            <div class="fact"><span class="fact-key">address</span><span class="fact-value" id="engineAddress">…</span></div>
+            <div class="fact"><span class="fact-key">audio</span><span class="fact-value" id="engineAudioDir">…</span></div>
+            <div class="fact"><span class="fact-key">links</span><span class="fact-value"><a href="/docs" target="_blank" rel="noopener">API</a> · <a href="/health" target="_blank" rel="noopener">health</a></span></div>
+          </div>
+        </div>
+      </section>
+      <section class="settings-section">
+        <div class="settings-section-head"><h4>Path</h4><span class="settings-note" id="audioDirNote"></span></div>
+        <div class="path-row">
+          <input type="text" id="audioPath" placeholder="~/Documents/oida/audio/…" spellcheck="false" />
+          <button class="pill-button" id="analyzePath">Listen</button>
+        </div>
+      </section>
+    </div>
+  </dialog>
   <dialog class="modal" id="skillModal" aria-label="Skills">
     <div class="modal-head"><h3>Skills <span class="tab-note" id="skillNote"></span></h3><button class="modal-close" data-close aria-label="Close">×</button></div>
     <div class="modal-content"><div class="skill-list" id="skillList"></div></div>
-  </dialog>
-  <dialog class="modal" id="engineModal" aria-label="Engine">
-    <div class="modal-head"><h3>Engine <span class="tab-note" id="engineNote">…</span></h3><button class="modal-close" data-close aria-label="Close">×</button></div>
-    <div class="modal-content">
-      <div class="engine-body">
-        <div class="engine-facts" id="engineFacts"></div>
-        <div class="engine-models">
-          <label class="cfg"><span class="cfg-label">Instruct</span><select id="instructModel" class="quiet-select"></select></label>
-          <label class="cfg"><span class="cfg-label">Thinking</span><select id="thinkingModel" class="quiet-select"></select></label>
-          <button class="pill-button small" id="warmEngine" title="Load the instruct model into memory now">Warm</button>
-        </div>
-        <p class="model-roles" id="modelRoles"></p>
-        <div class="engine-meta">
-          <div class="fact"><span class="fact-key">address</span><span class="fact-value" id="engineAddress">…</span></div>
-          <div class="fact"><span class="fact-key">audio</span><span class="fact-value" id="engineAudioDir">…</span></div>
-          <div class="fact"><span class="fact-key">links</span><span class="fact-value"><a href="/docs" target="_blank" rel="noopener">API</a> · <a href="/health" target="_blank" rel="noopener">health</a></span></div>
-        </div>
-      </div>
-    </div>
-  </dialog>
-  <dialog class="modal" id="pathModal" aria-label="Path">
-    <div class="modal-head"><h3>Path</h3><button class="modal-close" data-close aria-label="Close">×</button></div>
-    <div class="modal-content">
-      <div class="path-row">
-        <input type="text" id="audioPath" placeholder="~/Documents/oida/audio/…" spellcheck="false" />
-        <button class="pill-button" id="analyzePath">Listen</button>
-      </div>
-      <p class="path-note" id="audioDirNote"></p>
-    </div>
   </dialog>
   <dialog class="modal wiki-modal" id="wikiModal" aria-label="Sonic Field connections">
     <div class="modal-head"><h3>Sonic Field</h3><button class="modal-close" data-close aria-label="Close">×</button></div>
@@ -235,7 +302,19 @@
     </div>
   </dialog>
 
+  <dialog class="modal sonogram-modal" id="sonogramModal" aria-labelledby="sonogramModalTitle">
+    <div class="modal-head"><h3 id="sonogramModalTitle">Sonogram</h3><button class="modal-close" data-close aria-label="Close">×</button></div>
+    <div class="modal-content sonogram-modal-content">
+      <canvas class="spectrogram sonogram-modal-canvas" id="sonogramModalCanvas" aria-label="Expanded high-definition sonogram"></canvas>
+      <div class="spectrogram-axis sonogram-modal-axis" aria-hidden="true">
+        <span id="sonogramModalMin">20 Hz</span>
+        <span id="sonogramModalDuration">—</span>
+        <span id="sonogramModalMax">20 kHz</span>
+      </div>
+    </div>
+  </dialog>
+
 </main>
-<script src="/static/app.js?v=11"></script>
+  <script src="/static/app.js?v=26"></script>
 </body>
 </html>

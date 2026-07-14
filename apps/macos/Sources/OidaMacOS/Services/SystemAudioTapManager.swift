@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreMedia
+import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 
@@ -67,6 +68,8 @@ enum SystemAudioTapState: Equatable {
 }
 
 final class SystemAudioTapManager: NSObject, @unchecked Sendable {
+    static let capturePermissionMessage = "Screen & System Audio Recording permission is required. Enable oída in System Settings → Privacy & Security → Screen & System Audio Recording, then try Listen again."
+
     var onSnapshot: (@MainActor @Sendable (NativeAudioTapSnapshot) -> Void)?
     var onStateChange: (@MainActor @Sendable (SystemAudioTapState) -> Void)?
     var onRouteChange: (@MainActor @Sendable (NativeSystemAudioRoutePayload?) -> Void)?
@@ -87,6 +90,14 @@ final class SystemAudioTapManager: NSObject, @unchecked Sendable {
         guard !isCapturing else { return }
         guard #available(macOS 13.0, *) else {
             onStateChange?(.unavailable("ScreenCaptureKit audio requires macOS 13+"))
+            return
+        }
+
+        // ScreenCaptureKit reports a generic TCC failure after access has been
+        // denied. Preflight explicitly so first launch presents the native
+        // permission prompt and later attempts get an actionable status.
+        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
+            onStateChange?(.unavailable(Self.capturePermissionMessage))
             return
         }
 

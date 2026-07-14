@@ -44,6 +44,10 @@ struct CaptureRequestModel: Codable {
     let routePreset: String?
     let requestedAt: String?
     let status: String?
+    let direction: String?
+    let source: String?
+    let enabledSkillIDs: [String]?
+    let songID: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -51,6 +55,10 @@ struct CaptureRequestModel: Codable {
         case routePreset = "route_preset"
         case requestedAt = "requested_at"
         case status
+        case direction
+        case source
+        case enabledSkillIDs = "enabled_skill_ids"
+        case songID = "song_id"
     }
 }
 
@@ -93,6 +101,8 @@ struct ListenEventPayload: Codable {
     let captureDirection: String?
     let captureSeconds: Double?
     let captureTrigger: String?
+    let enabledSkillIDs: [String]?
+    let songID: Bool
 
     enum CodingKeys: String, CodingKey {
         case path
@@ -105,6 +115,8 @@ struct ListenEventPayload: Codable {
         case captureDirection = "capture_direction"
         case captureSeconds = "capture_seconds"
         case captureTrigger = "capture_trigger"
+        case enabledSkillIDs = "enabled_skill_ids"
+        case songID = "song_id"
     }
 }
 
@@ -115,6 +127,14 @@ struct ListenEventResponse: Codable {
     enum CodingKeys: String, CodingKey {
         case listeningEvent = "listening_event"
         case background
+    }
+}
+
+struct EventRenameResponse: Codable {
+    let listeningEvent: ListeningEventSummary
+
+    enum CodingKeys: String, CodingKey {
+        case listeningEvent = "listening_event"
     }
 }
 
@@ -219,6 +239,7 @@ struct FloatingAgentConfig: Codable {
 
 struct BackgroundStateModel: Codable {
     let activeLiveSessionId: String?
+    let activeSession: BackgroundSessionSummary?
     let status: String?
     let updatedAt: String?
     let lastActionId: String?
@@ -230,6 +251,7 @@ struct BackgroundStateModel: Codable {
 
     enum CodingKeys: String, CodingKey {
         case activeLiveSessionId = "active_live_session_id"
+        case activeSession = "active_session"
         case status
         case updatedAt = "updated_at"
         case lastActionId = "last_action_id"
@@ -238,6 +260,20 @@ struct BackgroundStateModel: Codable {
         case pinnedEvents = "pinned_events"
         case recentEvents = "recent_events"
         case captureRequest = "capture_request"
+    }
+}
+
+struct BackgroundSessionSummary: Codable, Identifiable {
+    let id: String
+    let name: String?
+    let createdAt: String?
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -761,6 +797,7 @@ struct ListeningEventSummary: Codable, Identifiable {
     let routes: [ListeningRouteSummary]?
     let aggregate: ListeningAggregateSummary?
     let memory: MemoryLinksSummary?
+    let musicID: MusicIdentificationSummary?
     let privacyMode: String?
     let rawAudioPolicy: String?
 
@@ -772,9 +809,22 @@ struct ListeningEventSummary: Codable, Identifiable {
         case routes
         case aggregate
         case memory
+        case musicID = "music_id"
         case privacyMode = "privacy_mode"
         case rawAudioPolicy = "raw_audio_policy"
     }
+}
+
+struct EventRenamePayload: Codable {
+    let title: String
+}
+
+struct MusicIdentificationSummary: Codable {
+    let matched: Bool?
+    let title: String?
+    let artist: String?
+    let album: String?
+    let provider: String?
 }
 
 struct ListeningAggregateSummary: Codable {
@@ -1014,6 +1064,10 @@ struct NativeSystemAudioAnalyzePayload: Codable {
     let durationSeconds: Double?
     let remember: Bool
     let sourceRoute: NativeSystemAudioRoutePayload?
+    let captureDirection: String?
+    let captureTrigger: String?
+    let enabledSkillIDs: [String]?
+    let songID: Bool
 
     enum CodingKeys: String, CodingKey {
         case path
@@ -1023,6 +1077,10 @@ struct NativeSystemAudioAnalyzePayload: Codable {
         case durationSeconds = "duration_s"
         case remember
         case sourceRoute = "source_route"
+        case captureDirection = "capture_direction"
+        case captureTrigger = "capture_trigger"
+        case enabledSkillIDs = "enabled_skill_ids"
+        case songID = "song_id"
     }
 }
 

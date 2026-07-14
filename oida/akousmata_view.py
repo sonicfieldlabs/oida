@@ -4,8 +4,9 @@ The shared store has its own app (the akousmata listening navigator,
 github.com/sonicfieldlabs/akousmata); oída embeds the same library view —
 list, filter, detail with lineage and kinship, audio playback — natively in
 its dashboard instead of launching the external app. Card shapes stay
-compatible with the navigator's. Read-only here: oída WRITES memories through
-its listen flow and the germ bridge, and edits belong to the navigator.
+compatible with the navigator's. Oída normally writes memories through its
+listen flow and the germ bridge; the embedded list also supports the small
+rename/forget operations exposed by its contextual menus.
 
 Lazy on the ``akousma`` package like the germ bridge: oída boots without it
 and these routes degrade to 503.
@@ -51,6 +52,9 @@ def card(record: dict[str, Any]) -> dict[str, Any]:
     provenance = record.get("provenance") or {}
     audio = record.get("audio") or {}
     lineage = record.get("lineage") or {}
+    oida_listen = (record.get("listening") or {}).get("oida.listen") or {}
+    payload = oida_listen.get("payload") if isinstance(oida_listen, dict) and isinstance(oida_listen.get("payload"), dict) else oida_listen
+    event_id = payload.get("event_id") if isinstance(payload, dict) else None
     return {
         "akousma_id": record["akousma_id"],
         "created_at": record.get("created_at"),
@@ -63,6 +67,8 @@ def card(record: dict[str, Any]) -> dict[str, Any]:
         "has_audio": bool(audio.get("uri")),
         "parent_count": len(lineage.get("parent_akousma_ids") or []),
         "relation_count": len(lineage.get("relations") or []),
+        "session_id": record.get("session_id"),
+        "event_id": event_id,
     }
 
 
@@ -87,7 +93,7 @@ def _ref(store, akousma_id: str) -> dict[str, Any]:
 
 
 def build_akousmata_router():
-    from fastapi import APIRouter, HTTPException
+    from fastapi import APIRouter, Body, HTTPException
     from fastapi.responses import FileResponse
 
     akousma = _akousma()
@@ -141,6 +147,36 @@ def build_akousmata_router():
                 ],
                 "audio_available": _resolve_audio(store, record) is not None,
             }
+        finally:
+            store.close()
+
+    @router.patch("/records/{akousma_id}")
+    def rename(akousma_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        summary = str(body.get("summary") or body.get("title") or "").strip()
+        if not summary:
+            raise HTTPException(status_code=400, detail="memory name cannot be empty")
+        if len(summary) > 160:
+            raise HTTPException(status_code=400, detail="memory name must be 160 characters or fewer")
+        store = _store()
+        try:
+            record = store.get(akousma_id)
+            if record is None:
+                raise HTTPException(status_code=404, detail=f"akousma not found: {akousma_id}")
+            record["summary"] = summary
+            store.put(record)
+            return {"record": card(record), "renamed": True}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            store.close()
+
+    @router.delete("/records/{akousma_id}")
+    def forget(akousma_id: str) -> dict[str, Any]:
+        store = _store()
+        try:
+            if not store.forget(akousma_id, delete_audio=False):
+                raise HTTPException(status_code=404, detail=f"akousma not found: {akousma_id}")
+            return {"akousma_id": akousma_id, "forgotten": True, "audio_deleted": False}
         finally:
             store.close()
 

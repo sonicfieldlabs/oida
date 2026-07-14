@@ -5,6 +5,14 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("Appearance") {
+                Picker("Theme", selection: $store.appearanceMode) {
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
+            }
+
             Section("Daemon") {
                 TextField("Base URL", text: $store.daemonBaseURL)
                     .textFieldStyle(.roundedBorder)
@@ -73,11 +81,18 @@ struct SettingsView: View {
             }
 
             Section {
-                Label("System-output capture uses ScreenCaptureKit and needs Screen Recording permission.", systemImage: "speaker.wave.2")
-                    .font(.caption)
+                HStack {
+                    Label("System listening needs Screen & System Audio Recording permission.", systemImage: "speaker.wave.2")
+                        .font(.caption)
+                    Spacer()
+                    Button("Open Privacy Settings") {
+                        store.openSystemAudioCaptureSettings()
+                    }
+                }
             }
             .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+        .preferredColorScheme(store.preferredColorScheme)
     }
 }

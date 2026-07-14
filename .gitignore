@@ -29,6 +29,7 @@ weights/
 MOSS-Audio/
 apps/macos/.build/
 apps/macos/dist/
+/dist/
 
 # Private derived listening data and per-machine config (local-first; never committed)
 akousmata/

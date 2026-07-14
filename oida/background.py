@@ -76,6 +76,11 @@ class BackgroundState:
     latest_event: dict[str, Any] | None = None
     recent_events: list[dict[str, Any]] = field(default_factory=list)
     pinned_events: list[dict[str, Any]] = field(default_factory=list)
+    # One listening session can contain many results. The active session is
+    # daemon-owned so the native panel, embedded dashboard, browser dashboard,
+    # hotkeys, and agent calls all file new readings into the same place.
+    active_session: dict[str, Any] | None = None
+    archived_sessions: list[dict[str, Any]] = field(default_factory=list)
     # A pending system-audio capture request. Any surface (web dashboard) may
     # file one; the native shell polls status, claims it, performs the tap
     # capture, and analyzes. This is how one daemon state drives all surfaces.
@@ -84,6 +89,7 @@ class BackgroundState:
 
 class BackgroundRuntime:
     RECENT_EVENT_LIMIT = 12
+    ARCHIVED_SESSION_LIMIT = 50
 
     def __init__(
         self,
@@ -104,6 +110,8 @@ class BackgroundRuntime:
             latest_event=(recent_events or pinned_events or [None])[0],
             recent_events=recent_events,
             pinned_events=pinned_events,
+            active_session=history.get("active_session"),
+            archived_sessions=history.get("archived_sessions", []),
         )
 
     @_synchronized
@@ -142,6 +150,9 @@ class BackgroundRuntime:
                 "recent_history_batch_review": True,
                 "generation_prompt_api": True,
                 "generation_relisten_api": True,
+                "listening_sessions": True,
+                "session_memory": True,
+                "session_archive": True,
             },
             "notes": [
                 "The daemon can stay running and perform quick captures from an active live session.",
@@ -224,11 +235,23 @@ class BackgroundRuntime:
     CAPTURE_REQUEST_TTL_SECONDS = 30.0
 
     @_synchronized
-    def request_capture(self, seconds: float | None = None, route_preset: str | None = None) -> dict[str, Any]:
+    def request_capture(
+        self,
+        seconds: float | None = None,
+        route_preset: str | None = None,
+        direction: str | None = None,
+        source: str | None = None,
+        enabled_skill_ids: list[str] | None = None,
+        song_id: bool = False,
+    ) -> dict[str, Any]:
         request = {
             "id": f"capreq-{uuid4().hex[:10]}",
             "seconds": float(seconds) if isinstance(seconds, (int, float)) and seconds and seconds > 0 else self.config.default_capture_seconds,
             "route_preset": route_preset or self.config.default_route_preset,
+            "direction": _capture_direction(direction, self.config.default_capture_direction),
+            "source": _capture_source(source),
+            "enabled_skill_ids": list(enabled_skill_ids) if enabled_skill_ids else None,
+            "song_id": bool(song_id),
             "requested_at": now_iso(),
             "requested_monotonic": time.monotonic(),
             "status": "pending",
@@ -286,6 +309,10 @@ class BackgroundRuntime:
 
     @_synchronized
     def finish_action(self, event: dict[str, Any] | None = None) -> None:
+        if event is not None:
+            session = self._ensure_active_session()
+            session["updated_at"] = str(event.get("created_at") or now_iso())
+            event["session"] = dict(session)
         if event is None:
             self.state.latest_event = None
         elif self._history_can_include_event(event):
@@ -301,6 +328,380 @@ class BackgroundRuntime:
         self.state.status = "result_ready" if event else ("listening" if self.state.active_live_session_id else "idle")
         self.state.last_error = None
         self.state.updated_at = now_iso()
+
+    @_synchronized
+    def create_session(self, name: str | None = None) -> dict[str, Any]:
+        session = self._new_session(name)
+        created_at = str(session["created_at"])
+        self.state.active_session = session
+        self.state.updated_at = created_at
+        self._write_recent_history()
+        return dict(session)
+
+    @_synchronized
+    def activate_session(self, session_id: str) -> dict[str, Any]:
+        normalized = str(session_id or "").strip()
+        session = next((item for item in self.sessions()["sessions"] if item.get("id") == normalized), None)
+        if session is None:
+            raise KeyError(session_id)
+        active = {key: session.get(key) for key in ("id", "name", "created_at", "updated_at")}
+        self.state.active_session = active
+        self.state.updated_at = now_iso()
+        self._write_recent_history()
+        return dict(active)
+
+    @_synchronized
+    def rename_session(self, session_id: str, name: str) -> dict[str, Any]:
+        normalized = str(session_id or "").strip()
+        renamed = _session_name(name, now_iso())
+        found = False
+        for event in [*self.state.recent_events, *self.state.pinned_events]:
+            session = event.get("session") if isinstance(event.get("session"), dict) else None
+            if session and session.get("id") == normalized:
+                event["session"] = {**session, "name": renamed, "updated_at": now_iso()}
+                found = True
+        if self.state.active_session and self.state.active_session.get("id") == normalized:
+            self.state.active_session = {**self.state.active_session, "name": renamed, "updated_at": now_iso()}
+            found = True
+        for index, archived in enumerate(self.state.archived_sessions):
+            if archived.get("id") != normalized:
+                continue
+            updated_at = now_iso()
+            events = []
+            for event in archived.get("events") or []:
+                event_copy = dict(event)
+                session = event_copy.get("session") if isinstance(event_copy.get("session"), dict) else {}
+                event_copy["session"] = {**session, "id": normalized, "name": renamed, "updated_at": updated_at}
+                events.append(event_copy)
+            self.state.archived_sessions[index] = {
+                **archived,
+                "name": renamed,
+                "updated_at": updated_at,
+                "events": events,
+            }
+            found = True
+        if not found:
+            raise KeyError(session_id)
+        self.state.updated_at = now_iso()
+        self._write_recent_history()
+        return dict(self.state.active_session) if self.state.active_session and self.state.active_session.get("id") == normalized else {
+            "id": normalized,
+            "name": renamed,
+        }
+
+    @_synchronized
+    def rename_event(self, session_id: str, event_id: str, title: str) -> dict[str, Any]:
+        normalized_session_id = str(session_id or "").strip()
+        normalized_event_id = str(event_id or "").strip()
+        renamed = _event_title(title)
+        updated_at = now_iso()
+        renamed_event: dict[str, Any] | None = None
+
+        def update(candidate: dict[str, Any]) -> bool:
+            nonlocal renamed_event
+            if str(candidate.get("id") or "") != normalized_event_id:
+                return False
+            session = candidate.get("session") if isinstance(candidate.get("session"), dict) else None
+            candidate_session_id = str(session.get("id")) if session and session.get("id") else "session_legacy"
+            if candidate_session_id != normalized_session_id:
+                return False
+            aggregate = candidate.get("aggregate") if isinstance(candidate.get("aggregate"), dict) else {}
+            candidate["aggregate"] = {**aggregate, "title": renamed}
+            renamed_event = dict(candidate)
+            return True
+
+        found = False
+        for candidate in [*self.state.recent_events, *self.state.pinned_events]:
+            found = update(candidate) or found
+        if isinstance(self.state.latest_event, dict):
+            found = update(self.state.latest_event) or found
+
+        for index, archived in enumerate(self.state.archived_sessions):
+            if str(archived.get("id") or "") != normalized_session_id:
+                continue
+            events = []
+            archived_changed = False
+            for stored in archived.get("events") or []:
+                candidate = dict(stored) if isinstance(stored, dict) else stored
+                if isinstance(candidate, dict) and update(candidate):
+                    archived_changed = True
+                    found = True
+                events.append(candidate)
+            if archived_changed:
+                self.state.archived_sessions[index] = {**archived, "updated_at": updated_at, "events": events}
+
+        if not found or renamed_event is None:
+            raise KeyError(event_id)
+        self.state.updated_at = updated_at
+        self._write_recent_history()
+        return renamed_event
+
+    @_synchronized
+    def delete_event(self, session_id: str, event_id: str) -> dict[str, Any]:
+        """Remove one derived listening result from session history.
+
+        Raw audio is deliberately left untouched: a result may point at an
+        external file or at an object shared with Akousmata. This operation
+        only removes the daemon-owned history references shown by Oída.
+        """
+        normalized_session_id = str(session_id or "").strip()
+        normalized_event_id = str(event_id or "").strip()
+        deleted: dict[str, Any] | None = None
+
+        def matches(candidate: Any) -> bool:
+            if not isinstance(candidate, dict) or str(candidate.get("id") or "") != normalized_event_id:
+                return False
+            session = candidate.get("session") if isinstance(candidate.get("session"), dict) else None
+            candidate_session_id = str(session.get("id")) if session and session.get("id") else "session_legacy"
+            return candidate_session_id == normalized_session_id
+
+        def without_event(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            nonlocal deleted
+            remaining = []
+            for candidate in events:
+                if matches(candidate):
+                    if deleted is None:
+                        deleted = dict(candidate)
+                    continue
+                remaining.append(candidate)
+            return remaining
+
+        self.state.recent_events = without_event(self.state.recent_events)
+        self.state.pinned_events = without_event(self.state.pinned_events)
+
+        updated_at = now_iso()
+        for index, archived in enumerate(self.state.archived_sessions):
+            if str(archived.get("id") or "") != normalized_session_id:
+                continue
+            events = []
+            changed = False
+            for candidate in archived.get("events") or []:
+                if matches(candidate):
+                    if deleted is None:
+                        deleted = dict(candidate)
+                    changed = True
+                    continue
+                events.append(candidate)
+            if changed:
+                self.state.archived_sessions[index] = {**archived, "updated_at": updated_at, "events": events}
+
+        if deleted is None:
+            raise KeyError(event_id)
+        if isinstance(self.state.latest_event, dict) and matches(self.state.latest_event):
+            remaining = self.state.recent_events or self.state.pinned_events
+            self.state.latest_event = remaining[0] if remaining else None
+        self.state.updated_at = updated_at
+        self._write_recent_history()
+        return deleted
+
+    @_synchronized
+    def delete_session(self, session_id: str) -> dict[str, Any]:
+        """Remove a session and all of its derived history references."""
+        normalized = str(session_id or "").strip()
+        snapshot = self.sessions()
+        session = next(
+            (
+                item
+                for item in [*snapshot["sessions"], *snapshot["archived_sessions"]]
+                if str(item.get("id") or "") == normalized
+            ),
+            None,
+        )
+        if session is None:
+            raise KeyError(session_id)
+
+        event_ids = {
+            str(event.get("id"))
+            for event in session.get("events") or []
+            if isinstance(event, dict) and event.get("id")
+        }
+        self.state.recent_events = [
+            event for event in self.state.recent_events if str(event.get("id") or "") not in event_ids
+        ]
+        self.state.pinned_events = [
+            event for event in self.state.pinned_events if str(event.get("id") or "") not in event_ids
+        ]
+        self.state.archived_sessions = [
+            item for item in self.state.archived_sessions if str(item.get("id") or "") != normalized
+        ]
+        if self.state.active_session and str(self.state.active_session.get("id") or "") == normalized:
+            self.state.active_session = self._new_session(None)
+        if self.state.latest_event and str(self.state.latest_event.get("id") or "") in event_ids:
+            remaining = self.state.recent_events or self.state.pinned_events
+            self.state.latest_event = remaining[0] if remaining else None
+        self.state.updated_at = now_iso()
+        self._write_recent_history()
+        return {
+            key: session.get(key)
+            for key in ("id", "name", "created_at", "updated_at", "archived_at", "event_count")
+            if session.get(key) is not None
+        }
+
+    @_synchronized
+    def session_events(self, session_id: str) -> list[dict[str, Any]]:
+        normalized = str(session_id or "").strip()
+        archived = next((item for item in self.state.archived_sessions if item.get("id") == normalized), None)
+        if archived is not None:
+            return [dict(event) for event in archived.get("events") or [] if isinstance(event, dict)]
+        events: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for event in [*self.state.recent_events, *self.state.pinned_events]:
+            event_id = str(event.get("id") or "")
+            session = event.get("session") if isinstance(event.get("session"), dict) else None
+            # Pre-session history has no session block; sessions() groups it as
+            # "session_legacy", so that id must resolve to the same events here
+            # or the legacy group's batch actions (remember, export) find nothing.
+            event_session_id = str(session["id"]) if session and session.get("id") else "session_legacy"
+            if event_session_id != normalized or (event_id and event_id in seen):
+                continue
+            if event_id:
+                seen.add(event_id)
+            events.append(event)
+        return events
+
+    @_synchronized
+    def sessions(self) -> dict[str, Any]:
+        grouped: dict[str, dict[str, Any]] = {}
+        seen_events: set[str] = set()
+        for event in [*self.state.recent_events, *self.state.pinned_events]:
+            event_id = str(event.get("id") or "")
+            if event_id and event_id in seen_events:
+                continue
+            if event_id:
+                seen_events.add(event_id)
+            raw_session = event.get("session") if isinstance(event.get("session"), dict) else None
+            if raw_session and raw_session.get("id"):
+                session_id = str(raw_session["id"])
+                name = str(raw_session.get("name") or "Listening session")
+                created_at = str(raw_session.get("created_at") or event.get("created_at") or "")
+                updated_at = str(raw_session.get("updated_at") or event.get("created_at") or "")
+            else:
+                session_id = "session_legacy"
+                name = "Earlier listens"
+                created_at = str(event.get("created_at") or "")
+                updated_at = created_at
+            group = grouped.setdefault(session_id, {
+                "id": session_id,
+                "name": name,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "events": [],
+            })
+            group["events"].append(event)
+            if updated_at > str(group.get("updated_at") or ""):
+                group["updated_at"] = updated_at
+
+        active = self.state.active_session
+        if active and active.get("id") not in grouped:
+            grouped[str(active["id"])] = {**active, "events": []}
+        sessions = sorted(grouped.values(), key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        active_id = str(active.get("id")) if active and active.get("id") else None
+        for session in sessions:
+            session["event_count"] = len(session["events"])
+            session["active"] = session.get("id") == active_id
+            session["archived"] = False
+        archived_sessions = []
+        for archived in self.state.archived_sessions:
+            events = [dict(event) for event in archived.get("events") or [] if isinstance(event, dict)]
+            archived_sessions.append({
+                **archived,
+                "events": events,
+                "event_count": len(events),
+                "active": False,
+                "archived": True,
+            })
+        return {
+            "version": "0.1",
+            "active_session": dict(active) if active else None,
+            "sessions": sessions,
+            "archived_sessions": archived_sessions,
+        }
+
+    @_synchronized
+    def archive_session(self, session_id: str) -> dict[str, Any]:
+        normalized = str(session_id or "").strip()
+        session = next((item for item in self.sessions()["sessions"] if item.get("id") == normalized), None)
+        if session is None:
+            raise KeyError(session_id)
+
+        event_ids = {str(event.get("id")) for event in session.get("events") or [] if event.get("id")}
+        pinned_ids = [
+            str(event.get("id"))
+            for event in self.state.pinned_events
+            if event.get("id") and str(event.get("id")) in event_ids
+        ]
+        archived_at = now_iso()
+        archived = {
+            key: session.get(key)
+            for key in ("id", "name", "created_at", "updated_at", "events")
+        }
+        archived.update({
+            "archived_at": archived_at,
+            "pinned_event_ids": pinned_ids,
+        })
+        self.state.archived_sessions = [
+            archived,
+            *(item for item in self.state.archived_sessions if item.get("id") != normalized),
+        ][: self.ARCHIVED_SESSION_LIMIT]
+        self.state.recent_events = [event for event in self.state.recent_events if str(event.get("id") or "") not in event_ids]
+        self.state.pinned_events = [event for event in self.state.pinned_events if str(event.get("id") or "") not in event_ids]
+        if self.state.active_session and self.state.active_session.get("id") == normalized:
+            self.state.active_session = self._new_session(None)
+        if self.state.latest_event and str(self.state.latest_event.get("id") or "") in event_ids:
+            remaining = self.state.recent_events or self.state.pinned_events
+            self.state.latest_event = remaining[0] if remaining else None
+        self.state.updated_at = archived_at
+        self._write_recent_history()
+        return dict(archived)
+
+    @_synchronized
+    def restore_session(self, session_id: str) -> dict[str, Any]:
+        normalized = str(session_id or "").strip()
+        archived = next((item for item in self.state.archived_sessions if item.get("id") == normalized), None)
+        if archived is None:
+            raise KeyError(session_id)
+        events = [dict(event) for event in archived.get("events") or [] if isinstance(event, dict)]
+        event_ids = {str(event.get("id")) for event in events if event.get("id")}
+        self.state.recent_events = [
+            *events,
+            *(event for event in self.state.recent_events if str(event.get("id") or "") not in event_ids),
+        ][: self._recent_limit()]
+        pinned_ids = {str(value) for value in archived.get("pinned_event_ids") or []}
+        restored_pinned = [event for event in events if str(event.get("id") or "") in pinned_ids]
+        self.state.pinned_events = [
+            *restored_pinned,
+            *(event for event in self.state.pinned_events if str(event.get("id") or "") not in event_ids),
+        ][: self._pinned_limit()]
+        self.state.archived_sessions = [item for item in self.state.archived_sessions if item.get("id") != normalized]
+        if events:
+            self.state.latest_event = events[0]
+        self.state.updated_at = now_iso()
+        self._write_recent_history()
+        return {
+            key: archived.get(key)
+            for key in ("id", "name", "created_at", "updated_at")
+        }
+
+    def _ensure_active_session(self) -> dict[str, Any]:
+        if self.state.active_session and self.state.active_session.get("id"):
+            return self.state.active_session
+        created_at = now_iso()
+        self.state.active_session = {
+            "id": f"session_{uuid4().hex[:12]}",
+            "name": _session_name(None, created_at),
+            "created_at": created_at,
+            "updated_at": created_at,
+        }
+        return self.state.active_session
+
+    def _new_session(self, name: str | None) -> dict[str, Any]:
+        created_at = now_iso()
+        return {
+            "id": f"session_{uuid4().hex[:12]}",
+            "name": _session_name(name, created_at),
+            "created_at": created_at,
+            "updated_at": created_at,
+        }
 
     @_synchronized
     def fail_action(self, error: str) -> None:
@@ -553,27 +954,51 @@ class BackgroundRuntime:
     def _write_config(self) -> None:
         write_json_atomic(self.config_path, asdict(self.config))
 
-    def _load_recent_history(self) -> dict[str, list[dict[str, Any]]]:
+    def _load_recent_history(self) -> dict[str, Any]:
         if not self._recent_history_enabled() or not self.history_path.exists():
-            return {"recent_events": [], "pinned_events": []}
+            return {"recent_events": [], "pinned_events": [], "active_session": None, "archived_sessions": []}
         try:
             data = json.loads(self.history_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return {"recent_events": [], "pinned_events": []}
+            return {"recent_events": [], "pinned_events": [], "active_session": None, "archived_sessions": []}
         if isinstance(data, dict):
             events = data.get("recent_events")
             pinned = data.get("pinned_events")
+            active_session = data.get("active_session")
+            archived_sessions = data.get("archived_sessions")
         else:
             events = data
             pinned = []
+            active_session = None
+            archived_sessions = []
         if not isinstance(events, list):
             events = []
         if not isinstance(pinned, list):
             pinned = []
+        if not isinstance(archived_sessions, list):
+            archived_sessions = []
         return {
             "recent_events": self._normalize_history_events(events, self._recent_limit()),
             "pinned_events": self._normalize_history_events(pinned, self._pinned_limit()),
+            "active_session": active_session if isinstance(active_session, dict) and active_session.get("id") else None,
+            "archived_sessions": self._normalize_archived_sessions(archived_sessions),
         }
+
+    def _normalize_archived_sessions(self, sessions: list[Any]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for session in sessions:
+            if not isinstance(session, dict) or not session.get("id"):
+                continue
+            session_id = str(session["id"])
+            if session_id in seen:
+                continue
+            seen.add(session_id)
+            events = self._normalize_history_events(session.get("events") or [], self._recent_limit())
+            normalized.append({**session, "id": session_id, "events": events})
+            if len(normalized) >= self.ARCHIVED_SESSION_LIMIT:
+                break
+        return normalized
 
     def _normalize_history_events(self, events: list[Any], limit: int) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
@@ -600,6 +1025,8 @@ class BackgroundRuntime:
             "limit": self._recent_limit(),
             "pinned_limit": self._pinned_limit(),
             "raw_audio_policy": "Derived event history only; raw audio is not copied into this file.",
+            "active_session": self.state.active_session,
+            "archived_sessions": self.state.archived_sessions[: self.ARCHIVED_SESSION_LIMIT],
             "pinned_events": self.state.pinned_events[: self._pinned_limit()],
             "recent_events": self.state.recent_events[: self._recent_limit()],
         }
@@ -683,6 +1110,7 @@ def normalize_background_config_data(value: dict[str, Any]) -> dict[str, Any]:
 
     data["floating_agent"] = normalize_floating_agent_config(data.get("floating_agent"))
     data["default_capture_seconds"] = _bounded_float(data.get("default_capture_seconds"), 10.0, 0.25, 600.0)
+    data["default_capture_direction"] = _capture_direction(data.get("default_capture_direction"), "past")
     data["default_route_preset"] = _valid_route_preset(data.get("default_route_preset"), "basic")
     data["hotkeys"] = normalize_hotkeys_config(data.get("hotkeys"))
     data["native_temp_audio_retention"] = normalize_native_temp_audio_retention(data.get("native_temp_audio_retention"))
@@ -801,6 +1229,31 @@ def _safe_archive_label(label: str | None) -> str | None:
     safe = "".join(char.lower() if char.isalnum() else "-" for char in str(label))
     safe = "-".join(part for part in safe.split("-") if part)
     return safe[:48] or None
+
+
+def _capture_direction(value: Any, fallback: str = "past") -> str:
+    normalized = str(value or fallback).strip().lower()
+    return normalized if normalized in {"past", "future"} else fallback
+
+
+def _capture_source(value: Any) -> str:
+    normalized = str(value or "system").strip().lower()
+    return normalized if normalized in {"system", "mic", "file"} else "system"
+
+
+def _session_name(value: Any, created_at: str) -> str:
+    normalized = " ".join(str(value or "").split()).strip()
+    if normalized:
+        return normalized[:80]
+    stamp = created_at[:16].replace("T", " ")
+    return f"Session {stamp}"
+
+
+def _event_title(value: Any) -> str:
+    normalized = " ".join(str(value or "").split()).strip()
+    if not normalized:
+        raise ValueError("listening result title cannot be empty")
+    return normalized[:160]
 
 
 def _history_event_matches(

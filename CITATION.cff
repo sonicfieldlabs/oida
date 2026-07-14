@@ -4,8 +4,8 @@ message: "If you use oida in research, please cite the software and the Listenin
 type: software
 authors:
   - name: "Sonic Field Labs"
-version: 0.1.0
-date-released: 2026-07-02
+version: 0.5.0
+date-released: 2026-07-13
 license: Apache-2.0
 repository-code: "https://github.com/sonicfieldlabs/oida"
 preferred-citation:

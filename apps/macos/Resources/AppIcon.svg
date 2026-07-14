@@ -10,7 +10,7 @@
       <stop offset="1" stop-color="#232320"/>
     </linearGradient>
   </defs>
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+  <rect width="1024" height="1024" rx="230" fill="url(#tile)"/>
   <g fill="none" stroke="#f4f3ee" stroke-linecap="round">
     <path d="M 541.4 675.9 A 150 150 0 1 0 342.1 476.6" stroke-width="48"/>
     <path d="M 609.0 766.9 A 262 262 0 1 0 251.1 409.0" stroke-width="38" opacity="0.82"/>

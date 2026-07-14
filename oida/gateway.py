@@ -12,7 +12,6 @@ event and controls which claims can be treated as supported.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from harness.akouo.command import build_harness_output

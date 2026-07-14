@@ -5,7 +5,12 @@
 
 const state = {
   source: "system",
+  direction: "past",
   preset: "basic",
+  customMode: false,
+  musicIDEnabled: localStorage.getItem("oida.music-id") === "on",
+  theme: localStorage.getItem("oida.theme") === "dark" ? "dark" : "light",
+  tagFilters: new Set(),
   presets: [],
   skills: [],
   selectedSkills: new Set(),
@@ -13,13 +18,18 @@ const state = {
   lastEvent: null,
   lastEventId: null,
   lastJson: null,
+  sessions: [],
+  archivedSessions: [],
+  currentSessionId: null,
+  currentSessionName: "",
   audioDir: "",
   engine: null,
   engineSignature: null,
-  phase: "idle", // idle | waiting | recording | analyzing
+  phase: "idle", // idle | waiting/capturing | processing/analyzing | result | failed
   recorder: null,
   recordedChunks: [],
   recordTimer: null,
+  recordStopTimer: null,
   captureHintTimer: null,
   captureRequestId: null,
   abortController: null,
@@ -27,11 +37,17 @@ const state = {
   sonicfieldAvailable: false,
   micDevices: [],
   monitor: null, // {stream, ctx, analyser, raf, peak}
+  diagnostics: [],
+  nativeEventId: null,
+  historyRequestSerial: 0,
+  activeSpectrogram: null,
+  mobileRemote: null,
 };
 
 const el = (id) => document.getElementById(id);
 const ui = {
   resultCard: el("resultCard"),
+  resultScroll: el("resultScroll"),
   listenButton: el("listenButton"),
   listenLabel: el("listenLabel"),
   listenStatus: el("listenStatus"),
@@ -64,24 +80,30 @@ const ui = {
   audioDirNote: el("audioDirNote"),
   analyzePath: el("analyzePath"),
   fileInput: el("fileInput"),
-  resultTitle: el("resultTitle"),
-  resultSummary: el("resultSummary"),
-  resultTags: el("resultTags"),
+  sessionTitle: el("sessionTitle"),
+  resultEntries: el("resultEntries"),
   resultBody: el("resultBody"),
   leftResize: el("leftResize"),
   rightResize: el("rightResize"),
-  exportDrop: el("exportDrop"),
-  exportMenu: el("exportMenu"),
-  rememberItem: el("rememberItem"),
-  wikiItem: el("wikiItem"),
-  jsonItem: el("jsonItem"),
-  soundItem: el("soundItem"),
-  promptItem: el("promptItem"),
-  skillsFootButton: el("skillsFootButton"),
-  configMenu: el("configMenu"),
-  jsonWrap: el("jsonWrap"),
-  jsonCopy: el("jsonCopy"),
-  jsonOutput: el("jsonOutput"),
+  musicIdToggle: el("musicIdToggle"),
+  configButton: el("configButton"),
+  sourceModal: el("sourceModal"),
+  sourceModalTitle: el("sourceModalTitle"),
+  settingsModal: el("settingsModal"),
+  themeLight: el("themeLight"),
+  themeDark: el("themeDark"),
+  resetInterface: el("resetInterface"),
+  mobileRemoteUrl: el("mobileRemoteUrl"),
+  mobileRemoteNote: el("mobileRemoteNote"),
+  mobileRemoteEnable: el("mobileRemoteEnable"),
+  mobileRemoteCopy: el("mobileRemoteCopy"),
+  mobileRemoteOpen: el("mobileRemoteOpen"),
+  sessionContextRow: el("sessionContextRow"),
+  tagFilterBar: el("tagFilterBar"),
+  tagFilterChips: el("tagFilterChips"),
+  tagFilterAdd: el("tagFilterAdd"),
+  tagFilterMenu: el("tagFilterMenu"),
+  tagFilterReset: el("tagFilterReset"),
   germNote: el("germNote"),
   wikiModal: el("wikiModal"),
   wikiQuery: el("wikiQuery"),
@@ -89,12 +111,26 @@ const ui = {
   wikiTerms: el("wikiTerms"),
   wikiGroups: el("wikiGroups"),
   historyList: el("historyList"),
-  historyNote: el("historyNote"),
+  archiveSection: el("archiveSection"),
+  archiveList: el("archiveList"),
+  newSession: el("newSession"),
   memorySearch: el("memorySearch"),
   memoryGo: el("memoryGo"),
   memoryList: el("memoryList"),
+  listenProgress: el("listenProgress"),
+  listenProgressFill: el("listenProgressFill"),
+  listenPhaseText: el("listenPhaseText"),
+  consoleOutput: el("consoleOutput"),
+  consoleNote: el("consoleNote"),
+  consoleCopy: el("consoleCopy"),
+  consoleClear: el("consoleClear"),
   engineAddress: el("engineAddress"),
   engineAudioDir: el("engineAudioDir"),
+  sonogramModal: el("sonogramModal"),
+  sonogramModalCanvas: el("sonogramModalCanvas"),
+  sonogramModalMin: el("sonogramModalMin"),
+  sonogramModalDuration: el("sonogramModalDuration"),
+  sonogramModalMax: el("sonogramModalMax"),
 };
 
 /* ────────────────────────────── helpers ─────────────────────────── */
@@ -109,7 +145,13 @@ function escapeHtml(value) {
 }
 
 async function fetchJson(url, options) {
-  const response = await fetch(url, options);
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    logActivity(`${options?.method || "GET"} ${url} — ${error.message}`, "error");
+    throw error;
+  }
   if (!response.ok) {
     let detail = `${response.status}`;
     try {
@@ -119,9 +161,13 @@ async function fetchJson(url, options) {
         detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
       }
     } catch (_) { /* keep status */ }
-    throw new Error(detail);
+    const error = new Error(detail);
+    logActivity(`${options?.method || "GET"} ${url} — ${response.status} ${detail}`, "error");
+    throw error;
   }
-  return response.json();
+  const result = await response.json();
+  if (options?.method && options.method !== "GET") logActivity(`${options.method} ${url} — ${response.status}`);
+  return result;
 }
 
 const post = (url, body, options) =>
@@ -130,22 +176,147 @@ const post = (url, body, options) =>
 function setListenStatus(text, tone) {
   ui.listenStatus.textContent = text;
   ui.listenStatus.className = `listen-status${tone ? ` ${tone}` : ""}`;
+  if (tone === "error" && text) logActivity(text, "error");
 }
 
 function setPhase(phase, label) {
+  const previous = state.phase;
   state.phase = phase;
-  const busy = phase !== "idle";
-  ui.listenButton.classList.toggle("busy", phase === "analyzing" || phase === "waiting");
-  ui.listenButton.classList.toggle("stop", busy);
-  ui.listenLabel.textContent = label || (busy ? "Stop" : "Listen");
+  const capturing = ["waiting", "recording", "capturing"].includes(phase);
+  const processing = ["analyzing", "processing"].includes(phase);
+  const busy = capturing || processing;
+  ui.listenButton.classList.toggle("busy", processing || phase === "waiting");
+  ui.listenButton.classList.toggle("stop", capturing);
+  ui.listenButton.classList.toggle("processing", processing);
+  ui.listenButton.dataset.phase = capturing ? "hearing" : (processing ? "operating" : phase);
+  ui.listenButton.disabled = processing;
+  ui.listenLabel.textContent = capturing
+    ? "Hearing — press to stop"
+    : (processing ? "Operating listening" : (label || "Listen"));
+  ui.listenButton.title = capturing ? "Stop hearing" : (processing ? "Operating listening" : "Listen");
+  ui.listenProgress.hidden = !busy;
+  ui.listenProgress.classList.toggle("hearing", capturing);
+  ui.listenProgress.classList.toggle("processing", processing);
+  if (!busy) ui.listenProgressFill.style.width = "0%";
+  if (previous !== phase) logActivity(`Phase: ${previous} → ${phase}`);
 }
+
+function updateListenProgress(progress, status) {
+  const value = Math.max(0, Math.min(1, Number(progress) || 0));
+  ui.listenProgressFill.style.width = `${Math.round(value * 100)}%`;
+  if (status) ui.listenPhaseText.textContent = status;
+}
+
+function logActivity(message, tone = "info") {
+  if (!message) return;
+  const stamp = new Date().toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  state.diagnostics.push({ stamp, message: String(message), tone });
+  if (state.diagnostics.length > 160) state.diagnostics.splice(0, state.diagnostics.length - 160);
+  if (ui.consoleOutput) {
+    ui.consoleOutput.textContent = state.diagnostics.map((entry) => `[${entry.stamp}] ${entry.tone === "error" ? "ERROR " : ""}${entry.message}`).join("\n");
+    ui.consoleOutput.scrollTop = ui.consoleOutput.scrollHeight;
+  }
+  if (ui.consoleNote) {
+    const errors = state.diagnostics.filter((entry) => entry.tone === "error").length;
+    ui.consoleNote.textContent = errors ? `${errors} error${errors === 1 ? "" : "s"}` : "";
+  }
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (_) { /* fall through for restricted WebKit/browser contexts */ }
+  }
+  const helper = document.createElement("textarea");
+  helper.value = text;
+  helper.setAttribute("readonly", "");
+  helper.style.position = "fixed";
+  helper.style.left = "-9999px";
+  document.body.appendChild(helper);
+  helper.select();
+  const copied = document.execCommand("copy");
+  helper.remove();
+  if (!copied) throw new Error("clipboard access unavailable");
+}
+
+function downloadJson(value, filename) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function fileSlug(value, fallback = "listening") {
+  const slug = String(value || fallback)
+    .normalize("NFKD")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return slug || fallback;
+}
+
+function musicResultLead(event) {
+  const musicID = event?.music_id;
+  if (!musicID?.matched) return "";
+  const title = String(musicID.title || "Identified song").trim();
+  const artist = String(musicID.artist || "Unknown artist").trim();
+  return `${title} by ${artist}.`;
+}
+
+function resultSummaryText(event) {
+  const aggregate = event?.aggregate || {};
+  return [musicResultLead(event), aggregate.short_summary || aggregate.detailed_summary || ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function listeningResultText(event) {
+  const aggregate = event?.aggregate || {};
+  const claims = event?.routes?.[0]?.structured?.claim_summary || {};
+  const lines = [
+    aggregate.title || "Listening result",
+    resultSummaryText(event),
+  ];
+  if ((event?.tags || []).length) lines.push(`Tags: ${event.tags.join(", ")}`);
+  for (const [label, items] of Object.entries(claims)) {
+    const statements = (items || []).map((item) => item?.statement).filter(Boolean);
+    if (statements.length) lines.push(`\n${label[0].toUpperCase()}${label.slice(1)}\n${statements.map((statement) => `• ${statement}`).join("\n")}`);
+  }
+  return lines.filter(Boolean).join("\n");
+}
+
+ui.consoleCopy.addEventListener("click", async () => {
+  try {
+    await copyText(ui.consoleOutput.textContent || "");
+    ui.consoleCopy.classList.add("copied");
+    ui.consoleCopy.title = "Copied";
+  } catch (_) {
+    ui.consoleCopy.title = "Copy failed";
+  }
+  setTimeout(() => {
+    ui.consoleCopy.classList.remove("copied");
+    ui.consoleCopy.title = "Copy console";
+  }, 1200);
+});
+ui.consoleClear.addEventListener("click", () => {
+  state.diagnostics = [];
+  ui.consoleOutput.textContent = "";
+  ui.consoleNote.textContent = "";
+});
 
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 // A mic recording is a purely local flow; daemon events from other surfaces
 // must not steal its phase. Same while a local /listen-event fetch owns the UI.
 function localFlowOwnsUi() {
-  return state.phase === "recording" || Boolean(state.abortController);
+  return Boolean(state.recorder) || Boolean(state.abortController);
 }
 
 function timeAgo(iso) {
@@ -169,14 +340,70 @@ async function refreshHealth() {
     ui.audioDirNote.textContent = state.audioDir;
     ui.engineAudioDir.textContent = state.audioDir;
     if (!ui.audioPath.value && state.audioDir) ui.audioPath.placeholder = `${state.audioDir}/…`;
-    if (state.lastEvent) {
-      ui.wikiItem.disabled = !state.sonicfieldAvailable;
-    }
     renderEngine(health.engine);
   } catch (_) {
     ui.engineAddress.textContent = "offline";
   }
 }
+
+function renderMobileRemote(remote) {
+  state.mobileRemote = remote || null;
+  const url = remote?.remote_ear_url || "";
+  if (ui.mobileRemoteUrl) ui.mobileRemoteUrl.value = url;
+  if (ui.mobileRemoteCopy) ui.mobileRemoteCopy.disabled = !url;
+  if (ui.mobileRemoteOpen) ui.mobileRemoteOpen.disabled = !url;
+  if (ui.mobileRemoteEnable) {
+    ui.mobileRemoteEnable.textContent = remote?.microphone_ready ? "Refresh" : "Enable";
+    ui.mobileRemoteEnable.disabled = false;
+  }
+  if (ui.mobileRemoteNote) {
+    const prefix = remote?.microphone_ready ? "Ready for the phone microphone." : "Not enabled.";
+    const instruction = remote?.microphone_ready
+      ? "Open the URL on a phone connected to the same private-network network, then allow microphone access."
+      : "";
+    ui.mobileRemoteNote.textContent = `${prefix} ${remote?.detail || "private-network HTTPS is required for mobile microphone access."} ${instruction}`.trim();
+    ui.mobileRemoteNote.classList.toggle("ready", Boolean(remote?.microphone_ready));
+  }
+}
+
+async function refreshMobileRemote() {
+  try {
+    renderMobileRemote(await fetchJson("/remote/status"));
+  } catch (error) {
+    renderMobileRemote({ detail: `Phone remote unavailable: ${error.message}` });
+  }
+}
+
+ui.mobileRemoteEnable?.addEventListener("click", async () => {
+  ui.mobileRemoteEnable.disabled = true;
+  ui.mobileRemoteEnable.textContent = "Enabling…";
+  if (ui.mobileRemoteNote) ui.mobileRemoteNote.textContent = "Creating the private HTTPS microphone URL…";
+  try {
+    const remote = await post("/remote/configure");
+    renderMobileRemote(remote);
+    setListenStatus(remote.microphone_ready ? "Phone microphone remote ready." : (remote.detail || "Phone remote needs attention."), remote.microphone_ready ? "" : "error");
+  } catch (error) {
+    renderMobileRemote({ detail: `Phone remote: ${error.message}` });
+    setListenStatus(`Phone remote: ${error.message}`, "error");
+  }
+});
+
+ui.mobileRemoteCopy?.addEventListener("click", async () => {
+  const url = ui.mobileRemoteUrl?.value || "";
+  if (!url) return;
+  try {
+    await copyText(url);
+    ui.mobileRemoteCopy.textContent = "Copied";
+    setTimeout(() => { if (ui.mobileRemoteCopy) ui.mobileRemoteCopy.textContent = "Copy URL"; }, 1200);
+  } catch (error) {
+    setListenStatus(`Copy remote URL: ${error.message}`, "error");
+  }
+});
+
+ui.mobileRemoteOpen?.addEventListener("click", () => {
+  const url = ui.mobileRemoteUrl?.value || "";
+  if (url) window.open(url, "_blank", "noopener");
+});
 
 const ENGINE_LABELS = {
   ready: "moss ready",
@@ -266,9 +493,9 @@ ui.warmEngine.addEventListener("click", async () => {
   }
 });
 
-/* ─────────────────────── skill / engine / path modals ───────────── */
+/* ─────────────────────── settings / skill / source modals ───────────── */
 
-const PANEL_DIALOGS = { skill: "skillModal", engine: "engineModal", path: "pathModal" };
+const PANEL_DIALOGS = { skill: "skillModal", settings: "settingsModal" };
 
 // Callable from the native shell and the rail icons; renders each panel as a
 // modal dialog. Modals are exclusive: opening one closes whatever is open.
@@ -277,40 +504,143 @@ window.oidaOpenPanel = (name) => {
   if (!target || typeof target.showModal !== "function") return;
   document.querySelectorAll("dialog[open]").forEach((other) => { if (other !== target) other.close(); });
   if (!target.open) target.showModal();
+  if (name === "settings") refreshMobileRemote();
 };
 
 document.querySelectorAll(".modal").forEach((dialog) => {
   dialog.querySelector("[data-close]")?.addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
 });
+ui.sonogramModal?.addEventListener("close", () => { state.activeSpectrogram = null; });
+window.addEventListener("resize", () => {
+  if (ui.sonogramModal?.open && state.activeSpectrogram) {
+    requestAnimationFrame(() => drawSpectrogram(state.activeSpectrogram, ui.sonogramModalCanvas));
+  }
+});
 
 // The native shell injects __oidaNative; that reveals the shell-only actions
 // (floating listener, open-in-browser), which post into the app.
 if (window.__oidaNative) document.body.classList.add("native");
 
-function shellAction(name) {
-  if (name === "reload" && !window.webkit?.messageHandlers?.oidaShell) {
+function shellAction(message) {
+  const action = typeof message === "string" ? message : message?.action;
+  if (action === "reload" && !window.webkit?.messageHandlers?.oidaShell) {
     window.location.reload();
     return;
   }
-  window.webkit?.messageHandlers?.oidaShell?.postMessage(name);
+  window.webkit?.messageHandlers?.oidaShell?.postMessage(message);
 }
+
+function applyTheme(theme, notifyNative = true) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  state.theme = normalized;
+  document.documentElement.dataset.theme = normalized;
+  localStorage.setItem("oida.theme", normalized);
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = normalized === "dark" ? "#1b1b19" : "#f6f6f4";
+  for (const button of [ui.themeLight, ui.themeDark].filter(Boolean)) {
+    const selected = button.dataset.themeChoice === normalized;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-checked", selected ? "true" : "false");
+  }
+  if (state.lastEvent) {
+    requestAnimationFrame(() => {
+      drawSpectrogram(state.lastEvent.features?.spectrogram);
+      if (ui.sonogramModal?.open && state.activeSpectrogram) {
+        drawSpectrogram(state.activeSpectrogram, ui.sonogramModalCanvas);
+      }
+    });
+  }
+  if (notifyNative && window.__oidaNative) shellAction(nativeSelectionMessage("sync"));
+}
+
+document.querySelectorAll("[data-theme-choice]").forEach((button) => {
+  button.addEventListener("click", () => applyTheme(button.dataset.themeChoice));
+});
+applyTheme(state.theme, false);
+
+ui.configButton?.addEventListener("click", () => window.oidaOpenPanel("settings"));
+ui.resetInterface?.addEventListener("click", () => {
+  for (const key of ["oida.side.left", "oida.side.right", "oida.side.left.width", "oida.side.right.width"]) {
+    localStorage.removeItem(key);
+  }
+  document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
+  window.location.reload();
+});
+
+function nativeSelectionMessage(action = "sync") {
+  return {
+    action,
+    source: state.source,
+    preset: state.preset,
+    direction: state.direction,
+    seconds: Number(ui.captureSeconds.value) || 10,
+    custom: state.customMode,
+    skills: state.customMode ? [...state.selectedSkills] : null,
+    musicId: state.musicIDEnabled,
+    appearance: state.theme,
+    sessionName: state.currentSessionName || null,
+  };
+}
+
+window.oidaNativeState = (nativeState) => {
+  if (!nativeState || typeof nativeState !== "object") return;
+  if (nativeState.source) applySourceSelection(nativeState.source, false);
+  if (nativeState.direction) applyDirectionSelection(nativeState.direction, false);
+  if (nativeState.preset && nativeState.preset !== state.preset) {
+    state.preset = nativeState.preset;
+    state.customMode = false;
+    applyPresetSkills();
+  }
+  if (nativeState.customMode && Array.isArray(nativeState.selectedSkillIDs)) {
+    state.customMode = true;
+    state.selectedSkills = new Set(nativeState.selectedSkillIDs);
+  } else if (nativeState.customMode === false && state.customMode) {
+    state.customMode = false;
+    applyPresetSkills();
+  }
+  if (typeof nativeState.musicIDEnabled === "boolean") {
+    state.musicIDEnabled = nativeState.musicIDEnabled;
+    localStorage.setItem("oida.music-id", state.musicIDEnabled ? "on" : "off");
+  }
+  if (nativeState.appearance) applyTheme(nativeState.appearance, false);
+  renderPresets();
+  renderSkills();
+  if (Number(nativeState.captureSeconds) > 0) {
+    const value = String(Number(nativeState.captureSeconds));
+    if (![...ui.captureSeconds.options].some((option) => option.value === value)) {
+      ui.captureSeconds.appendChild(new Option(`${value}sec`, value));
+    }
+    ui.captureSeconds.value = value;
+  }
+  // Selections above always mirror the shell; the phase/status surface only
+  // follows it while no in-page flow (mic recording, path/upload analyze)
+  // owns the UI — same rule the SSE handlers apply.
+  if (!localFlowOwnsUi()) {
+    setPhase(nativeState.phase || "idle");
+    const remaining = Number(nativeState.secondsRemaining);
+    const status = nativeState.phase === "capturing" && Number.isFinite(remaining)
+      ? `Hearing · ${Math.max(0, Math.ceil(remaining))}s`
+      : (nativeState.status || "");
+    if (status) {
+      setListenStatus(status, ["capturing", "processing"].includes(nativeState.phase) ? "active" : "");
+      updateListenProgress(nativeState.progress, status);
+    }
+    if (nativeState.error) setListenStatus(nativeState.error, "error");
+  }
+  (nativeState.logs || []).forEach((line) => {
+    if (!state.diagnostics.some((entry) => entry.message === line)) logActivity(line);
+  });
+  if (nativeState.eventId && nativeState.eventId !== state.nativeEventId) {
+    state.nativeEventId = nativeState.eventId;
+    refreshHistory({ selectLatest: true });
+  }
+};
 
 // the floating-listener corner button (drop-menu items are delegated below)
 document.querySelectorAll("button[data-shell]:not(.drop-item)").forEach((button) =>
   button.addEventListener("click", () => shellAction(button.dataset.shell))
 );
-
-ui.skillsFootButton.addEventListener("click", () => window.oidaOpenPanel("skill"));
-
-// configuration corner menu: Engine / Path / Reload / Open in browser
-ui.configMenu.addEventListener("click", (event) => {
-  const item = event.target.closest(".drop-item");
-  if (!item) return;
-  closeDropdowns();
-  if (item.dataset.panel) window.oidaOpenPanel(item.dataset.panel);
-  else if (item.dataset.shell) shellAction(item.dataset.shell);
-});
 
 /* ─────────────────────────────── SSE ────────────────────────────── */
 
@@ -320,6 +650,7 @@ function connectStream() {
     // EventSource retries transient drops itself, but gives up for good on an
     // HTTP error response; recreate it so a daemon restart resyncs the page.
     if (stream.readyState === EventSource.CLOSED) {
+      logActivity("Event stream disconnected; reconnecting", "error");
       setTimeout(connectStream, 5000);
     }
   };
@@ -327,6 +658,7 @@ function connectStream() {
     let payload = null;
     try { payload = JSON.parse(message.data); } catch (_) { return; }
     const data = payload.data || {};
+    if (payload.type !== "engine") logActivity(`Event: ${payload.type}`);
     switch (payload.type) {
       case "engine":
         renderEngine(data);
@@ -336,12 +668,14 @@ function connectStream() {
       case "capture_claimed":
         clearCaptureHint();
         if (localFlowOwnsUi()) break;
-        setPhase("analyzing");
-        setListenStatus(`Capturing ${Math.round(data.seconds || 10)} s of system audio…`, "active");
+        setPhase("capturing");
+        state.direction = data.direction || state.direction;
+        setListenStatus(`Hearing ${data.direction === "future" ? "forward" : "from the buffer"} · ${Math.round(data.seconds || 10)}s`, "active");
+        updateListenProgress(0, `Hearing · ${Math.round(data.seconds || 10)}s`);
         break;
       case "capture_cancelled":
         clearCaptureHint();
-        if (state.phase === "waiting") {
+        if (["waiting", "capturing"].includes(state.phase)) {
           setPhase("idle");
           setListenStatus("Capture cancelled.", "");
         }
@@ -349,8 +683,9 @@ function connectStream() {
       case "listen_started":
         clearCaptureHint();
         if (localFlowOwnsUi()) break;
-        if (state.phase === "idle" || state.phase === "waiting") setPhase("analyzing");
-        setListenStatus(`Listening (${data.route_preset || "basic"})…`, "active");
+        setPhase("processing");
+        setListenStatus("Operating listening…", "active");
+        updateListenProgress(1, "Operating listening…");
         break;
       case "listen_completed":
         clearCaptureHint();
@@ -361,13 +696,22 @@ function connectStream() {
         if (data.listening_event && data.listening_event.id !== state.lastEventId) {
           renderEvent(data.listening_event, null);
         }
-        refreshHistory();
+        refreshHistory({ eventId: data.listening_event?.id || state.lastEventId });
         break;
       case "listen_failed":
         clearCaptureHint();
         if (localFlowOwnsUi()) break;
         setPhase("idle");
         setListenStatus(data.detail || "Listen failed.", "error");
+        break;
+      case "session_changed":
+        refreshHistory({
+          selectSessionId: data.session_id || data.session?.id || state.currentSessionId,
+          eventId: data.listening_event?.id || state.lastEventId,
+        });
+        break;
+      case "covenant_changed":
+        refreshCovenant();
         break;
       default:
         break;
@@ -379,7 +723,7 @@ function connectStream() {
 
 // Tiny inline icons per listening mode / preset (stroke = currentColor).
 const ICON = (path) =>
-  `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+  `<svg class="ci mode-glyph" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">${path}</svg>`;
 
 const MODE_ICONS = {
   basic: ICON('<path d="M4 12c1.8-5 3.6-5 5.4 0s3.6 5 5.4 0 3.4-5 5.2 0"/>'),
@@ -406,7 +750,10 @@ const PRESET_ICONS = {
   deep: ICON('<path d="M3 8c3-5 6-5 9 0s6 5 9 0"/><path d="M3 13c3-5 6-5 9 0s6 5 9 0" opacity="0.6"/><path d="M3 18c3-5 6-5 9 0s6 5 9 0" opacity="0.3"/>'),
   "extended-spectrum": MODE_ICONS.experimental,
   generative: MODE_ICONS.generative,
+  custom: ICON('<path d="M5 8h14M5 16h14"/><circle cx="9" cy="8" r="2"/><circle cx="15" cy="16" r="2"/>'),
 };
+
+const VISIBLE_MODE_IDS = ["basic", "field", "signal", "music", "voice", "deep"];
 
 const PASS_LABELS = {
   transcribe: "transcript",
@@ -425,10 +772,11 @@ function presetTooltip(preset) {
 async function loadManifest() {
   try {
     const manifest = await fetchJson("/akouo/skills");
-    state.presets = (manifest.route_presets || []).filter((preset) => preset.enabled_by_default !== false);
+    const byId = new Map((manifest.route_presets || []).map((preset) => [preset.id, preset]));
+    state.presets = VISIBLE_MODE_IDS.map((id) => byId.get(id)).filter(Boolean);
     state.skills = manifest.skills || [];
     if (!state.presets.some((preset) => preset.id === state.preset)) state.preset = state.presets[0]?.id || "basic";
-    applyPresetSkills();
+    if (!state.customMode || !state.selectedSkills.size) applyPresetSkills();
     renderPresets();
     renderSkills();
   } catch (_) {
@@ -448,27 +796,53 @@ function renderPresets() {
   ui.modeMenu.innerHTML = "";
   for (const preset of state.presets) {
     const item = document.createElement("button");
-    item.className = `drop-item${preset.id === state.preset ? " active" : ""}`;
+    item.className = `drop-item${!state.customMode && preset.id === state.preset ? " active" : ""}`;
     item.setAttribute("role", "option");
     item.dataset.preset = preset.id;
     item.innerHTML = `${PRESET_ICONS[preset.id] || MODE_ICONS.basic}<span>${escapeHtml(preset.name)}</span>`;
     item.title = presetTooltip(preset);
     item.addEventListener("click", () => {
       state.preset = preset.id;
+      state.customMode = false;
       applyPresetSkills();
       renderPresets();
       renderSkills();
       closeDropdowns();
+      if (window.__oidaNative) shellAction(nativeSelectionMessage("sync"));
     });
     ui.modeMenu.appendChild(item);
   }
+  const custom = document.createElement("button");
+  custom.className = `drop-item custom-mode${state.customMode ? " active" : ""}`;
+  custom.setAttribute("role", "option");
+  custom.innerHTML = `${PRESET_ICONS.custom}<span>Custom</span>`;
+  custom.title = "Choose an individual set of listening skills.";
+  custom.addEventListener("click", () => {
+    if (!state.customMode) {
+      state.preset = "deep";
+      applyPresetSkills();
+    }
+    state.customMode = true;
+    renderPresets();
+    renderSkills();
+    closeDropdowns();
+    updateModeButton();
+    if (window.__oidaNative) shellAction(nativeSelectionMessage("sync"));
+    window.oidaOpenPanel("skill");
+  });
+  ui.modeMenu.appendChild(custom);
   updateModeButton();
 }
 
 function updateModeButton() {
   const preset = state.presets.find((item) => item.id === state.preset);
-  ui.modeIcon.innerHTML = PRESET_ICONS[state.preset] || MODE_ICONS.basic;
-  ui.modeName.textContent = preset ? preset.name : (state.preset || "Basic");
+  ui.modeIcon.innerHTML = state.customMode ? PRESET_ICONS.custom : (PRESET_ICONS[state.preset] || MODE_ICONS.basic);
+  ui.modeName.textContent = state.customMode ? "Custom" : (preset ? preset.name : (state.preset === "basic" ? "General" : state.preset || "General"));
+  const showMusicID = state.preset === "music" && !state.customMode;
+  ui.musicIdToggle.hidden = !showMusicID;
+  ui.musicIdToggle.classList.toggle("on", state.musicIDEnabled);
+  ui.musicIdToggle.setAttribute("aria-pressed", state.musicIDEnabled ? "true" : "false");
+  ui.musicIdToggle.title = state.musicIDEnabled ? "Music ID on — disable ShazamIO recognition" : "Music ID off — enable ShazamIO recognition";
 }
 
 /* ─────────────────────────── dropdowns ──────────────────────────── */
@@ -483,11 +857,14 @@ function closeDropdowns() {
   });
 }
 
-document.querySelectorAll(".dropdown").forEach((dd) => {
+function wireDropdown(dd) {
+  if (!dd || dd.dataset.dropdownWired === "true") return;
   const button = dd.querySelector("[aria-haspopup]");
   const menu = dd.querySelector(".drop-menu");
   if (!button || !menu) return;
+  dd.dataset.dropdownWired = "true";
   button.addEventListener("click", (event) => {
+    event.preventDefault();
     event.stopPropagation();
     const willOpen = menu.hidden;
     closeDropdowns();
@@ -496,35 +873,64 @@ document.querySelectorAll(".dropdown").forEach((dd) => {
       button.setAttribute("aria-expanded", "true");
     }
   });
-});
+}
+document.querySelectorAll(".dropdown").forEach(wireDropdown);
 document.addEventListener("click", (event) => { if (!event.target.closest(".dropdown")) closeDropdowns(); });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDropdowns(); });
 
 /* ─────────────────────────── sidebars ───────────────────────────── */
 
 // Collapse (persisted) + drag-resize (persisted). Collapsing clears the inline
-// width so the 44px rail class wins; expanding restores the stored width.
-for (const [key, side, toggle, handle, dir] of [
+// width so the rail leaves the grid entirely; expanding restores its width.
+function setSidebarCollapsed(key, side, collapsed) {
+  const widthKey = `oida.side.${key}.width`;
+  const currentWidth = side.getBoundingClientRect().width;
+  if (!side.classList.contains("collapsed") && currentWidth > 80) {
+    const width = `${Math.round(currentWidth)}px`;
+    localStorage.setItem(widthKey, width);
+    side.style.setProperty("--side-open-width", width);
+  }
+  side.classList.toggle("collapsed", collapsed);
+  localStorage.setItem(`oida.side.${key}`, collapsed ? "collapsed" : "open");
+  if (collapsed) {
+    side.style.width = "";
+  } else {
+    const remembered = localStorage.getItem(widthKey);
+    if (remembered) {
+      side.style.width = remembered;
+      side.style.setProperty("--side-open-width", remembered);
+    }
+  }
+  return collapsed;
+}
+
+const sidebarDefinitions = [
   ["left", ui.sideLeft, ui.leftToggle, ui.leftResize, 1],
   ["right", ui.sideRight, ui.rightToggle, ui.rightResize, -1],
-]) {
+];
+
+window.oidaToggleSidebar = (key) => {
+  const definition = sidebarDefinitions.find(([name]) => name === key);
+  if (!definition) return false;
+  const side = definition[1];
+  return setSidebarCollapsed(key, side, !side.classList.contains("collapsed"));
+};
+
+for (const [key, side, toggle, handle, dir] of sidebarDefinitions) {
   const widthKey = `oida.side.${key}.width`;
   const storedWidth = localStorage.getItem(widthKey);
+  side.style.setProperty("--side-open-width", storedWidth || "232px");
   if (localStorage.getItem(`oida.side.${key}`) === "collapsed") {
     side.classList.add("collapsed");
   } else if (storedWidth) {
     side.style.width = storedWidth;
   }
 
-  toggle.addEventListener("click", () => {
-    const collapsed = side.classList.toggle("collapsed");
-    localStorage.setItem(`oida.side.${key}`, collapsed ? "collapsed" : "open");
-    if (collapsed) {
-      side.style.width = "";
-    } else {
-      const remembered = localStorage.getItem(widthKey);
-      if (remembered) side.style.width = remembered;
-    }
+  toggle?.addEventListener("click", () => {
+    const collapsed = window.oidaToggleSidebar(key);
+    // The browser fallback control lives inside its rail. Drop pointer focus
+    // after collapsing so :focus-within does not hold the hover overlay open.
+    if (collapsed) toggle.blur();
   });
 
   handle.addEventListener("pointerdown", (event) => {
@@ -535,8 +941,9 @@ for (const [key, side, toggle, handle, dir] of [
     const startX = event.clientX;
     const startWidth = side.getBoundingClientRect().width;
     const onMove = (moveEvent) => {
-      const width = Math.min(440, Math.max(172, startWidth + dir * (moveEvent.clientX - startX)));
+      const width = Math.min(560, Math.max(172, startWidth + dir * (moveEvent.clientX - startX)));
       side.style.width = `${width}px`;
+      side.style.setProperty("--side-open-width", `${width}px`);
     };
     const onUp = () => {
       side.classList.remove("dragging");
@@ -566,7 +973,11 @@ function renderSkills() {
         checkbox.checked = true;
         setListenStatus("At least one skill stays enabled.", "error");
       }
+      state.customMode = true;
       updateSkillNote();
+      renderPresets();
+      updateModeButton();
+      if (window.__oidaNative) shellAction(nativeSelectionMessage("sync"));
     });
     const icon = document.createElement("span");
     icon.className = "skill-icon";
@@ -595,10 +1006,19 @@ function updateSkillNote() {
 
 function selectedSkillIds() {
   const ids = [...state.selectedSkills];
+  if (state.customMode) return ids;
   const presetSet = new Set(state.presetSkillIds);
   const isDefault = ids.length === presetSet.size && ids.every((id) => presetSet.has(id));
   return isDefault ? null : ids;
 }
+
+ui.musicIdToggle.addEventListener("click", () => {
+  state.musicIDEnabled = !state.musicIDEnabled;
+  localStorage.setItem("oida.music-id", state.musicIDEnabled ? "on" : "off");
+  updateModeButton();
+  setListenStatus(`Music ID ${state.musicIDEnabled ? "on" : "off"}.`, "");
+  if (window.__oidaNative) shellAction(nativeSelectionMessage("sync"));
+});
 
 /* ─────────────────────────── source panels ──────────────────────── */
 
@@ -627,19 +1047,89 @@ function markRadioSelection(buttons, isActive) {
   });
 }
 
+function applySourceSelection(source, notifyNative = true) {
+  const button = document.querySelector(`.source[data-source="${source}"]`);
+  if (!button) return;
+  markRadioSelection([...document.querySelectorAll(".source")], (other) => other === button);
+  state.source = source;
+  ui.systemPanel.hidden = source !== "system";
+  ui.micPanel.hidden = source !== "mic";
+  ui.filePanel.hidden = source !== "file";
+  if (source === "mic" && !state.micDevices.length) refreshMicDevices(false);
+  if (notifyNative && window.__oidaNative) shellAction(nativeSelectionMessage("sync"));
+}
+
+window.oidaSelectSource = (source) => {
+  const normalized = ["system", "mic", "file"].includes(source) ? source : "system";
+  if (state.phase !== "idle") return;
+  applySourceSelection(normalized);
+  setListenStatus("", "");
+};
+
+function positionSourceMenu(anchor) {
+  if (!anchor || !ui.sourceModal) return;
+  const rect = anchor.getBoundingClientRect();
+  const menuWidth = Math.min(304, window.innerWidth - 16);
+  const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.left));
+  const top = Math.min(window.innerHeight - 120, rect.bottom + 6);
+  ui.sourceModal.style.setProperty("--source-menu-left", `${Math.round(left)}px`);
+  ui.sourceModal.style.setProperty("--source-menu-top", `${Math.round(top)}px`);
+}
+
+window.oidaOpenSource = (source, anchor = null) => {
+  const normalized = ["system", "mic", "file"].includes(source) ? source : "system";
+  if (state.phase !== "idle") return;
+  applySourceSelection(normalized);
+  ui.sourceModalTitle.textContent = { system: "System audio", mic: "Microphone", file: "Audio file" }[normalized];
+  document.querySelectorAll("dialog[open]").forEach((dialog) => {
+    if (dialog !== ui.sourceModal) dialog.close();
+  });
+  const sourceButton = anchor || document.querySelector(`.source[data-source="${normalized}"]`);
+  positionSourceMenu(sourceButton);
+  if (!ui.sourceModal.open) {
+    if (typeof ui.sourceModal.show === "function") ui.sourceModal.show();
+    else if (typeof ui.sourceModal.showModal === "function") ui.sourceModal.showModal();
+  }
+  setListenStatus("", "");
+};
+
 document.querySelectorAll(".source").forEach((button) => {
-  button.addEventListener("click", () => {
-    if (state.phase !== "idle") return;
-    markRadioSelection([...document.querySelectorAll(".source")], (other) => other === button);
-    state.source = button.dataset.source;
-    ui.systemPanel.hidden = state.source !== "system";
-    ui.micPanel.hidden = state.source !== "mic";
-    ui.filePanel.hidden = state.source !== "file";
-    setListenStatus("", "");
-    if (state.source === "mic" && !state.micDevices.length) refreshMicDevices(false);
+  button.addEventListener("click", (interaction) => {
+    interaction.stopPropagation();
+    window.oidaOpenSource(button.dataset.source, button);
   });
 });
+document.addEventListener("click", (interaction) => {
+  if (!ui.sourceModal?.open) return;
+  if (interaction.target.closest("#sourceModal, .source")) return;
+  ui.sourceModal.close();
+});
+window.addEventListener("resize", () => {
+  if (!ui.sourceModal?.open) return;
+  positionSourceMenu(document.querySelector(`.source[data-source="${state.source}"]`));
+});
 radioKeyNav(document.querySelector(".sources"), ".source");
+
+function applyDirectionSelection(direction, notifyNative = true) {
+  state.direction = direction === "future" ? "future" : "past";
+  document.querySelectorAll(".direction-button").forEach((button) => {
+    const active = button.dataset.direction === state.direction;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-checked", active ? "true" : "false");
+  });
+  if (notifyNative && window.__oidaNative) shellAction(nativeSelectionMessage("sync"));
+}
+
+document.querySelectorAll(".direction-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (state.phase !== "idle") return;
+    applyDirectionSelection(button.dataset.direction);
+  });
+});
+
+ui.captureSeconds.addEventListener("change", () => {
+  if (window.__oidaNative) shellAction(nativeSelectionMessage("sync"));
+});
 
 /* mic devices + monitor */
 
@@ -725,7 +1215,17 @@ ui.micMonitor.addEventListener("click", () => (state.monitor ? stopMonitor() : s
 /* ──────────────────────────── listening ─────────────────────────── */
 
 ui.listenButton.addEventListener("click", () => {
-  if (state.phase !== "idle") return stopListening();
+  if (["waiting", "recording", "capturing"].includes(state.phase)) return stopListening();
+  if (["analyzing", "processing"].includes(state.phase)) return;
+  if (window.__oidaNative) {
+    setPhase("capturing");
+    const seconds = Number(ui.captureSeconds.value) || 10;
+    const status = state.source === "file" ? "Choose an audio file" : `Hearing · ${Math.round(seconds)}s`;
+    setListenStatus(status, "active");
+    updateListenProgress(0, status);
+    shellAction(nativeSelectionMessage("listen"));
+    return;
+  }
   if (state.source === "system") return listenSystem();
   if (state.source === "mic") return listenMic();
   ui.fileInput.click();
@@ -737,7 +1237,13 @@ ui.browseFile.addEventListener("click", () => {
 });
 
 async function stopListening() {
-  if (state.phase === "recording") {
+  if (window.__oidaNative) {
+    shellAction(nativeSelectionMessage("stop"));
+    setPhase("idle");
+    setListenStatus("Stopped.", "");
+    return;
+  }
+  if (["recording", "capturing"].includes(state.phase) && state.recorder) {
     if (state.recorder && state.recorder.state === "recording") state.recorder.stop();
     return;
   }
@@ -755,7 +1261,7 @@ async function stopListening() {
     state.abortController?.abort();
     state.abortController = null;
     setPhase("idle");
-    setListenStatus("Stopped waiting — the daemon finishes in the background; the result lands in Recent.", "");
+    setListenStatus("Stopped waiting — the daemon finishes in the background; the result lands in Sessions.", "");
   }
 }
 
@@ -764,7 +1270,14 @@ async function listenSystem() {
   setPhase("waiting");
   setListenStatus("Asking the oída app to capture system audio…", "active");
   try {
-    const response = await post("/background/capture-request", { seconds, route_preset: state.preset });
+    const response = await post("/background/capture-request", {
+      seconds,
+      route_preset: state.preset,
+      direction: state.direction,
+      source: "system",
+      enabled_skill_ids: selectedSkillIds(),
+      song_id: state.preset === "music" && !state.customMode && state.musicIDEnabled,
+    });
     state.captureRequestId = response.capture_request?.id || null;
     clearCaptureHint();
     // If nothing claims the request, check with the daemon before declaring
@@ -777,7 +1290,7 @@ async function listenSystem() {
         if (!status.state?.capture_request) {
           // The request disappeared before its 30 s TTL, so the native shell
           // claimed it even if this page missed the SSE notification.
-          setPhase("analyzing");
+          setPhase("capturing");
           setListenStatus(`Capturing ${Math.round(seconds)} s of system audio…`, "active");
           return;
         }
@@ -804,11 +1317,16 @@ function stopRecordTimer() {
     clearInterval(state.recordTimer);
     state.recordTimer = null;
   }
+  if (state.recordStopTimer) {
+    clearTimeout(state.recordStopTimer);
+    state.recordStopTimer = null;
+  }
 }
 
 async function listenMic() {
   let stream = null;
   try {
+    const captureSeconds = Number(ui.captureSeconds.value) || 10;
     const deviceId = ui.micDevice.value || null;
     const deviceLabel = ui.micDevice.selectedOptions[0]?.textContent || "default input";
     const constraints = { audio: ui.micDevice.value ? { deviceId: { exact: ui.micDevice.value } } : true };
@@ -824,15 +1342,17 @@ async function listenMic() {
       const extension = mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm";
       const blob = new Blob(state.recordedChunks, { type: mime });
       state.recorder = null;
-      setPhase("analyzing");
-      setListenStatus("Uploading recording…", "active");
+      setPhase("processing");
+      setListenStatus("Operating listening…", "active");
+      updateListenProgress(1, "Operating listening…");
       try {
         await uploadAndAnalyze(
           blob,
           `oida-mic-${Date.now()}.${extension}`,
           "mic",
           `Microphone · ${deviceLabel}`,
-          deviceId
+          deviceId,
+          { direction: state.direction, seconds: captureSeconds, trigger: "dashboard-microphone" }
         );
       } catch (error) {
         setPhase("idle");
@@ -840,20 +1360,29 @@ async function listenMic() {
       }
     };
     recorder.start();
-    setPhase("recording", "Stop");
+    setPhase("capturing", "Stop");
     const startedAt = Date.now();
-    setListenStatus("Recording… press Stop when done.", "active");
+    const directionNote = state.direction === "past"
+      ? "Browser input has no armed history; capturing the next bounded window"
+      : "Recording the future window";
+    setListenStatus(`${directionNote} · ${Math.round(captureSeconds)}s`, "active");
+    updateListenProgress(0, `Hearing · ${Math.round(captureSeconds)}s`);
     stopRecordTimer();
     state.recordTimer = setInterval(() => {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000);
-      const minutes = Math.floor(seconds / 60);
-      setListenStatus(`Recording ${minutes}:${String(seconds % 60).padStart(2, "0")} — press Stop when done.`, "active");
-    }, 1000);
+      const elapsed = Math.max(0, (Date.now() - startedAt) / 1000);
+      const remaining = Math.max(0, captureSeconds - elapsed);
+      setListenStatus(`Hearing · ${Math.ceil(remaining)}s`, "active");
+      updateListenProgress(elapsed / captureSeconds, `Hearing · ${Math.ceil(remaining)}s`);
+    }, 200);
+    state.recordStopTimer = setTimeout(() => {
+      if (recorder.state === "recording") recorder.stop();
+    }, captureSeconds * 1000);
   } catch (error) {
     // Without this, a failed recorder leaves the acquired mic hot forever.
     stream?.getTracks().forEach((track) => track.stop());
     state.recorder = null;
     stopRecordTimer();
+    setPhase("idle");
     setListenStatus(`Microphone: ${error.message}`, "error");
   }
 }
@@ -864,12 +1393,12 @@ async function uploadBlob(blob, filename, signal) {
   return fetchJson("/upload", { method: "POST", body: form, signal });
 }
 
-async function uploadAndAnalyze(blob, filename, sourceKind, sourceLabel, deviceId) {
+async function uploadAndAnalyze(blob, filename, sourceKind, sourceLabel, deviceId, analysisOptions = {}) {
   const controller = new AbortController();
   state.abortController = controller;
   try {
     const upload = await uploadBlob(blob, filename, controller.signal);
-    await analyzePath(upload.path, sourceKind, { controller, sourceLabel, deviceId });
+    await analyzePath(upload.path, sourceKind, { controller, sourceLabel, deviceId, ...analysisOptions });
   } finally {
     if (state.abortController === controller) state.abortController = null;
   }
@@ -925,12 +1454,18 @@ ui.analyzePath.addEventListener("click", () => {
 async function analyzePath(path, sourceKind, options = {}) {
   setListenStatus(`Listening (${state.preset})…`, "active");
   const body = { path, route_preset: state.preset };
+  body.song_id = state.preset === "music" && !state.customMode && state.musicIDEnabled;
   if (sourceKind === "mic") {
     body.source_type = "live_input";
     body.source_label = options.sourceLabel || "Microphone recording";
     body.privacy_mode = "ephemeral";
     body.raw_audio_policy = "temp";
     if (options.deviceId) body.device_id = options.deviceId;
+  }
+  if (options.direction || options.seconds || options.trigger) {
+    body.capture_direction = options.direction || state.direction;
+    body.capture_seconds = Number(options.seconds) || Number(ui.captureSeconds.value) || 10;
+    body.capture_trigger = options.trigger || "dashboard";
   }
   const skills = selectedSkillIds();
   if (skills) body.enabled_skill_ids = skills;
@@ -949,32 +1484,369 @@ async function analyzePath(path, sourceKind, options = {}) {
 
 /* ───────────────────────────── rendering ────────────────────────── */
 
-function renderEvent(event, fullResponse) {
+const RESULT_EXPORT_ICON = `<svg class="ci" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 15V4M8 7.5 12 3.5l4 4"/><path d="M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>`;
+const RESULT_COPY_ICON = `<svg class="ci" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>`;
+
+function visibleEvents(events) {
+  const filters = [...state.tagFilters];
+  if (!filters.length) return events || [];
+  return (events || []).filter((event) => {
+    const tags = new Set((event.tags || []).map((tag) => String(tag)));
+    return filters.every((tag) => tags.has(tag));
+  });
+}
+
+function hasTagFilters() {
+  return state.tagFilters.size > 0;
+}
+
+function tagFilterDescription() {
+  return [...state.tagFilters].map((tag) => `#${tag}`).join(" + ");
+}
+
+function knownTags() {
+  const tags = new Set();
+  for (const session of [...state.sessions, ...state.archivedSessions]) {
+    for (const event of (session.events || [])) {
+      for (const tag of (event.tags || [])) {
+        const value = String(tag || "").trim();
+        if (value) tags.add(value);
+      }
+    }
+  }
+  return [...tags].sort((a, b) => a.localeCompare(b));
+}
+
+function refreshTagFilter() {
+  if (!ui.tagFilterBar) return;
+  const active = [...state.tagFilters];
+  const filtering = active.length > 0;
+  ui.tagFilterBar.hidden = !filtering;
+  ui.sessionContextRow?.classList.toggle("filtering", filtering);
+  ui.tagFilterChips.replaceChildren();
+  for (const value of active) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "tag-filter-chip";
+    chip.textContent = `#${value}`;
+    chip.title = `Remove #${value}`;
+    chip.setAttribute("aria-label", `Remove tag filter ${value}`);
+    chip.addEventListener("click", () => toggleTagFilter(value));
+    ui.tagFilterChips.appendChild(chip);
+  }
+  const available = knownTags().filter((tag) => !state.tagFilters.has(tag));
+  ui.tagFilterAdd.disabled = available.length === 0;
+  ui.tagFilterMenu.replaceChildren();
+  for (const value of available) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "drop-item";
+    item.textContent = `#${value}`;
+    item.addEventListener("click", () => {
+      const next = new Set(state.tagFilters);
+      next.add(value);
+      setTagFilters(next);
+      closeDropdowns();
+    });
+    ui.tagFilterMenu.appendChild(item);
+  }
+}
+
+function setTagFilters(tags) {
+  state.tagFilters = new Set([...tags].map((tag) => String(tag || "").trim()).filter(Boolean));
+  refreshTagFilter();
+  renderSessionList(ui.historyList, state.sessions, false);
+  renderSessionList(ui.archiveList, state.archivedSessions, true);
+  const current = [...state.sessions, ...state.archivedSessions].find((session) => session.id === state.currentSessionId) || null;
+  renderSession(current, state.lastEventId, null);
+}
+
+function toggleTagFilter(tag) {
+  const next = new Set(state.tagFilters);
+  if (next.has(tag)) next.delete(tag);
+  else next.add(tag);
+  setTagFilters(next);
+}
+
+ui.tagFilterReset?.addEventListener("click", () => setTagFilters([]));
+
+function selectEvent(event, fullResponse = null, options = {}) {
   if (!event) return;
   state.lastEvent = event;
   state.lastEventId = event.id || null;
   state.lastJson = fullResponse || { listening_event: event };
-  const aggregate = event.aggregate || {};
-
-  ui.resultTitle.textContent = aggregate.title || "Listening event";
-  ui.resultSummary.textContent = aggregate.short_summary || aggregate.detailed_summary || "";
-  ui.resultSummary.classList.remove("placeholder");
-
-  const tags = event.tags || [];
-  ui.resultTags.innerHTML =
-    tags.slice(0, 8).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("") +
-    (tags.length > 8 ? `<span class="tag more">+${tags.length - 8}</span>` : "");
-
-  renderBreakdown(buildResultGroups(event));
-  ui.exportDrop.hidden = false;
-  ui.jsonWrap.hidden = true;
+  document.querySelectorAll(".result-entry").forEach((entry) => {
+    entry.classList.toggle("selected", entry.dataset.eventId === String(event.id || ""));
+  });
+  document.querySelectorAll(".session-event").forEach((button) => {
+    button.classList.toggle("selected", button.dataset.eventId === String(event.id || ""));
+  });
+  renderBreakdown(buildResultGroups(event), event);
   ui.germNote.hidden = true;
-  ui.rememberItem.disabled = false;
-  ui.rememberItem.textContent = event.memory?.saved_trace_id ? "Remembered" : "Remember";
-  ui.wikiItem.disabled = !state.sonicfieldAvailable;
-  ui.wikiItem.title = state.sonicfieldAvailable ? "" : "Sonic Field root not found";
-  ui.soundItem.disabled = !segmentUri(event);
-  ui.soundItem.title = segmentUri(event) ? "" : "This event keeps no audio reference, so germ cannot load it as sound";
+  if (options.scroll) {
+    document.querySelector(`.result-entry[data-event-id="${CSS.escape(String(event.id || ""))}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: prefersReducedMotion.matches ? "auto" : "smooth" });
+  }
+}
+
+function renderSession(session, selectedEventId = null, fullResponse = null, options = {}) {
+  if (!session) {
+    state.currentSessionId = null;
+    state.lastEvent = null;
+    state.lastEventId = null;
+    state.currentSessionName = "";
+    ui.sessionTitle.textContent = "Current session";
+    ui.resultEntries.innerHTML = `<article class="result-entry placeholder-entry"><div class="result-head"><h2>Ready</h2></div><p class="result-summary placeholder">Pick a source and press Listen. Results from the current session appear here; details on the right.</p></article>`;
+    ui.resultBody.innerHTML = `<p class="empty-note">Select a listening result to see its analysis.</p>`;
+    if (window.__oidaNative) shellAction({ action: "session", sessionName: "" });
+    return;
+  }
+
+  state.currentSessionId = session.id;
+  state.currentSessionName = session.name || "Listening session";
+  ui.sessionTitle.textContent = state.currentSessionName;
+  if (window.__oidaNative) shellAction({ action: "session", sessionName: state.currentSessionName });
+  const allEvents = session.events || [];
+  const events = visibleEvents(allEvents);
+  ui.resultEntries.innerHTML = "";
+  if (!events.length) {
+    const heading = hasTagFilters() ? "No results match these tags" : "No results yet";
+    const note = hasTagFilters()
+      ? `No result has every active filter (${escapeHtml(tagFilterDescription())}). Remove a tag or reset the filter.`
+      : "Press Listen to add the first result to this session.";
+    ui.resultEntries.innerHTML = `<article class="result-entry placeholder-entry"><div class="result-head"><h2>${heading}</h2></div><p class="result-summary placeholder">${note}</p></article>`;
+    state.lastEvent = null;
+    state.lastEventId = null;
+    state.lastJson = null;
+    ui.resultBody.innerHTML = `<p class="empty-note">This session has no analysis yet.</p>`;
+    return;
+  }
+
+  for (const event of events) {
+    const aggregate = event.aggregate || {};
+    const article = document.createElement("article");
+    article.className = "result-entry";
+    article.dataset.eventId = String(event.id || "");
+    article.tabIndex = 0;
+    article.setAttribute("role", "button");
+    article.setAttribute("aria-label", `Show analysis for ${aggregate.title || "listening result"}`);
+
+    const header = document.createElement("div");
+    header.className = "result-entry-head";
+    const heading = document.createElement("h2");
+    const titleButton = document.createElement("button");
+    titleButton.type = "button";
+    titleButton.className = "result-title-button";
+    titleButton.textContent = aggregate.title || "Listening result";
+    titleButton.title = "Click to rename this listening result";
+    titleButton.setAttribute("aria-label", `Rename ${aggregate.title || "listening result"}`);
+    titleButton.addEventListener("click", (interaction) => {
+      interaction.preventDefault();
+      interaction.stopPropagation();
+      selectEvent(event);
+      beginResultTitleEdit(titleButton, event, session);
+    });
+    heading.appendChild(titleButton);
+    header.appendChild(heading);
+    const summary = document.createElement("p");
+    summary.className = "result-summary";
+    summary.textContent = resultSummaryText(event);
+
+    const footer = document.createElement("div");
+    footer.className = "result-entry-foot";
+    const tags = document.createElement("div");
+    tags.className = "tags";
+    for (const value of (event.tags || []).slice(0, 8)) {
+      const tag = document.createElement("button");
+      tag.type = "button";
+      tag.className = `tag${state.tagFilters.has(String(value)) ? " active" : ""}`;
+      tag.textContent = value;
+      tag.title = state.tagFilters.has(String(value)) ? `Remove tag filter ${value}` : `Add tag filter ${value}`;
+      tag.addEventListener("click", (interaction) => {
+        interaction.preventDefault();
+        interaction.stopPropagation();
+        toggleTagFilter(String(value));
+      });
+      tags.appendChild(tag);
+    }
+    if ((event.tags || []).length > 8) {
+      const more = document.createElement("span");
+      more.className = "tag more";
+      more.textContent = `+${event.tags.length - 8}`;
+      tags.appendChild(more);
+    }
+    const actions = resultActions(event, session);
+    footer.append(tags, actions);
+    article.append(header, summary);
+    article.append(footer);
+
+    const choose = (interaction) => {
+      if (interaction.target.closest(".result-entry-actions")) return;
+      selectEvent(event);
+    };
+    article.addEventListener("click", choose);
+    article.addEventListener("keydown", (interaction) => {
+      if (["Enter", " "].includes(interaction.key)) {
+        interaction.preventDefault();
+        selectEvent(event);
+      }
+    });
+    ui.resultEntries.appendChild(article);
+  }
+
+  const selected = events.find((event) => event.id === selectedEventId) ||
+    events.find((event) => event.id === state.lastEventId) || events[0];
+  selectEvent(selected, selected.id === selectedEventId ? fullResponse : null, options);
+}
+
+function resultActions(event, session) {
+  const actions = document.createElement("div");
+  actions.className = "result-entry-actions";
+
+  const time = document.createElement("time");
+  time.className = "result-time";
+  time.dateTime = event.created_at || "";
+  time.textContent = timeAgo(event.created_at);
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "dropdown result-action-menu";
+  const exportButton = document.createElement("button");
+  exportButton.className = "result-tool";
+  exportButton.type = "button";
+  exportButton.setAttribute("aria-haspopup", "true");
+  exportButton.setAttribute("aria-expanded", "false");
+  exportButton.title = "Act on this listening result";
+  exportButton.setAttribute("aria-label", "Act on this listening result");
+  exportButton.innerHTML = RESULT_EXPORT_ICON;
+  const menu = document.createElement("div");
+  menu.className = "drop-menu";
+  menu.hidden = true;
+  const items = [
+    ["remember", event.memory?.saved_trace_id ? "Remembered" : "Remember"],
+    ["wiki", "Expand on Wiki"],
+    ["json", "Export JSON"],
+    ["sound", "Generate derived sound"],
+    ["prompt", "Convert listening to prompt"],
+  ];
+  for (const [action, label] of items) {
+    const item = document.createElement("button");
+    item.className = "drop-item";
+    item.dataset.action = action;
+    item.textContent = label;
+    if (action === "remember" && event.memory?.saved_trace_id) item.disabled = true;
+    if (action === "wiki" && !state.sonicfieldAvailable) {
+      item.disabled = true;
+      item.title = "Sonic Field root not found";
+    }
+    if (action === "sound" && !segmentUri(event)) {
+      item.disabled = true;
+      item.title = "This result keeps no audio reference";
+    }
+    menu.appendChild(item);
+  }
+  menu.addEventListener("click", (interaction) => {
+    const item = interaction.target.closest(".drop-item");
+    if (!item || item.disabled) return;
+    interaction.stopPropagation();
+    closeDropdowns();
+    handleResultAction(item.dataset.action, event, session, item);
+  });
+  dropdown.append(exportButton, menu);
+  wireDropdown(dropdown);
+
+  const copy = document.createElement("button");
+  copy.className = "result-tool";
+  copy.type = "button";
+  copy.title = "Copy listening result";
+  copy.setAttribute("aria-label", "Copy listening result");
+  copy.innerHTML = RESULT_COPY_ICON;
+  copy.addEventListener("click", async (interaction) => {
+    interaction.stopPropagation();
+    try {
+      await copyText(listeningResultText(event));
+      copy.classList.add("copied");
+      setListenStatus("Listening result copied.", "");
+      setTimeout(() => copy.classList.remove("copied"), 900);
+    } catch (error) {
+      setListenStatus(`Copy: ${error.message}`, "error");
+    }
+  });
+  actions.append(time, dropdown, copy);
+  return actions;
+}
+
+function beginResultTitleEdit(button, event, session) {
+  const initial = event.aggregate?.title || "Listening result";
+  const input = document.createElement("input");
+  input.className = "result-title-input";
+  input.value = initial;
+  input.maxLength = 160;
+  input.setAttribute("aria-label", "Listening result title");
+  let finished = false;
+
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const title = input.value.replace(/\s+/g, " ").trim();
+    if (!save || !title || title === initial) {
+      input.replaceWith(button);
+      return;
+    }
+    input.disabled = true;
+    try {
+      await fetchJson(`/sessions/${encodeURIComponent(session.id)}/events/${encodeURIComponent(event.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      event.aggregate = { ...(event.aggregate || {}), title };
+      setListenStatus("Listening result renamed.", "");
+      await refreshHistory({ selectSessionId: session.id, eventId: event.id });
+    } catch (error) {
+      input.disabled = false;
+      finished = false;
+      setListenStatus(`Rename: ${error.message}`, "error");
+      input.focus();
+      input.select();
+    }
+  };
+
+  input.addEventListener("keydown", (interaction) => {
+    interaction.stopPropagation();
+    if (interaction.key === "Enter") {
+      interaction.preventDefault();
+      finish(true);
+    } else if (interaction.key === "Escape") {
+      interaction.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener("click", (interaction) => interaction.stopPropagation());
+  input.addEventListener("blur", () => finish(true));
+  button.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+function renderEvent(event, fullResponse) {
+  if (!event) return;
+  showListeningView();
+  const sessionId = event.session?.id || "session_legacy";
+  let session = [...state.sessions, ...state.archivedSessions].find((item) => item.id === sessionId);
+  if (!session) {
+    session = {
+      id: sessionId,
+      name: event.session?.name || "Listening session",
+      updated_at: event.created_at,
+      events: [],
+      active: true,
+    };
+    state.sessions.unshift(session);
+  }
+  session.events = [event, ...(session.events || []).filter((item) => item.id !== event.id)];
+  session.event_count = session.events.length;
+  session.updated_at = event.created_at || session.updated_at;
+  renderSession(session, event.id, fullResponse, { scroll: true });
 }
 
 // Group the event's claims into the tabbed sections shown under the reading.
@@ -995,14 +1867,26 @@ function buildResultGroups(event) {
   );
   if (hypotheses.length) groups.push({ key: "hypotheses", label: "Hypotheses", count: hypotheses.length, html: claimList(hypotheses.slice(0, 8), true) });
 
+  const musicID = event.music_id;
+  if (musicID) {
+    const identity = musicID.matched
+      ? `<div class="music-id-module"><strong>${escapeHtml(musicID.title || "Identified music")}</strong>${musicID.artist ? `<span>${escapeHtml(musicID.artist)}</span>` : ""}${musicID.album ? `<small>${escapeHtml(musicID.album)}</small>` : ""}</div>`
+      : `<p class="empty-note">${escapeHtml(musicID.note || "No Music ID match.")}</p>`;
+    groups.push({ key: "music-id", label: "Music ID", count: musicID.matched ? 1 : 0, html: identity });
+  }
+
   const heard = (claims.heard || []).slice(0, 12);
   if (heard.length) groups.push({ key: "heard", label: "Heard", count: heard.length, html: claimList(heard, true) });
 
-  const interpreted = (claims.interpreted || []).slice(0, 10);
-  if (interpreted.length) groups.push({ key: "interpreted", label: "Interpreted", count: interpreted.length, html: claimList(interpreted, true) });
-
   const measured = claims.measured || [];
-  if (measured.length) groups.push({ key: "measured", label: "Measured", count: measured.length, html: claimList(measured, false) });
+  if (measured.length || event.features) {
+    groups.push({
+      key: "measured",
+      label: "Measured",
+      count: measured.length,
+      html: measurementModules(event.features || {}, measured, claimList),
+    });
+  }
 
   const undetermined = claims.undetermined || [];
   if (undetermined.length) groups.push({ key: "undetermined", label: "Undetermined", count: undetermined.length, html: claimList(undetermined, false) });
@@ -1014,81 +1898,248 @@ function buildResultGroups(event) {
       .map((match) => {
         const trace = match.trace || {};
         const score = typeof match.score === "number" ? ` · ${Math.round(match.score * 100)}%` : "";
-        return `<li><span>${escapeHtml(trace.title || trace.id || "trace")}${score}</span></li>`;
+        return `<li><button class="related-memory" type="button" data-trace-id="${escapeHtml(trace.id || "")}"><span>${escapeHtml(trace.title || trace.id || "trace")}</span><small>${escapeHtml(score.replace(/^ · /, ""))}</small></button></li>`;
       })
       .join("");
-    groups.push({ key: "memory", label: "Memory", count: memoryMatches.length, html: `<div class="block"><ul>${items}</ul></div>` });
+    groups.push({ key: "related", label: "Related", count: memoryMatches.length, html: `<div class="block related-list"><ul>${items}</ul></div>` });
   }
   return groups;
 }
 
-// The breakdown lives in the right rail as stacked sections, each collapsible
-// and open by default.
-function renderBreakdown(groups) {
+function measurementModules(features, measured, claimList) {
+  const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
+  const field = (...keys) => keys.map((key) => features[key]).find((value) => value !== undefined && value !== null);
+  const metric = (label, value, unit = "") =>
+    `<div class="metric-module"><span class="metric-value">${escapeHtml(value)}${unit ? ` <small>${escapeHtml(unit)}</small>` : ""}</span><span class="metric-label">${escapeHtml(label)}</span></div>`;
+  const metrics = [
+    metric("Loudness", number(field("integratedLufs", "integrated_lufs")), "LUFS"),
+    metric("Peak", number(field("peakDbfs", "peak_dbfs")), "dBFS"),
+    metric("RMS", number(field("rmsDbfs", "rms_dbfs")), "dBFS"),
+    metric("Dynamics", number(field("crestFactorDb", "crest_factor_db")), "dB"),
+    metric("Flatness", Number.isFinite(Number(field("spectralFlatness", "spectral_flatness"))) ? `${Math.round(Number(field("spectralFlatness", "spectral_flatness")) * 100)}%` : "—"),
+    metric("Centroid", Number.isFinite(Number(field("spectralCentroidHz", "spectral_centroid_hz"))) ? number(Number(field("spectralCentroidHz", "spectral_centroid_hz")) / 1000, 2) : "—", "kHz"),
+  ].join("");
+
+  const bands = features.bandEnergy || features.band_energy || {};
+  const bandKeys = [["sub", "Sub"], ["bass", "Bass"], ["lowMid", "Low mid"], ["mid", "Mid"], ["high", "High"], ["air", "Air"]];
+  const bandValue = (key) => bands[key] ?? (key === "lowMid" ? bands.low_mid : undefined);
+  const maximumBand = Math.max(0.001, ...bandKeys.map(([key]) => Number(bandValue(key)) || 0));
+  const bandChart = bandKeys.some(([key]) => Number.isFinite(Number(bandValue(key))))
+    ? `<div class="band-chart">${bandKeys.map(([key, label]) => {
+        const value = Math.max(0, Number(bandValue(key)) || 0);
+        const height = Math.max(2, Math.round((value / maximumBand) * 66));
+        return `<div class="band-column" title="${escapeHtml(label)} · ${Math.round(value * 1000) / 10}%"><span class="band-bar" style="height:${height}px"></span><span class="band-label">${escapeHtml(label)}</span></div>`;
+      }).join("")}</div>`
+    : `<p class="empty-note">Frequency energy will appear with the next measured listening result.</p>`;
+
+  const spectrogramData = features.spectrogram;
+  const spectrogram = hasRenderableSpectrogram(spectrogramData)
+    ? `<div class="spectrogram-wrap"><button class="spectrogram-trigger" id="openEventSpectrogram" type="button" aria-label="Open a larger high-definition sonogram" title="Open larger sonogram"><canvas class="spectrogram" id="eventSpectrogram" aria-label="Sonogram of the listened audio"></canvas></button><div class="spectrogram-axis"><span>${Math.round(spectrogramData.minimumHz || spectrogramData.minimum_hz || 20)} Hz</span><span>${number(spectrogramData.durationSeconds || spectrogramData.duration_seconds, 1)} s</span><span>${Math.round((spectrogramData.maximumHz || spectrogramData.maximum_hz || 20000) / 1000)} kHz</span></div></div>`
+    : `<div class="spectrogram-wrap is-empty"><div class="spectrogram-empty" role="img" aria-label="Empty sonogram"></div></div>`;
+  const visualization = `
+    <div class="measurement-viz">
+      <div class="viz-tabs" role="tablist" aria-label="Measured visualization">
+        <button class="viz-tab active" role="tab" aria-selected="true" data-viz-tab="sonogram">Sonogram</button>
+        <button class="viz-tab" role="tab" aria-selected="false" data-viz-tab="energy">Frequency energy</button>
+      </div>
+      <div class="viz-panel" data-viz-panel="sonogram">${spectrogram}</div>
+      <div class="viz-panel" data-viz-panel="energy" hidden>${bandChart}</div>
+    </div>`;
+  const rawClaims = measured.length
+    ? `<details class="measure-details"><summary>All ${measured.length} measured claims</summary>${claimList(measured, false)}</details>`
+    : "";
+  return `<div class="measurement-grid">${metrics}</div>${visualization}${rawClaims}`;
+}
+
+// The breakdown lives in the right rail as stacked sections. Hypotheses is the
+// default reading surface; measured and every supporting group stay quiet
+// until requested.
+function renderBreakdown(groups, event) {
   if (!groups.length) {
     ui.resultBody.innerHTML = `<p class="empty-note">No claims were produced.</p>`;
     return;
   }
   const caret = `<svg class="ci bd-caret" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
   ui.resultBody.innerHTML = groups
-    .map((g) => `<details class="bd-section" open><summary>${caret}${escapeHtml(g.label)}<span class="bd-count">${g.count}</span></summary>${g.html}</details>`)
+    .map((g) => `<details class="bd-section"${g.key === "hypotheses" ? " open" : ""}><summary>${caret}${escapeHtml(g.label)}<span class="bd-count">${g.count}</span></summary>${g.html}</details>`)
     .join("");
+  wireMeasurementTabs(event?.features?.spectrogram);
+  ui.resultBody.querySelectorAll(".related-memory[data-trace-id]").forEach((button) => {
+    button.addEventListener("click", () => openRelatedTrace(button.dataset.traceId));
+  });
+  // The canvas has zero size while its <details> is closed, so the initial
+  // draw is skipped for collapsed sections; draw again when one opens.
+  ui.resultBody.querySelectorAll(".bd-section").forEach((section) => {
+    section.addEventListener("toggle", () => {
+      if (section.open && section.querySelector("#eventSpectrogram")) {
+        requestAnimationFrame(() => drawSpectrogram(event?.features?.spectrogram));
+      }
+    });
+  });
+  requestAnimationFrame(() => drawSpectrogram(event?.features?.spectrogram));
+}
+
+async function openRelatedTrace(traceId) {
+  if (!traceId) return;
+  try {
+    const data = await fetchJson(`/memory/trace/${encodeURIComponent(traceId)}`);
+    const trace = data.trace || {};
+    const short = trace.summaries?.short || trace.summaries?.detailed || "No written summary.";
+    akousmataUi.title.textContent = trace.title || "Related listening";
+    akousmataUi.detail.innerHTML = [
+      `<p class="memory-meta">${escapeHtml(trace.id || traceId)} · ${escapeHtml(trace.sourceLabel || trace.sourceKind || "source")} · ${escapeHtml(String(trace.createdAt || "").slice(0, 16).replace("T", " "))}</p>`,
+      `<section class="memory-block"><div class="memory-kicker">Listening</div><p>${escapeHtml(short)}</p></section>`,
+      (trace.tags || []).length ? `<section class="memory-block"><div class="memory-kicker">Tags</div><p>${trace.tags.map((tag) => `#${escapeHtml(tag)}`).join(" · ")}</p></section>` : "",
+    ].join("");
+    akousmataUi.modal.hidden = false;
+  } catch (error) {
+    akousmataUi.title.textContent = "Related listening unavailable";
+    akousmataUi.detail.innerHTML = `<p class="empty-note">${escapeHtml(error.message)}</p>`;
+    akousmataUi.modal.hidden = false;
+  }
+}
+
+function wireMeasurementTabs(spectrogram) {
+  document.getElementById("openEventSpectrogram")?.addEventListener("click", () => openSonogramModal(spectrogram));
+  document.querySelectorAll(".viz-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      const selected = button.dataset.vizTab;
+      document.querySelectorAll(".viz-tab").forEach((candidate) => {
+        const active = candidate.dataset.vizTab === selected;
+        candidate.classList.toggle("active", active);
+        candidate.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      document.querySelectorAll(".viz-panel").forEach((panel) => {
+        panel.hidden = panel.dataset.vizPanel !== selected;
+      });
+      if (selected === "sonogram") requestAnimationFrame(() => drawSpectrogram(spectrogram));
+    });
+  });
+}
+
+function spectrogramStats(spectrogram) {
+  const values = spectrogram?.values;
+  if (!Array.isArray(values) || !values.length || !Array.isArray(values[0]) || !values[0].length) return null;
+  const rows = values[0].length;
+  if (!values.every((column) => Array.isArray(column) && column.length === rows)) return null;
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const column of values) {
+    for (const value of column) {
+      const energy = Number(value);
+      if (!Number.isFinite(energy)) continue;
+      minimum = Math.min(minimum, energy);
+      maximum = Math.max(maximum, energy);
+    }
+  }
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return null;
+  return { values, columns: values.length, rows, minimum, maximum };
+}
+
+function hasRenderableSpectrogram(spectrogram) {
+  const stats = spectrogramStats(spectrogram);
+  return Boolean(stats && stats.maximum > 0.01 && stats.maximum - stats.minimum > 0.01);
+}
+
+function openSonogramModal(spectrogram) {
+  if (!hasRenderableSpectrogram(spectrogram) || !ui.sonogramModal || !ui.sonogramModalCanvas) return;
+  state.activeSpectrogram = spectrogram;
+  const minimumHz = Number(spectrogram.minimumHz ?? spectrogram.minimum_hz ?? 20);
+  const maximumHz = Number(spectrogram.maximumHz ?? spectrogram.maximum_hz ?? 20000);
+  const duration = Number(spectrogram.durationSeconds ?? spectrogram.duration_seconds);
+  ui.sonogramModalMin.textContent = `${Math.round(minimumHz)} Hz`;
+  ui.sonogramModalMax.textContent = `${Math.round(maximumHz / 1000)} kHz`;
+  ui.sonogramModalDuration.textContent = Number.isFinite(duration) ? `${duration.toFixed(1)} s` : "—";
+  document.querySelectorAll("dialog[open]").forEach((dialog) => {
+    if (dialog !== ui.sonogramModal) dialog.close();
+  });
+  if (!ui.sonogramModal.open) ui.sonogramModal.showModal();
+  requestAnimationFrame(() => drawSpectrogram(spectrogram, ui.sonogramModalCanvas));
+}
+
+function drawSpectrogram(spectrogram, targetCanvas = null) {
+  const canvas = targetCanvas || document.getElementById("eventSpectrogram");
+  const stats = spectrogramStats(spectrogram);
+  if (!canvas || !stats) return;
+  const ratio = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+  const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
+  const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
+  if (width <= 1 || height <= 1) return;
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.clearRect(0, 0, width, height);
+  if (!hasRenderableSpectrogram(spectrogram)) return;
+
+  // Draw the compact feature matrix once, then scale it into a DPR-sized
+  // backing store with high-quality interpolation. This keeps the payload
+  // lightweight while avoiding the former blocky, pixelated presentation.
+  const source = document.createElement("canvas");
+  source.width = stats.columns;
+  source.height = stats.rows;
+  const sourceContext = source.getContext("2d");
+  if (!sourceContext) return;
+  const image = sourceContext.createImageData(stats.columns, stats.rows);
+  const dark = document.documentElement.dataset.theme === "dark";
+  const background = dark ? [41, 41, 38] : [238, 238, 234];
+  const foreground = dark ? [241, 240, 235] : [29, 29, 27];
+  for (let x = 0; x < stats.columns; x += 1) {
+    for (let y = 0; y < stats.rows; y += 1) {
+      const raw = Math.max(0, Math.min(1, Number(stats.values[x][y]) || 0));
+      const energy = Math.pow(raw, 0.82);
+      const offset = ((stats.rows - 1 - y) * stats.columns + x) * 4;
+      for (let channel = 0; channel < 3; channel += 1) {
+        image.data[offset + channel] = Math.round(background[channel] + (foreground[channel] - background[channel]) * energy);
+      }
+      image.data[offset + 3] = 255;
+    }
+  }
+  sourceContext.putImageData(image, 0, 0);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(source, 0, 0, width, height);
 }
 
 /* ─────────────────────────── result actions ─────────────────────── */
 
-async function rememberReading() {
-  if (!state.lastEvent) return;
-  ui.rememberItem.disabled = true;
+async function rememberReading(event, trigger = null) {
+  if (!event) return;
+  if (trigger) trigger.disabled = true;
   try {
-    const result = await post("/memory/remember", { event: state.lastEvent, tags: [state.preset] });
+    const result = await post("/memory/remember", { event, tags: [state.preset] });
     if (result.trace?.id) {
-      state.lastEvent.memory = { ...(state.lastEvent.memory || {}), saved_trace_id: result.trace.id };
-      ui.rememberItem.textContent = "Remembered";
+      event.memory = { ...(event.memory || {}), saved_trace_id: result.trace.id };
+      if (trigger) trigger.textContent = "Remembered";
     }
+    setListenStatus("Listening result remembered.", "");
     refreshMemory();
   } catch (error) {
     setListenStatus(`Memory: ${error.message}`, "error");
-    ui.rememberItem.disabled = false;
+    if (trigger) trigger.disabled = false;
   }
 }
 
-ui.exportMenu.addEventListener("click", (event) => {
-  const item = event.target.closest(".drop-item");
-  if (!item || item.disabled) return;
-  closeDropdowns();
-  switch (item.dataset.action) {
+function handleResultAction(action, event, session, trigger = null) {
+  switch (action) {
     case "remember":
-      rememberReading();
+      rememberReading(event, trigger);
       break;
     case "wiki":
-      if (!state.lastEvent) break;
       if (ui.wikiModal && typeof ui.wikiModal.showModal === "function" && !ui.wikiModal.open) ui.wikiModal.showModal();
-      exploreWiki({ event: state.lastEvent });
+      exploreWiki({ event });
       break;
     case "json":
-      ui.jsonWrap.hidden = !ui.jsonWrap.hidden;
-      if (!ui.jsonWrap.hidden) ui.jsonOutput.textContent = JSON.stringify(state.lastJson, null, 2);
+      downloadJson({ listening_event: event }, `${fileSlug(event.aggregate?.title, "listening-result")}.json`);
       break;
     case "sound":
-      germHandoff("sound");
+      germHandoff("sound", event, session?.id);
       break;
     case "prompt":
-      germHandoff("prompt");
+      germHandoff("prompt", event, session?.id);
       break;
   }
-});
-
-ui.jsonCopy.addEventListener("click", async () => {
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(state.lastJson, null, 2));
-    ui.jsonCopy.textContent = "copied";
-    setTimeout(() => { ui.jsonCopy.textContent = "copy"; }, 1200);
-  } catch (_) {
-    ui.jsonCopy.textContent = "copy failed";
-    setTimeout(() => { ui.jsonCopy.textContent = "copy"; }, 1800);
-  }
-});
+}
 
 /* ─────────────────────────── germ handoff ───────────────────────── */
 
@@ -1114,8 +2165,7 @@ const GERM_ORIGINS = {
   file: "file",
 };
 
-async function germHandoff(mode) {
-  const event = state.lastEvent;
+function germPayload(mode, event, sessionId = null) {
   if (!event) return;
   const segment = event.segment || {};
   const audio = { asset_id: segment.id || event.id };
@@ -1133,22 +2183,46 @@ async function germHandoff(mode) {
   };
   const structured = event.routes?.[0]?.structured;
   if (structured) listening["akouo.describe"] = structured;
-  setGermNote(`Handing to germ (${mode})…`);
+  return {
+    mode,
+    audio,
+    listening,
+    origin: GERM_ORIGINS[event.source?.type] || "file",
+    session_id: sessionId || event.id,
+    tags: (event.tags || []).slice(0, 8),
+  };
+}
+
+async function germHandoff(mode, event = state.lastEvent, sessionId = null, options = {}) {
+  if (!event) return null;
+  setGermNote(options.status || `Handing to germ (${mode})…`);
   try {
-    const result = await post("/germ/handoff", {
-      mode,
-      audio,
-      listening,
-      origin: GERM_ORIGINS[event.source?.type] || "file",
-      session_id: event.id,
-      tags: (event.tags || []).slice(0, 8),
-    });
-    setGermNote(`akousma ${result.akousma_id} → germ`);
-    window.open(result.germ_url, "_blank", "noopener");
+    const result = await post("/germ/handoff", germPayload(mode, event, sessionId));
+    if (!options.quiet) setGermNote(`akousma ${result.akousma_id} → germ`);
+    if (options.open !== false) window.open(result.germ_url, "_blank", "noopener");
+    return result;
   } catch (error) {
     const detail = String(error.message) === "404" ? "germ bridge unavailable (akousma package not installed)" : error.message;
     setGermNote(`germ: ${detail}`, "error");
+    if (options.throwOnError) throw error;
+    return null;
   }
+}
+
+async function batchGermHandoff(session, mode) {
+  const events = (session.events || []).filter((event) => mode !== "sound" || segmentUri(event));
+  if (!events.length) {
+    setListenStatus(mode === "sound" ? "No session results retain an audio reference." : "This session has no results.", "error");
+    return;
+  }
+  setGermNote(`Handing ${events.length} session result${events.length === 1 ? "" : "s"} to germ (${mode})…`);
+  const results = [];
+  for (const event of events) {
+    const result = await germHandoff(mode, event, session.id, { open: false, quiet: true });
+    if (result) results.push(result);
+  }
+  if (results[0]?.germ_url) window.open(results[0].germ_url, "_blank", "noopener");
+  setGermNote(`${results.length} of ${events.length} session results → germ${results.length > 1 ? " · opened first" : ""}`, results.length ? "" : "error");
 }
 
 /* ─────────────────────────── wiki explore ───────────────────────── */
@@ -1205,74 +2279,444 @@ ui.wikiGroups.addEventListener("click", async (event) => {
 
 /* ──────────────────────────── history ───────────────────────────── */
 
-async function refreshHistory() {
+async function refreshHistory(options = {}) {
+  const requestSerial = ++state.historyRequestSerial;
   try {
-    const history = await fetchJson("/background/history?limit=10");
-    const recent = history.recent_events || [];
-    ui.historyNote.textContent = recent.length ? `${recent.length}` : "";
-    if (!recent.length) {
-      ui.historyList.innerHTML = `<p class="empty-note">Nothing listened yet.</p>`;
-      return;
-    }
-    ui.historyList.innerHTML = "";
-    recent.slice(0, 10).forEach((event) => {
-      const button = document.createElement("button");
-      button.className = "row-item";
-      const title = document.createElement("span");
-      title.className = "ri-title";
-      title.textContent = event.aggregate?.title || event.id || "event";
-      const meta = document.createElement("span");
-      meta.className = "ri-meta";
-      meta.textContent = timeAgo(event.created_at);
-      button.append(title, meta);
-      button.addEventListener("click", () => renderEvent(event, null));
-      ui.historyList.appendChild(button);
-    });
-    if (!state.lastEvent && recent[0]) renderEvent(recent[0], null);
-  } catch (_) {
-    ui.historyList.innerHTML = `<p class="empty-note">History unavailable.</p>`;
+    const history = await fetchJson("/sessions");
+    if (requestSerial !== state.historyRequestSerial) return;
+    const sessions = history.sessions || [];
+    const archived = history.archived_sessions || [];
+    state.sessions = sessions;
+    state.archivedSessions = archived;
+    refreshTagFilter();
+    renderSessionList(ui.historyList, sessions, false);
+    ui.archiveSection.hidden = archived.length === 0;
+    renderSessionList(ui.archiveList, archived, true);
+
+    const combined = [...sessions, ...archived];
+    const targetEventId = options.eventId || (options.selectLatest ? state.nativeEventId : null) || state.lastEventId;
+    const eventSession = targetEventId
+      ? combined.find((session) => (session.events || []).some((event) => event.id === targetEventId))
+      : null;
+    const selectedSession = eventSession ||
+      combined.find((session) => session.id === options.selectSessionId) ||
+      combined.find((session) => session.id === state.currentSessionId) ||
+      sessions.find((session) => session.active) || sessions[0] || archived[0] || null;
+    const selectedEventId = targetEventId && eventSession?.id === selectedSession?.id
+      ? targetEventId
+      : ((selectedSession?.events || []).some((event) => event.id === state.lastEventId) ? state.lastEventId : null);
+    renderSession(selectedSession, selectedEventId, null, { scroll: Boolean(options.selectLatest) });
+  } catch (error) {
+    if (requestSerial !== state.historyRequestSerial) return;
+    const detail = String(error?.message || error || "unknown error");
+    ui.historyList.innerHTML = `<p class="empty-note">History unavailable: ${escapeHtml(detail)}</p>`;
+    logActivity(`Sessions: ${detail}`, "error");
   }
 }
+
+function renderSessionList(container, sessions, archived) {
+  container.innerHTML = "";
+  const filteredSessions = hasTagFilters()
+    ? sessions.filter((session) => visibleEvents(session.events).length)
+    : sessions;
+  if (!filteredSessions.length) {
+    if (!archived) {
+      container.innerHTML = `<p class="empty-note">${hasTagFilters() ? `No sessions match ${escapeHtml(tagFilterDescription())}.` : "No listening sessions yet."}</p>`;
+    }
+    return;
+  }
+  for (const session of filteredSessions) {
+    const sessionEvents = visibleEvents(session.events);
+    const group = document.createElement("details");
+    group.className = `session-group${archived ? " archived" : ""}`;
+    group.open = Boolean(session.active || session.id === state.currentSessionId);
+    const summary = document.createElement("summary");
+    summary.className = "session-summary";
+    if (session.active) {
+      const active = document.createElement("span");
+      active.className = "session-active";
+      active.title = "Current session";
+      summary.appendChild(active);
+    }
+    const name = document.createElement("span");
+    name.className = "session-name";
+    name.textContent = session.name || "Listening session";
+    const meta = document.createElement("span");
+    meta.className = "session-meta";
+    const count = document.createElement("span");
+    count.className = "session-count";
+    count.textContent = String(hasTagFilters() ? sessionEvents.length : (session.event_count || 0));
+    const time = document.createElement("time");
+    time.className = "session-time";
+    time.dateTime = archived ? (session.archived_at || "") : (session.updated_at || "");
+    time.textContent = timeAgo(archived ? session.archived_at : session.updated_at);
+    meta.append(count, time);
+    const menu = sessionMenu(session, archived);
+    summary.append(name, menu, meta);
+    summary.addEventListener("click", (interaction) => {
+      if (interaction.target.closest(".session-menu")) return;
+      showListeningView();
+      renderSession(session, null, null);
+    });
+    group.appendChild(summary);
+
+    const events = document.createElement("div");
+    events.className = "session-events";
+    for (const event of sessionEvents) {
+      const row = document.createElement("div");
+      row.className = "session-event-row";
+      const button = document.createElement("button");
+      button.className = "row-item session-event";
+      button.dataset.eventId = String(event.id || "");
+      const title = document.createElement("span");
+      title.className = "ri-title";
+      title.textContent = event.aggregate?.title || event.id || "Listening result";
+      button.append(title);
+      button.addEventListener("click", (interaction) => {
+        interaction.preventDefault();
+        interaction.stopPropagation();
+        group.open = true;
+        showListeningView();
+        renderSession(session, event.id, null, { scroll: true });
+      });
+      row.append(button, listeningMenu(event, session));
+      events.appendChild(row);
+    }
+    group.appendChild(events);
+    container.appendChild(group);
+  }
+}
+
+function sessionMenu(session, archived) {
+  const dropdown = document.createElement("span");
+  dropdown.className = "dropdown session-menu";
+  const button = document.createElement("button");
+  button.className = "session-more";
+  button.type = "button";
+  button.textContent = "•••";
+  button.title = `Session actions for ${session.name || "listening session"}`;
+  button.setAttribute("aria-label", button.title);
+  button.setAttribute("aria-haspopup", "true");
+  button.setAttribute("aria-expanded", "false");
+  const menu = document.createElement("span");
+  menu.className = "drop-menu";
+  menu.hidden = true;
+  const actions = [];
+  if (!archived && !session.active && session.id !== "session_legacy") actions.push(["activate", "Use for new listens"]);
+  if (session.id !== "session_legacy") actions.push(["rename", "Rename"]);
+  if ((session.events || []).length) {
+    actions.push(
+      ["remember", "Remember session"],
+      ["wiki", "Expand session on Wiki"],
+      ["json", "Export session JSON"],
+      ["sound", "Generate derived sounds"],
+      ["prompt", "Convert session to prompts"],
+    );
+  }
+  actions.push(archived ? ["restore", "Restore session"] : ["archive", "Archive session"]);
+  actions.push(["delete", "Delete session"]);
+  for (const [action, label] of actions) {
+    const item = document.createElement("button");
+    item.className = `drop-item${action === "delete" ? " destructive" : ""}`;
+    item.dataset.action = action;
+    item.textContent = label;
+    if (action === "wiki" && !state.sonicfieldAvailable) item.disabled = true;
+    if (action === "sound" && !(session.events || []).some(segmentUri)) item.disabled = true;
+    menu.appendChild(item);
+  }
+  menu.addEventListener("click", (interaction) => {
+    const item = interaction.target.closest(".drop-item");
+    if (!item || item.disabled) return;
+    interaction.preventDefault();
+    interaction.stopPropagation();
+    closeDropdowns();
+    handleSessionAction(item.dataset.action, session);
+  });
+  dropdown.addEventListener("click", (interaction) => {
+    interaction.preventDefault();
+    interaction.stopPropagation();
+  });
+  dropdown.append(button, menu);
+  wireDropdown(dropdown);
+  return dropdown;
+}
+
+function listeningMenu(event, session) {
+  const dropdown = document.createElement("span");
+  dropdown.className = "dropdown session-menu listening-menu";
+  const button = document.createElement("button");
+  button.className = "session-more";
+  button.type = "button";
+  button.textContent = "•••";
+  button.title = `Listening actions for ${event.aggregate?.title || "listening result"}`;
+  button.setAttribute("aria-label", button.title);
+  button.setAttribute("aria-haspopup", "true");
+  button.setAttribute("aria-expanded", "false");
+  const menu = document.createElement("span");
+  menu.className = "drop-menu";
+  menu.hidden = true;
+  const actions = [];
+  if (!session.active && session.id !== "session_legacy" && !session.archived) actions.push(["activate", "Use for new listens"]);
+  actions.push(
+    ["rename", "Rename"],
+    ["remember", event.memory?.saved_trace_id ? "Remembered" : "Remember sound"],
+    ["wiki", "Expand listening on Wiki"],
+    ["json", "Export listening JSON"],
+    ["sound", "Generate derived sound"],
+    ["prompt", "Convert listening to prompt"],
+    ["delete", "Delete listening"],
+  );
+  for (const [action, label] of actions) {
+    const item = document.createElement("button");
+    item.className = `drop-item${action === "delete" ? " destructive" : ""}`;
+    item.dataset.action = action;
+    item.textContent = label;
+    if (action === "remember" && event.memory?.saved_trace_id) item.disabled = true;
+    if (action === "wiki" && !state.sonicfieldAvailable) item.disabled = true;
+    if (action === "sound" && !segmentUri(event)) item.disabled = true;
+    menu.appendChild(item);
+  }
+  menu.addEventListener("click", (interaction) => {
+    const item = interaction.target.closest(".drop-item");
+    if (!item || item.disabled) return;
+    interaction.preventDefault();
+    interaction.stopPropagation();
+    closeDropdowns();
+    handleListeningAction(item.dataset.action, event, session, item);
+  });
+  dropdown.addEventListener("click", (interaction) => {
+    interaction.preventDefault();
+    interaction.stopPropagation();
+  });
+  dropdown.append(button, menu);
+  wireDropdown(dropdown);
+  return dropdown;
+}
+
+async function renameListeningResult(event, session) {
+  const initial = event.aggregate?.title || "Listening result";
+  const title = window.prompt("Rename listening result", initial)?.replace(/\s+/g, " ").trim();
+  if (!title || title === initial) return false;
+  await fetchJson(`/sessions/${encodeURIComponent(session.id)}/events/${encodeURIComponent(event.id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  event.aggregate = { ...(event.aggregate || {}), title };
+  await refreshHistory({ selectSessionId: session.id, eventId: event.id });
+  setListenStatus("Listening result renamed.", "");
+  return true;
+}
+
+async function handleListeningAction(action, event, session, trigger = null) {
+  try {
+    if (action === "activate") {
+      await post(`/sessions/${encodeURIComponent(session.id)}/activate`);
+      await refreshHistory({ selectSessionId: session.id, eventId: event.id });
+    } else if (action === "rename") {
+      await renameListeningResult(event, session);
+    } else if (action === "delete") {
+      if (!window.confirm(`Delete “${event.aggregate?.title || "this listening result"}”? This removes it from Oída history.`)) return;
+      await fetchJson(`/sessions/${encodeURIComponent(session.id)}/events/${encodeURIComponent(event.id)}`, { method: "DELETE" });
+      if (state.lastEventId === event.id) state.lastEventId = null;
+      setListenStatus("Listening result deleted.", "");
+      await refreshHistory({ selectSessionId: session.id });
+    } else {
+      handleResultAction(action, event, session, trigger);
+    }
+  } catch (error) {
+    setListenStatus(`Listening result: ${error.message}`, "error");
+  }
+}
+
+async function handleSessionAction(action, session) {
+  try {
+    if (action === "activate") {
+      await post(`/sessions/${encodeURIComponent(session.id)}/activate`);
+      state.currentSessionId = session.id;
+      await refreshHistory({ selectSessionId: session.id });
+    } else if (action === "rename") {
+      const name = window.prompt("Rename listening session", session.name || "Listening session");
+      if (!name?.trim()) return;
+      await fetchJson(`/sessions/${encodeURIComponent(session.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      await refreshHistory({ selectSessionId: session.id });
+    } else if (action === "remember") {
+      const result = await post(`/sessions/${encodeURIComponent(session.id)}/remember`);
+      setListenStatus(`Remembered ${result.remembered_count || 0} session result${result.remembered_count === 1 ? "" : "s"}.`, "");
+      refreshMemory();
+    } else if (action === "wiki") {
+      const query = (session.events || []).flatMap((event) => [event.aggregate?.title, ...(event.tags || [])]).filter(Boolean).join(" ").slice(0, 600);
+      if (ui.wikiModal && typeof ui.wikiModal.showModal === "function" && !ui.wikiModal.open) ui.wikiModal.showModal();
+      exploreWiki({ query: query || session.name });
+    } else if (action === "json") {
+      downloadJson({ session }, `${fileSlug(session.name, "listening-session")}.json`);
+    } else if (["sound", "prompt"].includes(action)) {
+      batchGermHandoff(session, action);
+    } else if (action === "archive") {
+      await post(`/sessions/${encodeURIComponent(session.id)}/archive`);
+      if (state.currentSessionId === session.id) state.currentSessionId = null;
+      setListenStatus("Session archived.", "");
+      await refreshHistory();
+    } else if (action === "restore") {
+      await post(`/sessions/${encodeURIComponent(session.id)}/restore`);
+      state.currentSessionId = session.id;
+      setListenStatus("Session restored.", "");
+      await refreshHistory({ selectSessionId: session.id });
+    } else if (action === "delete") {
+      if (!window.confirm(`Delete session “${session.name || "Listening session"}” and its ${session.event_count || (session.events || []).length} listening result(s)?`)) return;
+      await fetchJson(`/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      if (state.currentSessionId === session.id) state.currentSessionId = null;
+      setListenStatus("Session deleted.", "");
+      await refreshHistory();
+    }
+  } catch (error) {
+    setListenStatus(`Session: ${error.message}`, "error");
+  }
+}
+
+ui.newSession.addEventListener("click", async (interaction) => {
+  interaction.preventDefault();
+  interaction.stopPropagation();
+  try {
+    showListeningView();
+    const result = await post("/sessions", {});
+    state.currentSessionId = result.session?.id || null;
+    setListenStatus("New listening session ready.", "");
+    refreshHistory({ selectSessionId: state.currentSessionId });
+  } catch (error) {
+    setListenStatus(`Session: ${error.message}`, "error");
+  }
+});
 
 /* ───────────────────────────── memory ───────────────────────────── */
 
 async function refreshMemory(query) {
   try {
-    const url = query ? `/memory?q=${encodeURIComponent(query)}` : "/memory";
+    const url = query ? `/akousmata/records?text=${encodeURIComponent(query)}&limit=24` : "/akousmata/records?limit=24";
     const result = await fetchJson(url);
-    const traces = result.traces || [];
-    if (!traces.length) {
-      ui.memoryList.innerHTML = `<p class="empty-note">${query ? "No traces match." : "No saved traces yet. Use Remember on a result."}</p>`;
+    const records = result.records || [];
+    if (!records.length) {
+      ui.memoryList.innerHTML = `<p class="empty-note">${query ? "No memories match." : "No saved memories yet. Use Remember on a result or session."}</p>`;
       return;
     }
     ui.memoryList.innerHTML = "";
-    traces.slice(0, 12).forEach((trace) => {
-      const row = document.createElement("div");
-      row.className = "row-item static";
+    records.slice(0, 16).forEach((record) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "memory-row";
+      const row = document.createElement("button");
+      row.className = "row-item memory-item";
       const title = document.createElement("span");
       title.className = "ri-title";
-      title.textContent = trace.title || trace.id;
+      title.textContent = record.summary || record.akousma_id;
       const meta = document.createElement("span");
       meta.className = "ri-meta";
-      meta.textContent = (trace.tags || []).slice(0, 3).join(" ");
-      const forget = document.createElement("button");
-      forget.className = "ri-forget";
-      forget.textContent = "forget";
-      forget.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        try {
-          await post("/memory/forget", { trace_id: trace.id });
-          refreshMemory(ui.memorySearch.value.trim() || undefined);
-        } catch (error) {
-          ui.memoryList.querySelector(".memory-error")?.remove();
-          ui.memoryList.insertAdjacentHTML("afterbegin", `<p class="empty-note memory-error">${escapeHtml(error.message)}</p>`);
-        }
-      });
-      row.append(title, meta, forget);
-      ui.memoryList.appendChild(row);
+      meta.textContent = timeAgo(record.created_at);
+      row.append(title, meta);
+      row.addEventListener("click", () => openAkousma(record.akousma_id));
+      wrapper.append(row, memoryMenu(record));
+      ui.memoryList.appendChild(wrapper);
     });
-  } catch (_) {
-    ui.memoryList.innerHTML = `<p class="empty-note">Memory unavailable.</p>`;
+  } catch (error) {
+    ui.memoryList.innerHTML = `<p class="empty-note">Memory unavailable: ${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function linkedListening(record) {
+  const session = [...state.sessions, ...state.archivedSessions]
+    .find((candidate) => candidate.id === record.session_id);
+  const event = session?.events?.find((candidate) => candidate.id === record.event_id) || null;
+  return { session, event };
+}
+
+function memoryMenu(record) {
+  const dropdown = document.createElement("span");
+  dropdown.className = "dropdown session-menu memory-menu";
+  const button = document.createElement("button");
+  button.className = "session-more";
+  button.type = "button";
+  button.textContent = "•••";
+  button.title = `Memory actions for ${record.summary || record.akousma_id}`;
+  button.setAttribute("aria-label", button.title);
+  button.setAttribute("aria-haspopup", "true");
+  button.setAttribute("aria-expanded", "false");
+  const menu = document.createElement("span");
+  menu.className = "drop-menu";
+  menu.hidden = true;
+  const linked = linkedListening(record);
+  const actions = [
+    ["activate", "Use for new listens"],
+    ["rename", "Rename"],
+    ["remember", "Remembered"],
+    ["wiki", "Expand listening on Wiki"],
+    ["json", "Export memory JSON"],
+    ["sound", "Generate derived sound"],
+    ["prompt", "Convert listening to prompt"],
+    ["delete", "Delete memory"],
+  ];
+  for (const [action, label] of actions) {
+    const item = document.createElement("button");
+    item.className = `drop-item${action === "delete" ? " destructive" : ""}`;
+    item.dataset.action = action;
+    item.textContent = label;
+    if (action === "remember") item.disabled = true;
+    if (action === "activate" && (!record.session_id || record.session_id === "session_legacy" || linked.session?.archived)) item.disabled = true;
+    if (action === "wiki" && !state.sonicfieldAvailable) item.disabled = true;
+    menu.appendChild(item);
+  }
+  menu.addEventListener("click", (interaction) => {
+    const item = interaction.target.closest(".drop-item");
+    if (!item || item.disabled) return;
+    interaction.preventDefault();
+    interaction.stopPropagation();
+    closeDropdowns();
+    handleMemoryAction(item.dataset.action, record);
+  });
+  dropdown.addEventListener("click", (interaction) => {
+    interaction.preventDefault();
+    interaction.stopPropagation();
+  });
+  dropdown.append(button, menu);
+  wireDropdown(dropdown);
+  return dropdown;
+}
+
+async function handleMemoryAction(action, record) {
+  try {
+    const linked = linkedListening(record);
+    if (action === "activate") {
+      await post(`/sessions/${encodeURIComponent(record.session_id)}/activate`);
+      await refreshHistory({ selectSessionId: record.session_id, eventId: record.event_id });
+    } else if (action === "rename") {
+      const name = window.prompt("Rename memory", record.summary || "Listening memory")?.replace(/\s+/g, " ").trim();
+      if (!name || name === record.summary) return;
+      await fetchJson(`/akousmata/records/${encodeURIComponent(record.akousma_id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ summary: name }),
+      });
+      setListenStatus("Memory renamed.", "");
+      await refreshMemory(ui.memorySearch.value.trim() || undefined);
+    } else if (action === "wiki") {
+      if (ui.wikiModal && typeof ui.wikiModal.showModal === "function" && !ui.wikiModal.open) ui.wikiModal.showModal();
+      exploreWiki(linked.event ? { event: linked.event } : { query: record.summary || record.akousma_id });
+    } else if (action === "json") {
+      const data = await fetchJson(`/akousmata/records/${encodeURIComponent(record.akousma_id)}`);
+      downloadJson(data, `${fileSlug(record.summary, "listening-memory")}.json`);
+    } else if (["sound", "prompt"].includes(action)) {
+      const data = await fetchJson(`/germ/link?akousma_id=${encodeURIComponent(record.akousma_id)}&mode=${action}`);
+      window.open(data.germ_url, "_blank", "noopener");
+    } else if (action === "delete") {
+      if (!window.confirm(`Delete memory “${record.summary || record.akousma_id}”? Its referenced audio will not be erased.`)) return;
+      await fetchJson(`/akousmata/records/${encodeURIComponent(record.akousma_id)}`, { method: "DELETE" });
+      setListenStatus("Memory deleted.", "");
+      await refreshMemory(ui.memorySearch.value.trim() || undefined);
+    }
+  } catch (error) {
+    setListenStatus(`Memory: ${error.message}`, "error");
   }
 }
 
@@ -1281,47 +2725,16 @@ ui.memorySearch.addEventListener("keydown", (event) => {
   if (event.key === "Enter") refreshMemory(ui.memorySearch.value.trim() || undefined);
 });
 
-/* ─────────────── akousmata: the shared library, embedded ─────────────── */
+/* ─────────── memory detail (shared Akousmata store underneath) ───────── */
 
 const akousmataUi = {
-  list: document.getElementById("akousmataList"),
-  search: document.getElementById("akousmataSearch"),
-  go: document.getElementById("akousmataGo"),
-  note: document.getElementById("akousmataNote"),
   modal: document.getElementById("akousmataModal"),
   title: document.getElementById("akousmataTitle"),
   detail: document.getElementById("akousmataDetail"),
 };
 
-async function refreshAkousmata(query) {
-  if (!akousmataUi.list) return;
-  try {
-    const url = query ? `/akousmata/records?text=${encodeURIComponent(query)}&limit=24` : "/akousmata/records?limit=24";
-    const result = await fetchJson(url);
-    const records = result.records || [];
-    akousmataUi.note.textContent = records.length ? `${records.length}` : "";
-    if (!records.length) {
-      akousmataUi.list.innerHTML = `<p class="empty-note">${query ? "No shared memories match." : "The shared library is empty."}</p>`;
-      return;
-    }
-    akousmataUi.list.innerHTML = "";
-    records.forEach((record) => {
-      const row = document.createElement("div");
-      row.className = "row-item";
-      row.title = record.akousma_id;
-      const title = document.createElement("span");
-      title.className = "ri-title";
-      title.textContent = record.summary || record.akousma_id;
-      const meta = document.createElement("span");
-      meta.className = "ri-meta";
-      meta.textContent = [record.originating_app, (record.created_at || "").slice(0, 10)].filter(Boolean).join(" · ");
-      row.append(title, meta);
-      row.addEventListener("click", () => openAkousma(record.akousma_id));
-      akousmataUi.list.appendChild(row);
-    });
-  } catch (_) {
-    akousmataUi.list.innerHTML = `<p class="empty-note">Shared akousmata unavailable (py-akousma not installed?).</p>`;
-  }
+function showListeningView() {
+  if (akousmataUi.modal) akousmataUi.modal.hidden = true;
 }
 
 async function openAkousma(akousmaId) {
@@ -1331,27 +2744,27 @@ async function openAkousma(akousmaId) {
     akousmataUi.title.textContent = data.summary || akousmaId;
     const rows = [];
     const provenance = record.provenance || {};
-    rows.push(`<p class="empty-note" style="margin-top:0">${escapeHtml(akousmaId)} · ${escapeHtml(provenance.originating_app || "?")} · ${escapeHtml(provenance.origin || "?")} · ${escapeHtml((record.created_at || "").slice(0, 16).replace("T", " "))}</p>`);
-    if (data.audio_available) rows.push(`<audio controls style="width:100%" src="/akousmata/audio/${encodeURIComponent(akousmaId)}"></audio>`);
+    rows.push(`<p class="memory-meta">${escapeHtml(akousmaId)} · ${escapeHtml(provenance.originating_app || "?")} · ${escapeHtml(provenance.origin || "?")} · ${escapeHtml((record.created_at || "").slice(0, 16).replace("T", " "))}</p>`);
+    if (data.audio_available) rows.push(`<section class="memory-block"><div class="memory-kicker">Audio</div><audio controls style="width:100%" src="/akousmata/audio/${encodeURIComponent(akousmaId)}"></audio></section>`);
     const listening = record.listening || {};
     for (const namespace of Object.keys(listening).sort()) {
       const entry = listening[namespace];
       if (typeof entry !== "object" || entry === null) continue;
       const payload = entry.payload && typeof entry.payload === "object" ? entry.payload : entry;
       const text = entry.summary || payload.caption || payload.summary || payload.main_reading || payload.notes || "";
-      rows.push(`<p><strong class="ri-meta">${escapeHtml(namespace)}${entry.contract ? ` · ${escapeHtml(entry.contract)}` : ""}</strong><br>${escapeHtml(String(text).slice(0, 400)) || "<em>structured payload</em>"}</p>`);
+      rows.push(`<section class="memory-block"><div class="memory-kicker">${escapeHtml(namespace)}${entry.contract ? ` · ${escapeHtml(entry.contract)}` : ""}</div><p>${escapeHtml(String(text).slice(0, 800)) || "<em>structured payload</em>"}</p></section>`);
     }
     const link = (ref) => `<a href="#" data-akousma="${escapeHtml(ref.akousma_id)}" class="${ref.missing ? "ri-meta" : ""}">${escapeHtml(ref.summary || ref.akousma_id)}</a>`;
-    if (data.parents.length) rows.push(`<p><strong class="ri-meta">made from</strong><br>${data.parents.map(link).join("<br>")}</p>`);
-    if (data.children.length) rows.push(`<p><strong class="ri-meta">became</strong><br>${data.children.map(link).join("<br>")}</p>`);
+    if (data.parents.length) rows.push(`<section class="memory-block"><div class="memory-kicker">Made from</div><div class="memory-links">${data.parents.map(link).join("")}</div></section>`);
+    if (data.children.length) rows.push(`<section class="memory-block"><div class="memory-kicker">Became</div><div class="memory-links">${data.children.map(link).join("")}</div></section>`);
     if (data.related.length) {
-      rows.push(`<p><strong class="ri-meta">kinship</strong><br>${data.related.map((item) => `${escapeHtml((item.type || "").replaceAll("_", " "))} ${item.direction === "incoming" ? "⭠" : "⭢"} ${link(item)}`).join("<br>")}</p>`);
+      rows.push(`<section class="memory-block"><div class="memory-kicker">Kinship</div><div class="memory-links">${data.related.map((item) => `<span>${escapeHtml((item.type || "").replaceAll("_", " "))} ${item.direction === "incoming" ? "←" : "→"} ${link(item)}</span>`).join("")}</div></section>`);
     }
-    if ((record.tags || []).length) rows.push(`<p class="ri-meta">#${record.tags.map(escapeHtml).join(" #")}</p>`);
+    if ((record.tags || []).length) rows.push(`<section class="memory-block"><div class="memory-kicker">Tags</div><p>${record.tags.map((tag) => `#${escapeHtml(tag)}`).join(" · ")}</p></section>`);
     rows.push(
-      `<p>` +
-      ["sound", "prompt", "lineage"].map((mode) => `<button class="pill-button small" data-germ-mode="${mode}" data-germ-id="${escapeHtml(akousmaId)}">germ: ${mode}</button>`).join(" ") +
-      `</p>`,
+      `<div class="memory-actions">` +
+      ["sound", "prompt", "lineage"].map((mode) => `<button class="pill-button small" data-germ-mode="${mode}" data-germ-id="${escapeHtml(akousmaId)}">germ: ${mode}</button>`).join("") +
+      `</div>`,
     );
     akousmataUi.detail.innerHTML = rows.join("");
     akousmataUi.detail.querySelectorAll("a[data-akousma]").forEach((anchor) => {
@@ -1364,37 +2777,28 @@ async function openAkousma(akousmaId) {
       button.addEventListener("click", async () => {
         try {
           const data = await fetchJson(`/germ/link?akousma_id=${encodeURIComponent(button.dataset.germId)}&mode=${button.dataset.germMode}`);
-          window.open(data.germ_url, "_blank");
+          window.open(data.germ_url, "_blank", "noopener");
         } catch (error) {
           button.textContent = "germ unavailable";
         }
       });
     });
-    if (typeof akousmataUi.modal.showModal === "function" && !akousmataUi.modal.open) akousmataUi.modal.showModal();
+    akousmataUi.modal.hidden = false;
   } catch (error) {
-    akousmataUi.list.insertAdjacentHTML("afterbegin", `<p class="empty-note">${escapeHtml(error.message)}</p>`);
+    akousmataUi.title.textContent = "Memory unavailable";
+    akousmataUi.detail.innerHTML = `<p class="empty-note">${escapeHtml(error.message)}</p>`;
+    akousmataUi.modal.hidden = false;
   }
 }
 
-if (akousmataUi.go) {
-  akousmataUi.go.addEventListener("click", () => refreshAkousmata(akousmataUi.search.value.trim() || undefined));
-  akousmataUi.search.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") refreshAkousmata(akousmataUi.search.value.trim() || undefined);
-  });
-  akousmataUi.modal?.querySelector("[data-close]")?.addEventListener("click", () => akousmataUi.modal.close());
-}
-
-/* ─────────────────────── covenant (the sovereignty layer) ───────────────
-   Empty by default. The panel lists local covenant documents, activates one
-   for every listen surface, and lets the operator write them in plain text.
-   Withholding shows up on events as attributed absence, never silence. */
+/* ───────────────────────── rules (covenants underneath) ─────────────────
+   The user-facing surface calls these Rules. The daemon keeps its covenant
+   vocabulary and file format so existing documents remain compatible. */
 
 const covenantUi = {
   note: el("covenantNote"),
   select: el("covenantSelect"),
-  apply: el("covenantApply"),
-  clear: el("covenantClear"),
-  editToggle: el("covenantEditToggle"),
+  toggle: el("covenantToggle"),
   editor: el("covenantEditor"),
   name: el("covenantName"),
   text: el("covenantText"),
@@ -1406,78 +2810,105 @@ const covenantUi = {
 async function refreshCovenant() {
   if (!covenantUi.select) return;
   try {
-    const data = await fetchJson("covenant");
+    const priorSelection = covenantUi.select.value;
+    const data = await fetchJson("/covenant");
     const active = data.active;
     covenantUi.select.innerHTML = "";
-    for (const name of data.available) {
+    for (const name of data.available || []) {
       const option = document.createElement("option");
       option.value = name;
       option.textContent = name;
       covenantUi.select.append(option);
     }
-    if (!data.available.length) {
+    if (!(data.available || []).length) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = "no covenants yet — Edit… to write one";
+      option.textContent = "No rules yet — open Edit rules to write one";
       covenantUi.select.append(option);
     }
+    const activeName = active?.name || active?.id || "";
+    const availableNames = new Set(data.available || []);
+    if (activeName && availableNames.has(activeName)) covenantUi.select.value = activeName;
+    else if (priorSelection && availableNames.has(priorSelection)) covenantUi.select.value = priorSelection;
+    covenantUi.toggle.checked = Boolean(active);
     if (active) {
-      covenantUi.note.textContent = `under ${active.name || active.id}`;
-      const rules = active.rules.length;
-      const commitments = active.commitments.length;
+      covenantUi.note.textContent = `On · ${activeName}`;
+      const rules = active.rules?.length || 0;
+      const commitments = active.commitments?.length || 0;
       covenantUi.summary.textContent =
         `${rules} enforceable rule${rules === 1 ? "" : "s"} · ${commitments} commitment${commitments === 1 ? "" : "s"} carried` +
-        (active.extends.length ? ` · stands on ${active.extends.join(", ")}` : "");
+        (active.extends?.length ? ` · stands on ${active.extends.join(", ")}` : "");
     } else {
-      covenantUi.note.textContent = "empty — opted in, never imposed";
-      covenantUi.summary.textContent = "";
+      covenantUi.note.textContent = "Off — opted in, never imposed";
+      covenantUi.summary.textContent = covenantUi.select.value ? "Choose the toggle to apply these rules." : "";
     }
   } catch (error) {
     covenantUi.note.textContent = String(error.message || error);
+    logActivity(`Rules: ${error.message || error}`, "error");
+  }
+}
+
+async function loadSelectedCovenant() {
+  const name = covenantUi.select.value;
+  if (!name) return;
+  try {
+    const data = await fetchJson(`/covenant/${encodeURIComponent(name)}`);
+    covenantUi.name.value = data.name || name;
+    covenantUi.text.value = data.text || "";
+  } catch (error) {
+    logActivity(`Rules document: ${error.message || error}`, "error");
   }
 }
 
 function wireCovenant() {
   if (!covenantUi.select) return;
-  covenantUi.apply.addEventListener("click", async () => {
-    const name = covenantUi.select.value;
-    if (!name) return;
-    await fetchJson("covenant/activate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    refreshCovenant();
-  });
-  covenantUi.clear.addEventListener("click", async () => {
-    await fetchJson("covenant/activate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: null }),
-    });
-    refreshCovenant();
-  });
-  covenantUi.editToggle.addEventListener("click", async () => {
-    covenantUi.editor.hidden = !covenantUi.editor.hidden;
-    if (!covenantUi.editor.hidden && covenantUi.select.value && !covenantUi.text.value) {
-      try {
-        const data = await fetchJson(`covenant/${encodeURIComponent(covenantUi.select.value)}`);
-        covenantUi.name.value = data.name;
-        covenantUi.text.value = data.text;
-      } catch (_) { /* a blank editor is fine */ }
+  covenantUi.toggle.addEventListener("change", async () => {
+    const name = covenantUi.toggle.checked ? covenantUi.select.value : null;
+    if (covenantUi.toggle.checked && !name) {
+      covenantUi.toggle.checked = false;
+      covenantUi.note.textContent = "Write or select a rules document first.";
+      return;
     }
+    try {
+      await post("/covenant/activate", { name });
+      await refreshCovenant();
+    } catch (error) {
+      covenantUi.toggle.checked = !covenantUi.toggle.checked;
+      covenantUi.note.textContent = String(error.message || error);
+    }
+  });
+  covenantUi.select.addEventListener("change", async () => {
+    await loadSelectedCovenant();
+    if (!covenantUi.toggle.checked) return;
+    try {
+      await post("/covenant/activate", { name: covenantUi.select.value || null });
+      await refreshCovenant();
+    } catch (error) {
+      covenantUi.note.textContent = String(error.message || error);
+    }
+  });
+  covenantUi.select.addEventListener("focus", () => {
+    if (!covenantUi.text.value) loadSelectedCovenant();
   });
   const saveCovenant = async (activate) => {
     const name = covenantUi.name.value.trim();
     const text = covenantUi.text.value;
-    if (!name || !text.trim()) return;
-    await fetchJson("covenant", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, text, activate }),
-    });
-    covenantUi.editor.hidden = true;
-    refreshCovenant();
+    if (!name || !text.trim()) {
+      covenantUi.note.textContent = "A name and rules text are required.";
+      return;
+    }
+    try {
+      await fetchJson("/covenant", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, text, activate }),
+      });
+      await refreshCovenant();
+      covenantUi.select.value = name;
+      if (activate) covenantUi.toggle.checked = true;
+    } catch (error) {
+      covenantUi.note.textContent = String(error.message || error);
+    }
   };
   covenantUi.save.addEventListener("click", () => saveCovenant(false));
   covenantUi.saveActivate.addEventListener("click", () => saveCovenant(true));
@@ -1489,13 +2920,14 @@ wireCovenant();
 refreshHealth().finally(() => {
   refreshHistory();
 });
+refreshMobileRemote();
 loadManifest();
 refreshMemory();
-refreshAkousmata();
 refreshCovenant();
 refreshMicDevices(false); // load input devices by default, no permission prompt
 connectStream();
 setInterval(refreshHealth, 20000);
+logActivity("Dashboard ready");
 window.addEventListener("pagehide", () => {
   stopMonitor();
   stopRecordTimer();

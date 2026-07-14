@@ -10,6 +10,7 @@ import SwiftUI
 final class FloatingPanelController: NSObject, NSWindowDelegate {
     private var panel: FloatingListenerPanel?
     private let makeContent: () -> NSView
+    private var preferredAppearance: NSAppearance?
     private static let originDefaultsKey = "oida.floating-listener.origin"
 
     init(makeContent: @escaping () -> NSView) {
@@ -33,6 +34,14 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         ensurePanel().orderFrontRegardless()
     }
 
+    /// Keep AppKit materials in step with the in-app appearance selector.
+    /// SwiftUI's preferred color scheme updates labels and controls, while the
+    /// panel appearance controls the native behind-window blur itself.
+    func setAppearance(_ appearance: NSAppearance?) {
+        preferredAppearance = appearance
+        panel?.appearance = appearance
+    }
+
     func hide() {
         panel?.orderOut(nil)
     }
@@ -47,8 +56,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        // The dashboard and listener are light-first; pin the frost to aqua.
-        panel.appearance = NSAppearance(named: .aqua)
+        panel.appearance = preferredAppearance
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]

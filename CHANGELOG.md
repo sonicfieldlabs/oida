@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.5.0 - 2026-07-13
+
+- **Listening sessions**: one listening session now holds many results, and
+  the session is daemon state — the dashboard, the floating listener, the
+  hotkeys, MCP, and agent calls all file into the same place. `GET/POST
+  /sessions`, activate/rename/archive/restore/delete, per-result rename and
+  delete (raw audio is never touched by history deletion), and `POST
+  /sessions/{id}/remember` to remember a whole session. Sessions persist with
+  recent history and survive restarts; pre-session history appears as the
+  legacy "Earlier listens" group with the same batch actions.
+- **The session dashboard**: the center column is now a session feed (every
+  result a card with inline rename, copy, and an action menu), the left rail
+  groups history by session with Archive below, and tag chips filter the feed
+  (`#music-id`, presets, session tags — combinable). "Related" memory entries
+  open their trace inline.
+- **Measured, drawn**: DSP results now carry a compact normalized log-frequency
+  **spectrogram** (`features.spectrogram`, 144×64), rendered as a sonogram with
+  a high-definition modal view plus a frequency-energy band chart and a metric
+  grid (LUFS, peak, RMS, crest, flatness, centroid). Silence stays visually
+  empty instead of normalizing the noise floor into a bright box.
+- **Music ID, opt-in per listen**: a `song_id` flag on `/listen-event`,
+  `/background/capture`, `/background/capture-request`, live capture, and the
+  native analyze path runs ShazamIO recognition only in Music mode; matches
+  land as `music_id` on the event (tag `music-id`) and lead the result summary.
+  Under a covenant that withholds song identity the answer is attributed
+  absence, never a lookup. `/health` reports provider availability.
+- **Memory is the shared store**: Remember now writes the compatibility trace
+  *and* the shared Akousmata record in one act (`/memory/remember`, session
+  remember); the Memory rail lists the shared store with rename and forget
+  (`PATCH`/`DELETE /akousmata/records/{id}` — forgetting never deletes audio),
+  and each memory card links back to its session and result.
+- **Rules in the footer**: the covenant layer is surfaced as a Rules popover —
+  a toggle, a document picker, and a plain-text editor; the daemon keeps its
+  covenant vocabulary and file format. Still empty by default.
+- **Settings, consolidated**: appearance (light/dark, persisted, native shell
+  follows), interface reset, capture-permission and open-in-browser actions,
+  the **phone remote** (status + one-click `POST /remote/configure` through
+  private-network Serve HTTPS, with the URL to copy or open), Engine, and Path — one
+  modal. A collapsible activity console under the result box records phases,
+  requests, and errors.
+- **Native shell, chromed**: titlebar accessories (sidebar toggles, source
+  popovers with buffer/direction/mic level, floating listener, settings) via a
+  window-chrome bridge; a real listening lifecycle (capturing → processing →
+  result/failed) drives the dashboard, menu bar, and floating listener through
+  one state sync; the floating listener gains an editable title (renames the
+  session result), share/copy actions, the concentric listening glyph, and
+  session-scoped readings (a fresh launch no longer resurrects old history).
+  The supervisor launches the daemon through `run_oida_mps.sh` (self-syncing,
+  offline-tolerant), terminates its managed daemon on quit, and the mac-mps
+  engine monitor no longer reports a stale "ready" after models unload; the
+  shell requests a launch prewarm when it attaches to a cold daemon.
+  ScreenCaptureKit access is preflighted with an actionable message, and the
+  dev build is signed with a stable designated requirement so privacy consent
+  survives rebuilds.
+- **Directed capture everywhere**: capture requests carry direction, source,
+  skills, and Music ID; the native analyze path records `capture` and enforces
+  covenant gates (423 refusals, pass filtering, perception/claim redaction,
+  memory-retention refusal) like every other listen surface. 176 tests.
+
 ## 0.4.0 - 2026-07-12
 
 - **The sovereignty layer (spec v1.3 / AKOÚŌ v0.7)**: oída can now listen

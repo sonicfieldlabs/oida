@@ -51,8 +51,103 @@ def inspect_integrations() -> dict[str, Any]:
         },
         "codex": {"available": bool(shutil.which("codex"))},
         "claude": {"available": bool(shutil.which("claude"))},
-        "remote": settings.get("remote") or {},
+        "remote": remote_status(settings=settings),
     }
+
+
+def remote_status(*, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Describe the secure phone remote without changing system state.
+
+    A raw ``http://192.168…`` URL is not useful for this feature: mobile
+    browsers expose microphone capture only in a secure context.  Oída keeps
+    the daemon loopback-bound and uses private-network Serve as the private HTTPS
+    boundary instead.
+    """
+    loaded = settings if isinstance(settings, dict) else _load_integration_settings()
+    configured = loaded.get("remote") if isinstance(loaded.get("remote"), dict) else {}
+    executable = shutil.which("private-network")
+    https_port = _remote_https_port(configured.get("https_port"))
+    if not executable:
+        return {
+            "available": False,
+            "configured": False,
+            "enabled": False,
+            "served": False,
+            "secure": False,
+            "microphone_ready": False,
+            "https_port": https_port,
+            "detail": "private-network is required for a private HTTPS phone microphone URL.",
+        }
+
+    status_result = _run([executable, "status", "--json"])
+    status_payload: dict[str, Any] = {}
+    if status_result["ok"]:
+        try:
+            parsed = json.loads(status_result["output"])
+            if isinstance(parsed, dict):
+                status_payload = parsed
+        except json.JSONDecodeError:
+            pass
+    self_status = status_payload.get("Self") if isinstance(status_payload.get("Self"), dict) else {}
+    dns_name = str(self_status.get("DNSName") or "").rstrip(".") or None
+    running = status_payload.get("BackendState") == "Running" and bool(dns_name)
+    base_url = f"https://{dns_name}:{https_port}/" if dns_name else None
+    remote_ear_url = f"{base_url}remote" if base_url else None
+
+    serve_result = _run([executable, "serve", "status", "--json"]) if running else None
+    served = _private-network_serves_oida(serve_result, dns_name=dns_name, https_port=https_port)
+    saved_enabled = bool(configured.get("enabled"))
+    enabled = bool(running and served)
+    secure = bool(remote_ear_url and remote_ear_url.startswith("https://"))
+    if not running:
+        detail = "private-network is installed but is not connected."
+    elif not served:
+        detail = "Secure phone access is ready to be enabled."
+    else:
+        detail = "Phone microphone access is available through private private-network HTTPS."
+    return {
+        "available": bool(running),
+        "configured": saved_enabled,
+        "enabled": enabled,
+        "served": served,
+        "secure": secure,
+        "microphone_ready": bool(enabled and secure),
+        "mode": "private-network-serve",
+        "private-network_host": dns_name,
+        "https_port": https_port,
+        "url": base_url,
+        "remote_ear_url": remote_ear_url,
+        "library_url": f"{base_url}library/" if base_url else None,
+        "detail": detail,
+    }
+
+
+def _remote_https_port(value: object) -> int:
+    try:
+        port = int(value or 8443)
+    except (TypeError, ValueError):
+        return 8443
+    return port if 1 <= port <= 65535 else 8443
+
+
+def _private-network_serves_oida(
+    result: dict[str, Any] | None,
+    *,
+    dns_name: str | None,
+    https_port: int,
+) -> bool:
+    if not result or not result.get("ok") or not dns_name:
+        return False
+    try:
+        payload = json.loads(str(result.get("output") or ""))
+    except json.JSONDecodeError:
+        return False
+    web = payload.get("Web") if isinstance(payload, dict) and isinstance(payload.get("Web"), dict) else {}
+    host = web.get(f"{dns_name}:{https_port}") if isinstance(web, dict) else None
+    handlers = host.get("Handlers") if isinstance(host, dict) and isinstance(host.get("Handlers"), dict) else {}
+    root = handlers.get("/") if isinstance(handlers, dict) else None
+    proxy = str(root.get("Proxy") or "") if isinstance(root, dict) else ""
+    return proxy.rstrip("/") == "http://127.0.0.1:8765"
 
 
 def _install_hermes() -> dict[str, Any]:

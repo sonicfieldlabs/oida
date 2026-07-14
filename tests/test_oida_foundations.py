@@ -10,9 +10,11 @@ import numpy as np
 import soundfile as sf
 
 from oida.akouo_skills import akouo_manifest, resolve_route_skill_ids, route_preset, validate_akouo_manifest
+from oida.akousmata_view import card as akousmata_card
 from oida.background import BackgroundRuntime
 from oida.conversation import ConversationStore
 from oida.contracts import audio_segment_from_path, source_for_path, to_dict
+from oida.dsp import inspect_path
 from oida.engine_stub import StubMossEngine
 from oida.generation import GenerationStore
 from oida.listening import listening_event_dict
@@ -28,6 +30,23 @@ from harness.akouo.routing import evidence_level_for_report
 
 
 class OidaFoundationTests(unittest.TestCase):
+    def test_embedded_akousmata_card_links_back_to_its_session_result(self) -> None:
+        record = {
+            "akousma_id": "akm_test",
+            "created_at": "2026-07-13T00:00:00Z",
+            "summary": "Rain at the window",
+            "session_id": "session_test",
+            "provenance": {"originating_app": "oida", "origin": "live-input"},
+            "audio": {},
+            "lineage": {},
+            "listening": {"oida.listen": {"payload": {"event_id": "evt_test"}}},
+        }
+
+        result = akousmata_card(record)
+
+        self.assertEqual(result["session_id"], "session_test")
+        self.assertEqual(result["event_id"], "evt_test")
+
     def test_audio_segment_contract_from_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_tone(Path(tmp) / "tone.wav", duration_s=0.25)
@@ -38,6 +57,25 @@ class OidaFoundationTests(unittest.TestCase):
         self.assertEqual(data["sample_rate"], 16000)
         self.assertGreater(data["duration_ms"], 200)
         self.assertEqual(data["data_ref"]["kind"], "path")
+
+    def test_dsp_embeds_a_compact_spectrogram_for_result_visualization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_tone(Path(tmp) / "tone.wav", duration_s=1.0)
+            spectrogram = inspect_path(path)["features"]["spectrogram"]
+
+        self.assertGreater(spectrogram["timeBins"], 1)
+        self.assertEqual(spectrogram["frequencyBins"], 64)
+        self.assertEqual(len(spectrogram["values"]), spectrogram["timeBins"])
+        self.assertTrue(all(len(row) == 64 for row in spectrogram["values"]))
+        self.assertTrue(all(0.0 <= value <= 1.0 for row in spectrogram["values"] for value in row))
+
+    def test_silent_spectrogram_stays_visually_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "silence.wav"
+            sf.write(path, np.zeros(16_000, dtype=np.float32), 16_000)
+            spectrogram = inspect_path(path)["features"]["spectrogram"]
+
+        self.assertTrue(all(value == 0.0 for row in spectrogram["values"] for value in row))
 
     def test_source_registry_exposes_system_audio_distinctly(self) -> None:
         registry = source_registry_dict()
@@ -496,13 +534,113 @@ class OidaFoundationTests(unittest.TestCase):
     def test_background_capture_request_cancel_is_distinct_from_claim(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime = BackgroundRuntime(config_path=Path(tmp) / "background.json")
-            request = runtime.request_capture(seconds=4, route_preset="signal")
+            request = runtime.request_capture(seconds=4, route_preset="signal", direction="future", source="mic")
             cancelled = runtime.cancel_capture_request(request["id"])
 
         self.assertIsNotNone(cancelled)
         assert cancelled is not None
         self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(cancelled["direction"], "future")
+        self.assertEqual(cancelled["source"], "mic")
         self.assertIsNone(runtime.claim_capture_request(request["id"]))
+
+    def test_background_runtime_groups_results_into_persistent_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "background.json"
+            runtime = BackgroundRuntime(config_path=config_path)
+            first = runtime.create_session("River walk")
+            runtime.finish_action({"id": "evt_a", "aggregate": {"title": "Water"}})
+            runtime.finish_action({"id": "evt_b", "aggregate": {"title": "Birds"}})
+            second = runtime.create_session("Studio")
+            runtime.finish_action({"id": "evt_c", "aggregate": {"title": "Hum"}})
+            runtime.rename_session(second["id"], "Night studio")
+            runtime.rename_event(second["id"], "evt_c", "Low studio hum")
+            restored = BackgroundRuntime(config_path=config_path)
+            grouped = {session["id"]: session for session in restored.sessions()["sessions"]}
+
+        self.assertEqual(grouped[first["id"]]["event_count"], 2)
+        self.assertEqual([event["id"] for event in grouped[first["id"]]["events"]], ["evt_b", "evt_a"])
+        self.assertEqual(grouped[second["id"]]["name"], "Night studio")
+        self.assertTrue(grouped[second["id"]]["active"])
+        self.assertEqual(grouped[second["id"]]["events"][0]["session"]["name"], "Night studio")
+        self.assertEqual(grouped[second["id"]]["events"][0]["aggregate"]["title"], "Low studio hum")
+
+    def test_pre_session_history_resolves_through_the_legacy_group(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = BackgroundRuntime(config_path=Path(tmp) / "background.json")
+            runtime.finish_action({"id": "evt_old", "aggregate": {"title": "Before sessions"}})
+            # Persisted history from releases before listening sessions carries
+            # no session block; sessions() groups it as "session_legacy".
+            runtime.state.recent_events[0].pop("session", None)
+            legacy = next(
+                session for session in runtime.sessions()["sessions"] if session["id"] == "session_legacy"
+            )
+            events = runtime.session_events("session_legacy")
+
+        self.assertEqual(legacy["event_count"], 1)
+        self.assertEqual([event["id"] for event in events], ["evt_old"])
+
+    def test_background_runtime_archives_and_restores_complete_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "background.json"
+            runtime = BackgroundRuntime(config_path=config_path)
+            session = runtime.create_session("Field notes")
+            runtime.finish_action({"id": "evt_one", "aggregate": {"title": "Rain"}})
+            runtime.finish_action({"id": "evt_two", "aggregate": {"title": "Steps"}})
+            runtime.set_pinned_event("evt_one")
+
+            archived = runtime.archive_session(session["id"])
+            after_archive = runtime.sessions()
+            restored_runtime = BackgroundRuntime(config_path=config_path)
+            persisted_archive = restored_runtime.sessions()
+            restored_runtime.restore_session(session["id"])
+            after_restore = restored_runtime.sessions()
+
+        self.assertEqual(archived["id"], session["id"])
+        self.assertNotIn(session["id"], {item["id"] for item in after_archive["sessions"]})
+        self.assertEqual(after_archive["archived_sessions"][0]["event_count"], 2)
+        self.assertEqual(persisted_archive["archived_sessions"][0]["name"], "Field notes")
+        restored = next(item for item in after_restore["sessions"] if item["id"] == session["id"])
+        self.assertEqual([event["id"] for event in restored["events"]], ["evt_two", "evt_one"])
+        self.assertEqual(restored_runtime.state.pinned_events[0]["id"], "evt_one")
+        self.assertEqual(after_restore["archived_sessions"], [])
+
+    def test_background_runtime_deletes_listening_results_and_sessions_persistently(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "background.json"
+            runtime = BackgroundRuntime(config_path=config_path)
+            first = runtime.create_session("First")
+            runtime.finish_action({"id": "evt_one", "aggregate": {"title": "One"}})
+            runtime.finish_action({"id": "evt_two", "aggregate": {"title": "Two"}})
+            runtime.set_pinned_event("evt_one")
+            deleted_event = runtime.delete_event(first["id"], "evt_two")
+
+            second = runtime.create_session("Second")
+            runtime.finish_action({"id": "evt_three", "aggregate": {"title": "Three"}})
+            deleted_session = runtime.delete_session(second["id"])
+            restored = BackgroundRuntime(config_path=config_path)
+            sessions = restored.sessions()
+
+        self.assertEqual(deleted_event["id"], "evt_two")
+        self.assertEqual(deleted_session["id"], second["id"])
+        self.assertEqual([event["id"] for event in restored.state.recent_events], ["evt_one"])
+        self.assertEqual([event["id"] for event in restored.state.pinned_events], ["evt_one"])
+        self.assertNotIn(second["id"], {session["id"] for session in sessions["sessions"]})
+        self.assertIsNotNone(restored.state.active_session)
+        self.assertNotEqual(restored.state.active_session["id"], second["id"])
+
+    def test_background_runtime_deletes_archived_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "background.json"
+            runtime = BackgroundRuntime(config_path=config_path)
+            session = runtime.create_session("Archive to delete")
+            runtime.finish_action({"id": "evt_archived", "aggregate": {"title": "Archived"}})
+            runtime.archive_session(session["id"])
+            deleted = runtime.delete_session(session["id"])
+            restored = BackgroundRuntime(config_path=config_path)
+
+        self.assertEqual(deleted["id"], session["id"])
+        self.assertEqual(restored.sessions()["archived_sessions"], [])
 
     def test_akouo_evidence_level_reflects_unavailable_model(self) -> None:
         report = {
@@ -579,6 +717,8 @@ class OidaFoundationTests(unittest.TestCase):
         self.assertTrue(status["capabilities"]["recent_history_batch_review"])
         self.assertTrue(status["capabilities"]["generation_prompt_api"])
         self.assertTrue(status["capabilities"]["generation_relisten_api"])
+        self.assertTrue(status["capabilities"]["listening_sessions"])
+        self.assertTrue(status["capabilities"]["session_memory"])
 
     def test_background_runtime_tracks_bounded_recent_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

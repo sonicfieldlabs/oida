@@ -58,6 +58,23 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+plutil -lint "$INFO_PLIST" >/dev/null
+
+# Swift's built executable has a changing ad-hoc cdhash and does not bind the
+# app bundle's identifier or Info.plist. Sign the development bundle with an
+# explicit, stable designated requirement so macOS privacy consent follows the
+# oida bundle identity across local rebuilds. Release packaging still uses the
+# Developer ID path in package_signed.sh.
+DEVELOPMENT_REQUIREMENT="=designated => identifier \"$BUNDLE_ID\""
+codesign \
+  --force \
+  --deep \
+  --sign - \
+  --identifier "$BUNDLE_ID" \
+  --requirements "$DEVELOPMENT_REQUIREMENT" \
+  "$APP_BUNDLE"
+codesign --verify --deep --strict "$APP_BUNDLE"
+
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }

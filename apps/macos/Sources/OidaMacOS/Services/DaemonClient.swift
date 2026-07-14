@@ -21,6 +21,8 @@ enum DaemonClientError: LocalizedError {
 }
 
 struct DaemonClient {
+    private static let analysisTimeout: TimeInterval = 15 * 60
+
     var baseURLString: String
     var session: URLSession = .shared
 
@@ -43,6 +45,10 @@ struct DaemonClient {
         try await get("/health")
     }
 
+    func warmEngine() async throws -> EngineStatusModel {
+        try await post("/engine/warm", payload: EmptyPayload())
+    }
+
     func backgroundStatus() async throws -> BackgroundStatusResponse {
         try await get("/background/status")
     }
@@ -62,12 +68,20 @@ struct DaemonClient {
             routePreset: routePreset,
             remember: remember
         )
-        return try await post("/background/capture", payload: payload)
+        return try await post(
+            "/background/capture",
+            payload: payload,
+            timeoutInterval: Self.analysisTimeout
+        )
     }
 
     func rerun(event: ListeningEventSummary, routePreset: String, remember: Bool = false) async throws -> RouteRerunResponse {
         let payload = RouteRerunPayload(event: event, routePreset: routePreset, remember: remember)
-        return try await post("/listen-event/rerun", payload: payload)
+        return try await post(
+            "/listen-event/rerun",
+            payload: payload,
+            timeoutInterval: Self.analysisTimeout
+        )
     }
 
     func askConversation(event: ListeningEventSummary?, conversationId: String?, question: String) async throws -> ConversationAskResponse {
@@ -132,7 +146,11 @@ struct DaemonClient {
         durationSeconds: Double?,
         routePreset: String?,
         remember: Bool,
-        sourceRoute: NativeSystemAudioRoutePayload?
+        sourceRoute: NativeSystemAudioRoutePayload?,
+        captureDirection: String?,
+        captureTrigger: String?,
+        enabledSkillIDs: [String]? = nil,
+        songID: Bool = false
     ) async throws -> NativeSystemAudioAnalyzeResponse {
         let payload = NativeSystemAudioAnalyzePayload(
             path: path,
@@ -141,9 +159,17 @@ struct DaemonClient {
             sourceLabel: "Native system audio",
             durationSeconds: durationSeconds,
             remember: remember,
-            sourceRoute: sourceRoute
+            sourceRoute: sourceRoute,
+            captureDirection: captureDirection,
+            captureTrigger: captureTrigger,
+            enabledSkillIDs: enabledSkillIDs,
+            songID: songID
         )
-        return try await post("/native/system-audio/analyze", payload: payload)
+        return try await post(
+            "/native/system-audio/analyze",
+            payload: payload,
+            timeoutInterval: Self.analysisTimeout
+        )
     }
 
     func nativeSystemAudioTempStatus() async throws -> NativeSystemAudioTempStatusResponse {
@@ -164,7 +190,9 @@ struct DaemonClient {
         rawAudioPolicy: String? = nil,
         captureDirection: String? = nil,
         captureSeconds: Double? = nil,
-        captureTrigger: String? = nil
+        captureTrigger: String? = nil,
+        enabledSkillIDs: [String]? = nil,
+        songID: Bool = false
     ) async throws -> ListenEventResponse {
         let payload = ListenEventPayload(
             path: path,
@@ -176,9 +204,22 @@ struct DaemonClient {
             rawAudioPolicy: rawAudioPolicy,
             captureDirection: captureDirection,
             captureSeconds: captureSeconds,
-            captureTrigger: captureTrigger
+            captureTrigger: captureTrigger,
+            enabledSkillIDs: enabledSkillIDs,
+            songID: songID
         )
-        return try await post("/listen-event", payload: payload)
+        return try await post(
+            "/listen-event",
+            payload: payload,
+            timeoutInterval: Self.analysisTimeout
+        )
+    }
+
+    func renameListeningEvent(sessionId: String, eventId: String, title: String) async throws -> EventRenameResponse {
+        try await patch(
+            "/sessions/\(sessionId)/events/\(eventId)",
+            payload: EventRenamePayload(title: title)
+        )
     }
 
     func akouoSkills() async throws -> AkouoSkillsResponse {
@@ -197,9 +238,25 @@ struct DaemonClient {
         return try await send(request)
     }
 
-    private func post<T: Decodable, P: Encodable>(_ path: String, payload: P) async throws -> T {
+    private func post<T: Decodable, P: Encodable>(
+        _ path: String,
+        payload: P,
+        timeoutInterval: TimeInterval? = nil
+    ) async throws -> T {
         var request = URLRequest(url: try endpoint(path))
         request.httpMethod = "POST"
+        if let timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try JSONEncoder().encode(payload)
+        applyAuth(to: &request)
+        return try await send(request)
+    }
+
+    private func patch<T: Decodable, P: Encodable>(_ path: String, payload: P) async throws -> T {
+        var request = URLRequest(url: try endpoint(path))
+        request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONEncoder().encode(payload)
         applyAuth(to: &request)

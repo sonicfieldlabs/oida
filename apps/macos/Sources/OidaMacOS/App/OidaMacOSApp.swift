@@ -11,17 +11,20 @@ struct OidaMacOSApp: App {
             ContentView()
                 .environmentObject(store)
                 .frame(minWidth: 760, minHeight: 560)
+                .onAppear {
+                    appDelegate.onWillTerminate = { store.shutdownManagedDaemon() }
+                }
                 .task {
                     await store.bootstrap()
                 }
         }
         .commands {
             CommandMenu("oída") {
-                Button(store.isListening ? "Listening…" : "Listen Now") {
+                Button(store.isListening ? "Listening…" : (store.isProcessing ? "Operating listening…" : "Listen Now")) {
                     Task { await store.listenNow() }
                 }
                 .keyboardShortcut("l", modifiers: [.command, .option])
-                .disabled(store.isListening)
+                .disabled(store.isListenBusy)
 
                 Button("Show/Hide Floating Listener") {
                     store.toggleFloatingListener()

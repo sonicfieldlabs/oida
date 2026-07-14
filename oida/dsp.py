@@ -15,6 +15,8 @@ HEAVY_ANALYSIS_MAX_SECONDS = 600
 ONSET_SEGMENT_MAX_SECONDS = 60
 SURVEY_WINDOW = 2048
 SURVEY_MAX_FRAMES = 900
+SPECTROGRAM_TIME_BINS = 144
+SPECTROGRAM_FREQUENCY_BINS = 64
 ONSET_WINDOW = 1024
 ONSET_HOP = 512
 ONSET_MIN_SEPARATION_SECONDS = 0.05
@@ -53,6 +55,7 @@ class AudioFeatures:
     channelBalanceDb: float | None = None
     clippedSampleRatio: float | None = None
     analyzedSeconds: float | None = None
+    spectrogram: dict[str, object] | None = None
 
 
 def sha256_file(path: str | Path) -> str:
@@ -226,6 +229,7 @@ def analyze_audio(audio: AudioData) -> AudioFeatures:
     features.spectralRolloffHz = survey["rolloffMeanHz"]
     features.spectralFlatness = survey["flatnessMean"]
     features.bandEnergy = survey["bandEnergy"]
+    features.spectrogram = compact_spectrogram(audio, analyzed_length)
 
     loudness = analyze_loudness(audio, analyzed_length)
     features.integratedLufs = loudness["integratedLufs"]
@@ -318,6 +322,60 @@ def analyze_spectral_survey(audio: AudioData, analyzed_length: int) -> dict[str,
         "rolloffMeanHz": float(np.mean(rolloffs)) if rolloffs else None,
         "flatnessMean": float(np.mean(flatnesses)) if flatnesses else None,
         "bandEnergy": {key: value / band_total for key, value in band_sums.items()} if band_total > 0 else None,
+    }
+
+
+def compact_spectrogram(audio: AudioData, analyzed_length: int) -> dict[str, object] | None:
+    """Return a compact, normalized log-frequency spectrogram for UI display.
+
+    It is derived from the same bounded audio used for DSP inspection, so the
+    dashboard can render it even after an ephemeral capture file is released.
+    Values are time-major in [0, 1], low frequencies first.
+    """
+    if analyzed_length < 512 or audio.sample_rate <= 0:
+        return None
+    channel = audio.samples[:analyzed_length, 0]
+    window_size = min(SURVEY_WINDOW, max(512, 2 ** int(math.floor(math.log2(channel.shape[0])))))
+    if channel.shape[0] < window_size:
+        return None
+    frame_count = min(SPECTROGRAM_TIME_BINS, max(1, channel.shape[0] // max(1, window_size // 2)))
+    starts = (
+        [0]
+        if frame_count == 1
+        else [int(frame * (channel.shape[0] - window_size) / (frame_count - 1)) for frame in range(frame_count)]
+    )
+    window = np.hanning(window_size).astype(np.float32)
+    frequencies = np.fft.rfftfreq(window_size, 1.0 / audio.sample_rate)
+    minimum_hz = max(20.0, float(audio.sample_rate) / window_size)
+    maximum_hz = min(20_000.0, float(audio.sample_rate) / 2)
+    if maximum_hz <= minimum_hz:
+        return None
+    edges = np.geomspace(minimum_hz, maximum_hz, SPECTROGRAM_FREQUENCY_BINS + 1)
+    rows: list[list[float]] = []
+    for start in starts:
+        magnitudes = np.abs(np.fft.rfft(channel[start : start + window_size] * window))
+        bands: list[float] = []
+        for index in range(SPECTROGRAM_FREQUENCY_BINS):
+            mask = (frequencies >= edges[index]) & (frequencies < edges[index + 1])
+            bands.append(float(np.sqrt(np.mean(np.square(magnitudes[mask])))) if np.any(mask) else 0.0)
+        rows.append(bands)
+    matrix = np.asarray(rows, dtype=np.float64)
+    if float(np.max(matrix)) <= 1e-10:
+        # A flat silent matrix has no visible information. Treat it as empty
+        # rather than normalizing the numerical floor into a solid bright box.
+        normalized = np.zeros_like(matrix)
+    else:
+        decibels = 20.0 * np.log10(matrix + 1e-12)
+        peak = float(np.max(decibels))
+        floor = peak - 72.0
+        normalized = np.clip((decibels - floor) / max(1e-9, peak - floor), 0.0, 1.0)
+    return {
+        "timeBins": int(normalized.shape[0]),
+        "frequencyBins": int(normalized.shape[1]),
+        "durationSeconds": float(analyzed_length / audio.sample_rate),
+        "minimumHz": minimum_hz,
+        "maximumHz": maximum_hz,
+        "values": np.round(normalized, 3).tolist(),
     }
 
 

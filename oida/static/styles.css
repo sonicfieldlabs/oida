@@ -13,12 +13,30 @@
   --soft: #b7b7b0;
   --line: #e3e3de;
   --primary: #2b2b27;    /* the one dark action (Listen) */
+  --primary-ink: #ffffff;
   --warn: #a9762f;       /* amber */
   --bad: #a2453a;        /* rust */
   --radius: 10px;
   --radius-s: 8px;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
   font-family: -apple-system, BlinkMacSystemFont, Inter, "Segoe UI", sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1b1b19;
+  --ctl: #242421;
+  --well: #292926;
+  --sel: #363632;
+  --ink: #f1f0eb;
+  --muted: #aaa9a1;
+  --faint: #797970;
+  --soft: #5d5d56;
+  --line: #343430;
+  --primary: #f1f0eb;
+  --primary-ink: #1b1b19;
+  --warn: #d2a159;
+  --bad: #cb6b61;
 }
 
 * { box-sizing: border-box; }
@@ -931,4 +949,955 @@ body:not(.native) .native-only { display: none !important; }
   }
   .result-foot { flex-wrap: wrap; }
   .modal { width: calc(100vw - 24px); }
+}
+
+/* ═══════════════ v13 — synchronized workspace + sessions ═══════════════ */
+
+html, body, .shellapp { height: 100%; overflow: hidden; }
+.shell { height: 100%; min-height: 0; overflow: hidden; }
+.side { height: 100%; min-height: 0; }
+.side-top { flex: none; }
+.side-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.center { height: 100%; min-height: 0; overflow: hidden; }
+.result-card { height: 100%; min-height: 0; }
+.result-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 8px 18px 0;
+  scrollbar-gutter: stable;
+}
+.result-footer-shell { flex: none; min-width: 0; }
+.result-foot { margin-top: 0; padding-top: 10px; }
+
+/* Settings now lives directly beside File in the source rail. */
+.top-config { margin-left: auto; flex: none; }
+.top-config .side-toggle { order: 0; }
+.drop-menu.top-menu { top: calc(100% + 5px); bottom: auto; right: 0; left: auto; }
+
+/* Source settings stay on one compact line. */
+.config-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.config-line > .cfg, .config-line > .quiet-select { flex: 1; min-width: 0; }
+.direction-toggle {
+  display: inline-flex; align-items: center; gap: 2px; flex: none;
+  padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--ctl);
+}
+.direction-button {
+  display: grid; place-items: center;
+  width: 26px; height: 24px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--faint); cursor: pointer;
+}
+.direction-button:hover { color: var(--ink); background: var(--well); }
+.direction-button.active { color: var(--ink); background: var(--sel); }
+
+/* Sidebar sections collapse independently; only section titles are bold. */
+details.side-section { display: block; min-width: 0; }
+summary.side-head {
+  cursor: pointer; list-style: none; align-items: center;
+  margin-bottom: 8px; padding: 2px 0;
+}
+summary.side-head::-webkit-details-marker { display: none; }
+summary.side-head::after {
+  content: ""; width: 6px; height: 6px; flex: none;
+  border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint);
+  transform: rotate(45deg); transition: transform 0.15s ease;
+}
+details.side-section:not([open]) summary.side-head { margin-bottom: 0; }
+details.side-section:not([open]) summary.side-head::after { transform: rotate(-45deg); }
+.section-tools { display: flex; justify-content: flex-end; margin: -2px 0 5px; }
+.section-action {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 0; background: transparent; color: var(--faint);
+  padding: 3px 5px; border-radius: 6px; font-size: 11.5px; cursor: pointer;
+}
+.section-action:hover { color: var(--ink); background: var(--well); }
+.row-item .ri-title { font-weight: 400; }
+
+/* Session rows keep the archive quiet until a session is expanded. */
+.session-group { border-bottom: 1px solid var(--line); padding: 2px 0 6px; }
+.session-group:last-child { border-bottom: 0; }
+.session-summary {
+  display: flex; align-items: center; gap: 7px;
+  min-height: 30px; list-style: none; cursor: pointer;
+  padding: 4px 5px; border-radius: 7px;
+}
+.session-summary::-webkit-details-marker { display: none; }
+.session-summary:hover { background: var(--well); }
+.session-name { min-width: 0; flex: 1; font-size: 13px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-meta { color: var(--faint); font: 10.5px var(--mono); flex: none; }
+.session-active { width: 5px; height: 5px; border-radius: 50%; background: var(--ink); flex: none; }
+.session-actions { display: flex; gap: 1px; padding: 2px 3px 4px 18px; }
+.session-action {
+  border: 0; background: transparent; color: var(--faint); cursor: pointer;
+  padding: 3px 6px; border-radius: 5px; font-size: 10.5px;
+}
+.session-action:hover { background: var(--well); color: var(--ink); }
+.session-events { display: flex; flex-direction: column; padding-left: 12px; }
+.session-event { padding: 5px 7px; font-size: 12.5px; }
+.session-event .ri-title { font-weight: 400; }
+
+/* Capture and processing are visibly distinct, while controls stay fixed. */
+.listen-progress {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 24px; color: var(--muted); font-size: 11.5px;
+}
+.phase-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); flex: none; }
+.listen-progress.processing .phase-dot { animation: phase-pulse 1s ease-in-out infinite; }
+.phase-label { white-space: nowrap; }
+.progress-track { height: 3px; flex: 1; min-width: 48px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.progress-fill { display: block; width: 0%; height: 100%; border-radius: inherit; background: var(--ink); transition: width 0.16s linear; }
+.listen-progress.processing .progress-fill { width: 32%; animation: progress-scan 1.1s ease-in-out infinite alternate; }
+.listen-send.processing { background: var(--muted); cursor: progress; }
+.listen-send:disabled { opacity: 0.72; }
+@keyframes phase-pulse { 50% { opacity: 0.3; transform: scale(0.72); } }
+@keyframes progress-scan { from { transform: translateX(-60%); } to { transform: translateX(210%); } }
+
+/* Expandable diagnostics sit below the listening field and never move it. */
+.activity-console { border-top: 1px solid var(--line); margin-top: 7px; }
+.activity-console > summary {
+  display: flex; align-items: center; gap: 8px; list-style: none;
+  padding: 7px 1px 5px; color: var(--muted); font-size: 11.5px; cursor: pointer;
+}
+.activity-console > summary::-webkit-details-marker { display: none; }
+.activity-console > summary::before { content: "›"; color: var(--faint); transform: rotate(0); transition: transform 0.12s ease; }
+.activity-console[open] > summary::before { transform: rotate(90deg); }
+.console-note { margin-left: auto; color: var(--faint); font: 10.5px var(--mono); }
+.console-toolbar { display: flex; justify-content: flex-end; gap: 4px; margin-bottom: 4px; }
+.console-action { border: 0; background: transparent; color: var(--faint); font-size: 10.5px; padding: 3px 6px; cursor: pointer; border-radius: 5px; }
+.console-action:hover { background: var(--well); color: var(--ink); }
+.console-output {
+  margin: 0; height: 150px; overflow: auto; resize: vertical;
+  border-radius: 8px; background: #171716; color: #d8d8d1;
+  padding: 10px 12px; font: 10.5px/1.55 var(--mono); white-space: pre-wrap;
+}
+
+/* Rules replaces the large Covenant sidebar block. */
+.rules-menu { width: min(340px, calc(100vw - 36px)); max-height: 70vh; overflow-y: auto; padding: 12px; gap: 9px; }
+.rules-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.rules-summary { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.switch { display: inline-flex; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch span { width: 30px; height: 18px; border-radius: 10px; background: var(--line); position: relative; transition: background 0.15s ease; }
+.switch span::after { content: ""; position: absolute; width: 14px; height: 14px; top: 2px; left: 2px; border-radius: 50%; background: var(--ctl); box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform 0.15s ease; }
+.switch input:checked + span { background: var(--ink); }
+.switch input:checked + span::after { transform: translateX(12px); }
+.rules-editor-fold { border-top: 1px solid var(--line); padding-top: 6px; }
+.rules-editor-fold > summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+.rules-editor { display: grid; gap: 6px; margin-top: 8px; }
+.rules-editor input, .rules-editor textarea {
+  width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--ctl);
+  padding: 7px 9px; font: 11px/1.45 var(--mono); resize: vertical;
+}
+.rules-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* Compact measured-information modules and monochrome charts. */
+.measurement-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+.metric-module { min-width: 0; padding: 8px 9px; border-radius: 8px; background: var(--well); }
+.metric-value { display: block; font: 600 13.5px/1.2 var(--mono); letter-spacing: -.025em; color: var(--ink); white-space: nowrap; }
+.metric-value small { font-size: 8.5px; letter-spacing: 0; }
+.metric-label { display: block; margin-top: 3px; color: var(--faint); font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; }
+.band-chart { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: end; gap: 5px; height: 88px; padding: 8px 4px 0; margin: 4px 0 12px; border-bottom: 1px solid var(--line); }
+.band-column { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
+.band-bar { width: min(18px, 70%); min-height: 2px; border-radius: 3px 3px 0 0; background: var(--ink); opacity: .82; }
+.band-label { color: var(--faint); font-size: 8.5px; text-transform: uppercase; }
+.viz-title { margin: 8px 0 3px; color: var(--faint); font-size: 9.5px; letter-spacing: .07em; text-transform: uppercase; }
+.spectrogram-wrap { margin: 5px 0 12px; }
+.spectrogram { display: block; width: 100%; height: 116px; border-radius: 7px; background: var(--well); image-rendering: pixelated; }
+.spectrogram-axis { display: flex; justify-content: space-between; margin-top: 3px; color: var(--faint); font: 8.5px var(--mono); }
+.measure-details { border-top: 1px solid var(--line); padding-top: 7px; }
+.measure-details summary { cursor: pointer; color: var(--faint); font-size: 10.5px; }
+
+@media (max-width: 640px) {
+  html, body, .shellapp { height: auto; min-height: 100%; overflow: auto; }
+  .shell { height: auto; min-height: 100vh; overflow: visible; }
+  .side, .center, .result-card { height: auto; overflow: visible; }
+  .side-body, .result-scroll { overflow: visible; }
+  .top-config { margin-left: 0; }
+}
+
+/* ═══════════════ v15 — session feed + native titlebar controls ═══════════════ */
+
+/* The native window owns sidebar collapse; the web controls remain as a
+   browser fallback. Floating listener and Settings form one compact pair. */
+.top-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+.top-config { margin-left: 0; }
+.rail-action {
+  display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--faint); cursor: pointer;
+}
+.rail-action:hover { color: var(--ink); background: var(--well); }
+.side.collapsed .top-actions { display: none; }
+body.native .web-side-toggle { display: none; }
+body.native .side-right .side-top { display: none; }
+body.native .side-right .side-body { padding-top: 10px; }
+body.native .side-left.collapsed .side-top { display: none; }
+
+/* Explicit section affordances allow + to sit immediately left of the caret. */
+summary.side-head::after { display: none; }
+.side-head-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; }
+.section-caret {
+  width: 6px; height: 6px; flex: none;
+  border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint);
+  transform: rotate(45deg); transition: transform .15s ease;
+}
+details.side-section:not([open]) .section-caret { transform: rotate(-45deg); }
+.section-add {
+  display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: var(--faint);
+  font-size: 18px; font-weight: 400; line-height: 1; cursor: pointer;
+}
+.section-add:hover { color: var(--ink); background: var(--well); }
+
+/* Session actions live on the title line and reveal only on intent. */
+.session-summary { position: relative; gap: 6px; }
+.session-menu { flex: none; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.session-summary:hover .session-menu,
+.session-summary:focus-within .session-menu,
+.session-menu:has(.drop-menu:not([hidden])) { opacity: 1; pointer-events: auto; }
+.session-more {
+  display: grid; place-items: center; width: 24px; height: 22px; padding: 0 0 5px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--faint);
+  font: 600 10px/1 var(--mono); letter-spacing: -1px; cursor: pointer;
+}
+.session-more:hover, .session-more[aria-expanded="true"] { color: var(--ink); background: var(--sel); }
+.session-menu .drop-menu { top: calc(100% + 3px); bottom: auto; right: -20px; min-width: 208px; z-index: 45; }
+.drop-item.destructive { color: var(--bad); }
+.session-events { padding: 1px 0 3px 12px; }
+.session-event.selected { background: var(--sel); color: var(--ink); }
+.session-group.archived .session-name { color: var(--muted); }
+
+/* A session is a feed of individually actionable listening results. */
+.session-context {
+  margin: 0 4px 10px; color: var(--ink); font-size: 13px; font-weight: 650;
+  letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.result-entries { display: flex; flex-direction: column; }
+.result-entry {
+  position: relative; padding: 17px 10px 16px; border-top: 1px solid var(--line);
+  border-radius: 7px; cursor: pointer; transition: background .12s ease, box-shadow .12s ease;
+}
+.result-entry:first-child { border-top-color: transparent; }
+.result-entry:hover { background: color-mix(in srgb, var(--well) 55%, transparent); }
+.result-entry.selected { background: color-mix(in srgb, var(--well) 72%, transparent); box-shadow: inset 2px 0 0 var(--ink); }
+.result-entry.placeholder-entry { cursor: default; padding-top: 8px; }
+.result-entry.placeholder-entry:hover { background: transparent; }
+.result-entry-head { display: flex; align-items: baseline; gap: 12px; }
+.result-entry-head h2 { margin: 0; font-size: 17px; font-weight: 620; letter-spacing: -.015em; }
+.result-entry-head time { margin-left: auto; color: var(--faint); font: 10.5px var(--mono); }
+.result-entry-foot { display: flex; align-items: flex-end; gap: 10px; margin-top: 12px; min-width: 0; }
+.result-entry-foot .tags { flex: 1; min-width: 0; margin-top: 0; }
+.result-entry-actions { display: inline-flex; align-items: center; gap: 1px; margin-left: auto; flex: none; }
+.result-tool {
+  display: grid; place-items: center; width: 29px; height: 29px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--faint); cursor: pointer;
+}
+.result-tool:hover, .result-tool[aria-expanded="true"] { color: var(--ink); background: var(--sel); }
+.result-tool.copied { color: var(--ink); background: var(--sel); }
+.result-action-menu .drop-menu { right: 0; min-width: 224px; }
+
+@media (max-width: 640px) {
+  .result-entry { padding-left: 7px; padding-right: 7px; }
+  .result-entry-foot { align-items: flex-start; }
+  .result-entry-actions { padding-top: 1px; }
+}
+
+/* ═══════════════ v17 — quiet controls + disappearing rails ═══════════════ */
+
+/* Controls are distinguished by fill and focus, never by a drawn border. */
+button, input, select, textarea { border: 0 !important; }
+input:not([type="checkbox"]), select, textarea { background: var(--well); }
+.quiet-select, .direction-toggle, .drop-menu { border: 0; background: var(--well); }
+.drop-menu { box-shadow: 0 10px 28px rgba(29, 29, 27, .14); }
+.pill-button:hover { background: var(--sel); }
+.ci, .mode-glyph { stroke-width: 1.55; }
+
+/* Memory search is one soft field followed by a bare magnifier glyph. */
+.side .memory-search { flex-wrap: nowrap; align-items: center; gap: 7px; }
+.memory-search input {
+  flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  background: var(--well);
+}
+.memory-search-icon {
+  display: grid; place-items: center; width: 20px; height: 28px; padding: 0;
+  flex: none; color: var(--faint); background: transparent; cursor: pointer;
+}
+.memory-search-icon:hover { color: var(--ink); }
+
+/* Result boxes breathe equally on every side; selection uses fill alone. */
+.session-context { margin-left: 12px; margin-right: 12px; }
+.result-entries { gap: 6px; padding: 0 8px 12px; }
+.result-entry,
+.result-entry:first-child {
+  margin: 3px 0; padding: 16px; border: 0; border-radius: 9px;
+  transition: background .12s ease;
+}
+.result-entry.selected {
+  background: color-mix(in srgb, var(--well) 76%, transparent);
+  box-shadow: none;
+}
+.result-music-id {
+  margin: 7px 0 0; color: var(--muted); font-size: 12px;
+}
+.music-id-module {
+  display: flex; flex-direction: column; gap: 2px; padding: 9px 10px;
+  border-radius: 8px; background: var(--well);
+}
+.music-id-module strong { font-size: 12.5px; font-weight: 620; }
+.music-id-module span { color: var(--muted); font-size: 11.5px; }
+.music-id-module small { color: var(--faint); font-size: 10px; }
+
+/* Custom follows Deep as the final, visually separated mode. */
+.drop-item.custom-mode { margin-top: 5px; }
+.music-id-toggle.on { color: var(--ink); background: var(--sel); }
+
+/* A collapsed rail consumes no grid width and has no divider. A narrow edge
+   sensor reveals it as an overlay; the native titlebar toggles remain visible. */
+.shell { position: relative; }
+.side-left { grid-column: 1; }
+.center { grid-column: 2; }
+.side-right { grid-column: 3; }
+.side.collapsed {
+  position: absolute; top: 0; bottom: 0; width: 0 !important; min-width: 0;
+  z-index: 60; overflow: visible; border: 0 !important; transition: width .14s ease;
+}
+.side-left.collapsed { left: 0; }
+.side-right.collapsed { right: 0; }
+.side.collapsed::before {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 10px;
+  background: transparent;
+}
+.side-left.collapsed::before { left: 0; }
+.side-right.collapsed::before { right: 0; }
+.side.collapsed:hover,
+.side.collapsed:focus-within {
+  width: var(--side-open-width, 232px) !important;
+  background: var(--bg);
+}
+.side.collapsed:hover .side-body,
+.side.collapsed:focus-within .side-body { display: flex; }
+.side.collapsed:hover .side-top,
+.side.collapsed:focus-within .side-top { display: flex; }
+.side.collapsed:hover .side-top .sources,
+.side.collapsed:focus-within .side-top .sources { display: inline-flex; }
+.side.collapsed:hover .top-actions,
+.side.collapsed:focus-within .top-actions { display: inline-flex; }
+body.native .side-left.collapsed:hover .side-top,
+body.native .side-left.collapsed:focus-within .side-top { display: flex; }
+body:not(.native) .side-left.collapsed:not(:hover):not(:focus-within) .web-side-toggle {
+  position: fixed; top: 9px; left: 8px;
+}
+body:not(.native) .side-right.collapsed:not(:hover):not(:focus-within) .web-side-toggle {
+  position: fixed; top: 9px; right: 8px;
+}
+
+@media (max-width: 640px) {
+  .result-entry, .result-entry:first-child { margin: 2px 0; padding: 14px 12px; }
+}
+
+/* ═══════════════ v18 — appearance, titlebar tools, and reading details ═══════════════ */
+
+/* Theme-aware surfaces. The palette remains monochrome in both appearances. */
+:root[data-theme="dark"] .modal::backdrop { background: rgba(0, 0, 0, .56); }
+:root[data-theme="dark"] .drop-menu { box-shadow: 0 14px 36px rgba(0, 0, 0, .34); }
+:root[data-theme="dark"] .console-output { background: #11110f; color: #d8d7d0; }
+:root[data-theme="dark"] .result-entry:hover { background: color-mix(in srgb, var(--well) 72%, transparent); }
+
+/* Native window chrome owns both top control groups. Browser fallback keeps the
+   same source tools at upper-left and listener/settings at upper-right. */
+body.native .side-left .browser-rail-top,
+body.native .side-right .side-top { display: none; }
+body.native .side-left .side-body,
+body.native .side-right .side-body { padding-top: 7px; }
+.side-right .top-actions { order: -1; margin-left: 0; }
+.side-right .side-top { gap: 3px; }
+body:not(.native) #floatingRail { display: none; }
+.app-icon-glyph {
+  display: block; width: 17px; height: 17px; border-radius: 5px;
+  object-fit: cover; pointer-events: none;
+}
+.rail-action { display: flex; align-items: center; justify-content: center; }
+.rail-action > .ci, .rail-action > .app-icon-glyph { margin: 0; }
+
+/* Match the left rail's distance from its divider to the inspector's reference
+   gutter. Avoid reserving an invisible scrollbar gutter beside that divider. */
+.side-body, .side-right .side-body { padding-left: 14px; padding-right: 14px; }
+.side-left .side-body { scrollbar-gutter: auto; }
+.side-left .side-body > *,
+.side-left .history-list,
+.side-left .memory-list,
+.side-left .memory-search { width: 100%; min-width: 0; }
+.side-left .side-head,
+.side-left .session-summary,
+.side-left .session-event,
+.side-left .memory-search { margin-left: 0; margin-right: 0; }
+.side-left .session-summary { padding-left: 5px; padding-right: 5px; }
+
+/* The native window title carries the session name, letting results begin at
+   the top edge. The browser keeps a compact in-content session line. */
+.center { position: relative; padding-top: 0; }
+.result-card { padding-top: 5px; }
+.session-context-row {
+  display: flex; align-items: center; gap: 8px; min-height: 28px;
+  margin: 0 12px 4px;
+}
+.session-context { flex: 1; min-width: 0; margin: 0; }
+body.native .session-context-row { display: none; }
+body.native .session-context-row.filtering { display: flex; }
+body.native .session-context-row.filtering .session-context { display: none; }
+.tag-filter-bar {
+  display: flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%;
+  margin-left: auto; padding: 3px 5px 3px 8px; border-radius: 9px;
+  background: var(--well); color: var(--muted); font: 10.5px var(--mono);
+}
+.tag-filter-bar[hidden] { display: none; }
+.tag-filter-label { color: var(--faint); margin-right: 1px; }
+.tag-filter-chips { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
+.tag-filter-chip {
+  padding: 3px 6px; border-radius: 6px; background: var(--sel);
+  color: var(--ink); font: inherit; cursor: pointer;
+}
+.tag-filter-chip:hover { color: var(--muted); }
+.tag-filter-add, .tag-filter-reset {
+  display: grid; place-items: center; width: 21px; height: 21px; padding: 0;
+  border-radius: 6px; background: transparent; color: var(--faint); cursor: pointer;
+  font: 14px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.tag-filter-add:hover, .tag-filter-reset:hover,
+.tag-filter-add[aria-expanded="true"] { background: var(--sel); color: var(--ink); }
+.tag-filter-add:disabled { opacity: .3; cursor: default; }
+.tag-filter-dropdown .drop-menu {
+  top: calc(100% + 6px); right: 0; bottom: auto; min-width: 160px; max-height: 240px; overflow: auto;
+}
+
+/* Editable result headings and one aligned lower-right metadata cluster. */
+.result-entry-head { align-items: flex-start; }
+.result-entry-head h2 { flex: 1; min-width: 0; }
+.result-title-button {
+  display: block; max-width: 100%; padding: 0; border-radius: 4px;
+  background: transparent; color: inherit; font: inherit; letter-spacing: inherit;
+  text-align: left; cursor: text;
+}
+.result-title-button:hover { color: var(--muted); }
+.result-title-input {
+  width: 100%; min-width: 0; padding: 3px 6px; border-radius: 6px;
+  background: var(--well); color: var(--ink); font: inherit; letter-spacing: inherit;
+}
+.result-entry-actions { align-items: center; }
+.result-time {
+  margin: 0 4px 0 0; color: var(--faint); font: 10.5px var(--mono);
+  white-space: nowrap;
+}
+.tag { border: 0; }
+button.tag { cursor: pointer; }
+button.tag:hover, button.tag.active { background: var(--sel); color: var(--ink); }
+
+/* App icon is the listen glyph everywhere; Stop still replaces it in-place. */
+.listen-send { color: var(--primary-ink); }
+.ic-listen-app {
+  display: block; width: 24px; height: 24px; object-fit: cover;
+  border-radius: 50%; pointer-events: none;
+}
+.listen-send.stop .ic-listen-app { display: none; }
+.listen-send.stop { color: #fff; }
+.listen-send.busy .ic-listen-app { animation: wave 1.1s ease-in-out infinite; }
+.music-id-toggle {
+  font: 650 10px/1 var(--mono); letter-spacing: -.03em;
+}
+
+/* Source configuration and consolidated Settings. */
+.source-modal { max-width: 420px; }
+.source-modal-content { min-height: 86px; }
+.source-modal .source-config { width: 100%; }
+.source-modal .config-line { width: 100%; }
+.source-modal .pill-button { align-self: flex-start; }
+.settings-modal { max-width: 690px; }
+.settings-content { display: flex; flex-direction: column; gap: 0; max-height: 78vh; }
+.settings-section { padding: 15px 0; border-top: 1px solid var(--line); }
+.settings-section:first-child { padding-top: 4px; border-top: 0; }
+.settings-section-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 16px; margin-bottom: 10px;
+}
+.settings-section-head h4 {
+  margin: 0; color: var(--ink); font-size: 12px; font-weight: 620;
+  letter-spacing: .05em; text-transform: uppercase;
+}
+.settings-note { margin: 0; color: var(--faint); font-size: 11px; font-weight: 400; }
+.theme-selector {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+  border-radius: 9px; background: var(--well);
+}
+.theme-choice {
+  min-width: 74px; padding: 6px 12px; border-radius: 7px;
+  background: transparent; color: var(--muted); font-size: 12px; cursor: pointer;
+}
+.theme-choice:hover { color: var(--ink); }
+.theme-choice.active { background: var(--sel); color: var(--ink); }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.settings-modal .engine-models .cfg { flex: 1 1 220px; }
+.settings-modal .engine-models select { width: 100%; }
+.settings-modal .path-row { display: flex; gap: 7px; }
+.settings-modal .path-row input { flex: 1; min-width: 0; }
+.mobile-remote-row { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+.mobile-remote-address { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
+.mobile-remote-address input {
+  width: 100%; min-width: 0; padding: 8px 10px; border-radius: 8px;
+  color: var(--muted); font: 11px var(--mono); text-overflow: ellipsis;
+}
+.mobile-remote-actions { flex: none; }
+.mobile-remote-note { margin: 8px 0 0; line-height: 1.45; }
+.memory-detail-head { justify-content: flex-start; }
+
+/* Console actions are quiet glyphs; only errors occupy the summary badge. */
+.console-action {
+  display: grid; place-items: center; width: 26px; height: 24px; padding: 0;
+}
+.console-action.copied { color: var(--ink); background: var(--sel); }
+.console-note:empty { display: none; }
+
+/* Memory opens within the center reading column, never across the side rails. */
+.center-modal {
+  position: absolute; inset: 0; z-index: 55; display: flex;
+  align-items: stretch; justify-content: center; padding: 8px 18px 18px;
+  background: color-mix(in srgb, var(--bg) 93%, transparent);
+  backdrop-filter: blur(8px);
+}
+.center-modal[hidden] { display: none; }
+.center-modal-surface {
+  display: flex; flex-direction: column; width: min(860px, 100%); min-height: 0;
+  border-radius: 12px; background: var(--bg); box-shadow: 0 16px 44px rgba(0, 0, 0, .2);
+}
+.center-modal .modal-content { flex: 1; max-height: none; overflow: auto; }
+.memory-detail { color: var(--ink); font-weight: 400; }
+.memory-meta { margin: 0 0 14px; color: var(--faint); font: 10.5px/1.55 var(--mono); }
+.memory-block { padding: 11px 0; border-top: 1px solid var(--line); }
+.memory-block:first-of-type { border-top: 0; }
+.memory-kicker {
+  margin-bottom: 5px; color: var(--faint); font-size: 10px; font-weight: 500;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.memory-block p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.memory-links { display: flex; flex-direction: column; gap: 4px; }
+.memory-links a { color: var(--muted); font-size: 12.5px; text-decoration: none; }
+.memory-links a:hover { color: var(--ink); }
+.memory-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+
+/* Sonogram and frequency energy share one compact visualization surface. */
+.measurement-viz { margin: 8px 0 12px; }
+.viz-tabs {
+  display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 6px;
+  border-radius: 8px; background: var(--well);
+}
+.viz-tab {
+  padding: 5px 8px; border-radius: 6px; background: transparent;
+  color: var(--faint); font-size: 9.5px; letter-spacing: .04em;
+  text-transform: uppercase; cursor: pointer;
+}
+.viz-tab:hover { color: var(--ink); }
+.viz-tab.active { background: var(--sel); color: var(--ink); }
+.viz-panel[hidden] { display: none; }
+.viz-panel .band-chart, .viz-panel .spectrogram-wrap { margin-bottom: 4px; }
+.spectrogram { background: var(--well); }
+
+@media (max-width: 640px) {
+  .center-modal { position: fixed; padding: 8px; }
+  .settings-section-head { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .settings-modal .path-row { flex-direction: column; }
+  .mobile-remote-row { align-items: stretch; flex-direction: column; }
+  .mobile-remote-actions { align-self: flex-start; }
+}
+
+/* ═══════════════ v19 — anchored sources + scoped contextual actions ═══════════════ */
+
+/* Source choice is communicated by contrast alone. No filled selected state. */
+.side-top .source,
+.side-top .source:hover,
+.side-top .source.active,
+.side-top .source:not(.active):hover {
+  background: transparent;
+}
+.side-top .source { color: var(--faint); opacity: .54; }
+.side-top .source:hover { color: var(--muted); opacity: .82; }
+.side-top .source.active { color: var(--ink); opacity: 1; font-weight: 400; }
+
+/* Browser fallback source controls are transient menus attached to the icon. */
+.source-modal[open] {
+  position: fixed;
+  inset: auto;
+  left: var(--source-menu-left, 48px);
+  top: var(--source-menu-top, 44px);
+  width: min(304px, calc(100vw - 16px));
+  max-width: 304px;
+  margin: 0;
+  z-index: 90;
+  border-radius: 11px;
+  background: var(--bg);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, .22);
+}
+.source-modal::backdrop { background: transparent; }
+.source-modal .modal-head { padding: 11px 13px 5px; }
+.source-modal .modal-content { padding: 3px 13px 13px; max-height: 240px; }
+.source-modal-content { min-height: 64px; }
+
+/* Rails can breathe on large displays while remaining bounded. */
+.side { max-width: min(560px, 45vw); }
+
+/* Each column scrolls on a transparent track: only its thumb is visible. */
+.side-body,
+.result-scroll {
+  scrollbar-gutter: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--soft) transparent;
+}
+.side-body::-webkit-scrollbar,
+.result-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.side-body::-webkit-scrollbar-track,
+.result-scroll::-webkit-scrollbar-track { background: transparent; }
+.side-body::-webkit-scrollbar-thumb,
+.result-scroll::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--soft) 72%, transparent);
+}
+.side-body::-webkit-scrollbar-corner,
+.result-scroll::-webkit-scrollbar-corner { background: transparent; }
+
+/* Session metadata stays flush to the divider: menu, count, then time. */
+.session-meta { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.session-count { display: inline-flex; align-items: center; gap: 5px; }
+.session-count::after { content: "·"; color: var(--soft); }
+.session-more { font-weight: 400; }
+.session-event-row,
+.memory-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  position: relative;
+}
+.session-event-row > .session-event,
+.memory-row > .memory-item { flex: 1; min-width: 0; }
+.session-event-row > .session-menu,
+.memory-row > .session-menu { margin-left: -2px; }
+.session-event-row:hover > .session-menu,
+.session-event-row:focus-within > .session-menu,
+.memory-row:hover > .session-menu,
+.memory-row:focus-within > .session-menu,
+.listening-menu:has(.drop-menu:not([hidden])),
+.memory-menu:has(.drop-menu:not([hidden])) {
+  opacity: 1;
+  pointer-events: auto;
+}
+.session-event-row .session-more,
+.memory-row .session-more { width: 22px; }
+.session-event-row .drop-menu,
+.memory-row .drop-menu { top: calc(100% + 3px); bottom: auto; right: 0; }
+.memory-item .ri-title { font-weight: 400; }
+
+/* Confidence is evidence metadata, not a color-coded verdict. */
+.conf,
+.conf.high,
+.conf.medium,
+.conf.low {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+/* Related memories are full-row, keyboard-accessible reading links. */
+.related-list li { display: block; }
+.related-memory {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 7px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+.related-memory:hover { background: var(--well); color: var(--ink); }
+.related-memory span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-memory small { flex: none; color: var(--faint); font: 9.5px var(--mono); }
+.related-memory small:empty { display: none; }
+
+/* The listening affordance is the Oída glyph itself, at full size. */
+.listen-send,
+.listen-send:hover,
+.listen-send.processing {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  opacity: 1;
+}
+.ic-listen-app {
+  display: block;
+  width: 42px;
+  height: 42px;
+  border-radius: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.ic-listen-app path {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+}
+.ic-listen-app path:nth-of-type(1) { stroke-width: 48; }
+.ic-listen-app path:nth-of-type(2) { stroke-width: 38; }
+.ic-listen-app path:nth-of-type(3) { stroke-width: 30; }
+.ic-listen-app .glyph-core { fill: currentColor; }
+.listen-send:hover .ic-listen-app { opacity: .76; }
+.listen-send.stop {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bad);
+  color: #fff;
+}
+.listen-send.stop:hover { background: var(--bad); }
+
+/* System settings share one first-row control surface. */
+.settings-system-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.settings-system-row .settings-actions { justify-content: flex-end; }
+
+.floating-listener-glyph { opacity: .9; }
+
+/* ═══════════════ v20 — listening motion + compact control well ═══════════════ */
+
+/* Rules, Music ID, mode, the activity monitor, and the listening action read
+   as one compact composer instead of unrelated controls at the page edge. */
+.listen-control-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--well) 82%, transparent);
+}
+.listen-control-box .result-foot {
+  min-height: 42px;
+  margin: 0;
+  padding: 0;
+}
+.listen-control-box .listen-progress { min-height: 13px; }
+
+/* Hearing is already represented by the animated glyph and meter. The line
+   alone shows elapsed capture without a duplicate Listening/Hearing badge. */
+.listen-progress.hearing { gap: 0; }
+.listen-progress.hearing .phase-dot,
+.listen-progress.hearing .phase-label { display: none; }
+.listen-progress.hearing .progress-track { min-width: 100%; }
+.listen-progress.hearing + .result-foot .listen-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* Music ID uses only contrast for state; it never grows a selected tile. */
+.music-id-toggle,
+.music-id-toggle:hover,
+.music-id-toggle.on,
+.music-id-toggle.on:hover {
+  background: transparent !important;
+}
+.music-id-toggle { color: var(--soft); opacity: .46; }
+.music-id-toggle:hover { color: var(--muted); opacity: .78; }
+.music-id-toggle.on { color: var(--ink); opacity: 1; }
+
+/* Ellipsis actions stay deliberately quiet until intent is shown. */
+.session-more {
+  color: var(--soft);
+  opacity: .48;
+  font-weight: 400;
+  transition: color .12s ease, opacity .12s ease, background .12s ease;
+}
+.session-more:hover,
+.session-more[aria-expanded="true"] {
+  color: var(--muted);
+  opacity: .88;
+  background: transparent;
+}
+.drop-item { transition: color .12s ease, background .12s ease; }
+.drop-item:hover:not(:disabled) {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--sel) 82%, var(--well));
+}
+
+/* Keep the dot as the exact, motionless origin for every phase. The SVG
+   viewport is centered on (478, 540), so every ring shares the same orbit. */
+.listen-send.stop,
+.listen-send.stop:hover {
+  width: 42px;
+  height: 42px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.listen-send.stop .ic-stop,
+.listen-send.processing .ic-stop { display: none; }
+.listen-send.stop .ic-listen-app,
+.listen-send.processing .ic-listen-app {
+  display: block;
+  animation: none;
+  transform: none;
+}
+.listen-send.stop .ic-listen-app path,
+.listen-send.processing .ic-listen-app path {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+.listen-send.stop .glyph-core,
+.listen-send.processing .glyph-core {
+  animation: none;
+  transform: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.listen-send.stop .ic-listen-app path:nth-of-type(1) { animation: oida-hear-cw .92s linear infinite; }
+.listen-send.stop .ic-listen-app path:nth-of-type(2) { animation: oida-hear-ccw 1.28s linear infinite; }
+.listen-send.stop .ic-listen-app path:nth-of-type(3) { animation: oida-hear-cw 1.72s linear infinite reverse; }
+.listen-send.processing .ic-listen-app {
+  perspective: none;
+  transform-style: preserve-3d;
+}
+.listen-send.processing .ic-listen-app path:nth-of-type(1) { animation: oida-operate-y 1.05s linear infinite; }
+.listen-send.processing .ic-listen-app path:nth-of-type(2) { animation: oida-operate-y 1.34s linear infinite reverse; }
+.listen-send.processing .ic-listen-app path:nth-of-type(3) { animation: oida-operate-y 1.68s linear infinite; }
+
+@keyframes oida-hear-cw { to { transform: rotate(360deg); } }
+@keyframes oida-hear-ccw { to { transform: rotate(-360deg); } }
+@keyframes oida-operate-y { to { transform: rotateY(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .listen-send.stop .ic-listen-app path,
+  .listen-send.processing .ic-listen-app path { animation: none; }
+}
+
+@media (max-width: 760px) {
+  .settings-system-row { align-items: flex-start; flex-direction: column; }
+  .settings-system-row .settings-actions { justify-content: flex-start; }
+}
+
+/* ═══════════════ v22 — continuous chrome + detailed sonogram ═══════════════ */
+
+/* Keep every utility mark on the same light, geometric stroke system. */
+.ci,
+.mode-glyph {
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  shape-rendering: geometricPrecision;
+}
+body:not(.native) .browser-rail-top,
+body:not(.native) .side-right .side-top {
+  gap: 8px;
+  padding-inline: 12px;
+}
+body:not(.native) .side-top .sources { gap: 5px; }
+
+/* The composer has a little air around and inside it, while remaining a
+   single compact control surface. */
+.listen-control-box {
+  gap: 4px;
+  margin: 5px 8px 7px;
+  padding: 10px 12px 9px;
+  border-radius: 15px;
+}
+
+/* The listening mark remains the affordance; a hairline circle gives it a
+   stable boundary without turning it back into a filled button. */
+.listen-send,
+.listen-send:hover,
+.listen-send.stop,
+.listen-send.stop:hover,
+.listen-send.processing,
+.listen-send.processing:hover {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 0.75px color-mix(in srgb, var(--ink) 21%, transparent);
+}
+.listen-send:hover {
+  box-shadow: inset 0 0 0 0.75px color-mix(in srgb, var(--ink) 38%, transparent);
+}
+.ic-listen-app {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+}
+
+/* A silent or unavailable sonogram is an unfilled field. Real data uses a
+   smooth DPR-backed canvas and can be opened at inspection scale. */
+.spectrogram-wrap { margin: 5px 0 10px; }
+.spectrogram-trigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: zoom-in;
+}
+.spectrogram-trigger:focus-visible { outline-offset: 2px; }
+.spectrogram-trigger:hover .spectrogram { opacity: .9; }
+.spectrogram {
+  height: 132px;
+  border-radius: 8px;
+  background: transparent;
+  image-rendering: auto;
+  transition: opacity .12s ease;
+}
+.spectrogram-empty {
+  width: 100%;
+  height: 116px;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: inset 0 0 0 0.75px color-mix(in srgb, var(--line) 68%, transparent);
+}
+.spectrogram-wrap.is-empty .spectrogram-axis { display: none; }
+
+.sonogram-modal {
+  width: min(960px, calc(100vw - 48px));
+  max-width: 960px;
+}
+.sonogram-modal-content { padding-top: 8px; }
+.sonogram-modal-canvas {
+  width: 100%;
+  height: clamp(300px, 52vh, 520px);
+  border-radius: 9px;
+}
+.sonogram-modal-axis { margin-top: 7px; font-size: 9.5px; }
+
+@media (max-width: 640px) {
+  .listen-control-box { margin-inline: 3px; }
+  .sonogram-modal { width: calc(100vw - 24px); }
+  .sonogram-modal-canvas { height: min(52vh, 360px); }
 }

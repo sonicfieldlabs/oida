@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -44,11 +45,12 @@ from oida.acoustic_system import acoustic_system_manifest
 from oida.akouo_skills import akouo_manifest, route_preset
 from oida.background import BackgroundRuntime
 from oida.conversation import ConversationStore
-from oida.contracts import AudioSegment, AudioSourceDescriptor, PrivacyMode, RawAudioPolicy, SourceType, audio_segment_from_path, source_for_path
+from oida.contracts import AudioSegment, AudioSourceDescriptor, PrivacyMode, RawAudioPolicy, SourceType, audio_segment_from_path, new_id, source_for_path
 from oida.covenant import CovenantStore, parse_covenant
 from oida.engine import build_engine
 from oida.generation import GenerationStore
 from oida.gateway import GATEWAY_CONTRACT, gateway_manifest, harness_host_perception
+from oida.integrations import install as install_integration, remote_status
 from oida.listening import listening_event_dict
 from oida.live import LiveManager
 from oida.memory import AkousmataStore, earworm_context_for_event
@@ -68,6 +70,7 @@ from oida.reporting import caption, direct_analysis, events, forbidden_topics_fo
 from oida.reportschema import dump_model
 from oida.route_comparison import compare_route_events
 from oida.sonicfield import SonicFieldBridge, terms_from_event
+from oida.songid import identify_song
 from oida.source_routes import native_system_audio_route_manifest, normalize_system_audio_source_route, system_audio_source_label
 from oida.sources import source_registry_dict
 from oida.system_audio import system_audio_status_dict
@@ -232,6 +235,9 @@ class ListenEventRequest(PathRequest):
     # spec v1.3 sovereignty: pin a named covenant for this listen; None uses
     # the active covenant; the layer is empty by default.
     covenant: str | None = None
+    # Opt-in only. The UI exposes this beside Music mode; other routes ignore
+    # it so recognition cannot be enabled accidentally by a stale client.
+    song_id: bool = False
 
 
 class GatewayListenRequest(ListenEventRequest):
@@ -303,6 +309,7 @@ class LiveCaptureRequest(BaseModel):  # type: ignore[misc,valid-type]
     route_preset: str = "basic"
     enabled_skill_ids: list[str] | None = None
     disabled_skill_ids: list[str] | None = None
+    song_id: bool = False
 
 
 class CovenantSaveRequest(BaseModel):  # type: ignore[misc,valid-type]
@@ -361,6 +368,7 @@ class BackgroundCaptureRequest(BaseModel):  # type: ignore[misc,valid-type]
     enabled_skill_ids: list[str] | None = None
     disabled_skill_ids: list[str] | None = None
     remember: bool = False
+    song_id: bool = False
 
 
 class NativeSystemAudioAnalyzeRequest(PathRequest):
@@ -372,6 +380,9 @@ class NativeSystemAudioAnalyzeRequest(PathRequest):
     duration_s: float | None = None
     remember: bool = False
     source_route: dict[str, object] | None = None
+    capture_direction: str | None = None
+    capture_trigger: str | None = None
+    song_id: bool = False
 
 
 class NativeSystemAudioCleanupRequest(BaseModel):  # type: ignore[misc,valid-type]
@@ -398,10 +409,26 @@ class SonicFieldExploreRequest(BaseModel):  # type: ignore[misc,valid-type]
 class CaptureRequestBody(BaseModel):  # type: ignore[misc,valid-type]
     seconds: float | None = None
     route_preset: str | None = None
+    direction: str | None = None
+    source: str | None = None
+    enabled_skill_ids: list[str] | None = None
+    song_id: bool = False
 
 
 class CaptureRequestClaimBody(BaseModel):  # type: ignore[misc,valid-type]
     id: str | None = None
+
+
+class SessionCreateRequest(BaseModel):  # type: ignore[misc,valid-type]
+    name: str | None = None
+
+
+class SessionRenameRequest(BaseModel):  # type: ignore[misc,valid-type]
+    name: str
+
+
+class EventRenameRequest(BaseModel):  # type: ignore[misc,valid-type]
+    title: str
 
 
 class EngineModelBody(BaseModel):  # type: ignore[misc,valid-type]
@@ -488,8 +515,14 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     def engine_status() -> dict[str, Any]:
         runtime = engine.runtime_status()
         with engine_monitor_lock:
-            if config.profile == "mac-mps" and runtime.get("loaded_models"):
-                engine_monitor["state"] = "ready"
+            if config.profile == "mac-mps":
+                if runtime.get("loaded_models"):
+                    engine_monitor["state"] = "ready"
+                elif engine_monitor["state"] == "ready":
+                    # A previous warm-up timestamp is not proof of residency.
+                    # Model switching or a failed load can leave the runtime
+                    # empty; expose that as cold so launch recovery runs again.
+                    engine_monitor["state"] = "cold"
             assignments = runtime.get("assignments") or {}
             return {
                 "profile": config.profile,
@@ -504,6 +537,35 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "thinking_model": assignments.get("thinking") or (Path(config.thinking_model).name if config.thinking_model else None),
                 "available_models": available_models,
             }
+
+    def enrich_music_id(
+        event: dict[str, Any],
+        path: Path,
+        *,
+        preset_id: str,
+        requested: bool,
+        withheld_reason: str | None = None,
+    ) -> None:
+        """Attach an opt-in ShazamIO result directly to a listening event.
+
+        Missing dependencies, network errors, and no-match responses stay as
+        visible metadata and never suppress the descriptive listening result.
+        """
+        if not requested or preset_id != "music":
+            return
+        if withheld_reason:
+            event["music_id"] = {
+                "provider": "withheld",
+                "matched": False,
+                "note": withheld_reason,
+            }
+            return
+        result = identify_song(path, enabled=True)
+        event["music_id"] = result
+        if result.get("matched"):
+            tags = event.setdefault("tags", [])
+            if isinstance(tags, list) and "music-id" not in tags:
+                tags.append("music-id")
 
     def _prewarm_engine(model_kind: str = "instruct") -> None:
         with engine_monitor_lock:
@@ -654,6 +716,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         privacy_mode: str = "ephemeral",
         enabled_skill_ids: list[str] | None = None,
         disabled_skill_ids: list[str] | None = None,
+        song_id: bool = False,
     ) -> dict[str, object]:
         preset = route_preset(preset_id)
         path = str(capture["path"])
@@ -671,7 +734,12 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             privacy_mode=_privacy_mode(privacy_mode),
             raw_audio_policy="temp",
         )
+        enrich_music_id(event, Path(path), preset_id=preset.id, requested=song_id)
         event = memory.enrich_event(event)
+        # Session ownership is daemon state and must be attached before the
+        # completion event reaches any UI. That keeps dashboard, floating
+        # listener, and history subscribers on the same result object.
+        background.finish_action(event)
         broadcaster.publish("listen_completed", {"listening_event": event, "route_preset": preset.id})
         return {
             **capture,
@@ -679,6 +747,82 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "perception_report": perception_dict,
             "command_output": command_output,
         }
+
+    def remember_event(event: dict[str, Any], *, tags: list[str] | None = None, user_notes: str | None = None) -> dict[str, Any]:
+        """Write one result through Oida's compatibility trace and the shared
+        Akousmata store. The UI calls both simply "Memory"; callers still get
+        the legacy trace id while newer surfaces can navigate the shared record.
+        """
+        trace = memory.remember(event, user_notes=user_notes, tags=tags)
+        event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
+        akousma_id: str | None = None
+        shared_error: str | None = None
+        try:
+            segment = event.get("segment") if isinstance(event.get("segment"), dict) else {}
+            data_ref = segment.get("data_ref") if isinstance(segment.get("data_ref"), dict) else {}
+            source = event.get("source") if isinstance(event.get("source"), dict) else {}
+            aggregate = event.get("aggregate") if isinstance(event.get("aggregate"), dict) else {}
+            session = event.get("session") if isinstance(event.get("session"), dict) else {}
+            audio: dict[str, Any] = {
+                "asset_id": str(segment.get("id") or event.get("id") or new_id("asset")),
+                "type": "capture",
+            }
+            sha256 = data_ref.get("sha256")
+            if sha256:
+                audio["content_hash"] = f"sha256:{sha256}"
+            if isinstance(segment.get("duration_ms"), (int, float)):
+                audio["duration_seconds"] = float(segment["duration_ms"]) / 1000
+            if isinstance(segment.get("sample_rate"), (int, float)):
+                audio["sample_rate"] = int(segment["sample_rate"])
+            if isinstance(segment.get("channels"), (int, float)):
+                audio["channels"] = int(segment["channels"])
+            # Shared memory keeps derived listening by default. A durable or
+            # externally referenced path may travel with it; temporary capture
+            # paths are deliberately not promoted into durable memory.
+            uri = str(data_ref.get("uri") or "")
+            if uri and event.get("raw_audio_policy") in {"keep", "external_ref"}:
+                audio["uri"] = uri if "://" in uri else f"file://{uri}"
+
+            structured = (event.get("routes") or [{}])[0].get("structured") if isinstance(event.get("routes"), list) and event.get("routes") else None
+            listening: dict[str, Any] = {
+                "oida.listen": {
+                    "summary": aggregate.get("short_summary") or aggregate.get("title"),
+                    "title": aggregate.get("title"),
+                    "event_id": event.get("id"),
+                    "features": event.get("features") or {},
+                }
+            }
+            if isinstance(structured, dict):
+                listening["akouo.describe"] = structured
+            from .akousma_bridge import build_akousma_from_listen, persist_akousma
+
+            origin = {
+                "live_input": "live-input",
+                "buffer": "live-input",
+                "system_output": "system-output",
+                "external_stream": "system-output",
+                "generated": "generated",
+            }.get(str(source.get("type") or ""), "file")
+            record = build_akousma_from_listen(
+                audio=audio,
+                listening=listening,
+                origin=origin,
+                device=str(source.get("label") or "") or None,
+                session_id=str(session.get("id") or "") or None,
+                tags=[*(event.get("tags") or []), *(tags or [])],
+                summary=str(aggregate.get("short_summary") or aggregate.get("title") or "") or None,
+                capture=event.get("capture") if isinstance(event.get("capture"), dict) else None,
+                covenant=event.get("covenant") if isinstance(event.get("covenant"), dict) else None,
+            )
+            akousma_id = persist_akousma(record)
+            event.setdefault("memory", {})["akousma_id"] = akousma_id
+        except Exception as exc:
+            # Compatibility memory is already durable at this point. A missing
+            # or malformed optional shared-Akousmata installation must not turn
+            # Remember into a failed request or lose the local trace.
+            shared_error = str(exc)
+            LOGGER.warning("shared Akousmata memory write failed: %s", exc)
+        return {"trace": trace, "event": event, "akousma_id": akousma_id, "shared_error": shared_error}
 
     @app.get("/health")
     def health() -> dict[str, object]:
@@ -697,6 +841,11 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "hf_hub_offline": config.hf_hub_offline,
             "engine": engine_status(),
             "sonicfield": {"available": sonicfield.available, "root": str(sonicfield.root) if sonicfield.root else None},
+            "music_id": {
+                "provider": "shazamio",
+                "available": importlib.util.find_spec("shazamio") is not None,
+                "default_enabled": False,
+            },
         }
 
     @app.get("/engine/status")
@@ -771,6 +920,25 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         # no-cache: without it browsers reuse a heuristically-cached dashboard
         # after an upgrade (assets are ?v= versioned, the document is not)
         return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/remote/status")
+    def remote_access_status() -> dict[str, object]:
+        return remote_status()
+
+    @app.post("/remote/configure")
+    def remote_access_configure(request: Request) -> dict[str, object]:
+        # Configuring a machine-level private-network proxy is a desktop-only action.
+        # A phone on the private-network can use the remote, but cannot reconfigure it.
+        if _hostname_only(request.headers.get("host", "")) not in _LOOPBACK_HOSTNAMES:
+            raise HTTPException(status_code=403, detail="phone remote configuration is available only from this Mac")
+        configuration = install_integration("remote", serve=True, https_port=8443)
+        status = remote_status()
+        private-network_host = status.get("private-network_host")
+        if private-network_host:
+            # The app loaded its trusted-host settings before this endpoint ran;
+            # update the live guard too so first-time setup works immediately.
+            allowed_hostnames.add(str(private-network_host).strip().lower().rstrip("."))
+        return {**status, "configuration": configuration}
 
     @app.get("/remote")
     def remote_ear_page() -> FileResponse:
@@ -914,6 +1082,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 "/akousmata/records",
                 "/akousmata/tags",
                 "/akousmata/records/{akousma_id}",
+                "/akousmata/records/{akousma_id} [PATCH, DELETE]",
                 "/akousmata/audio/{akousma_id}",
                 "/qa",
                 "/think",
@@ -999,7 +1168,14 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
     @app.post("/background/capture-request")
     def background_capture_request_endpoint(req: CaptureRequestBody) -> dict[str, object]:
-        request = background.request_capture(seconds=req.seconds, route_preset=req.route_preset)
+        request = background.request_capture(
+            seconds=req.seconds,
+            route_preset=req.route_preset,
+            direction=req.direction,
+            source=req.source,
+            enabled_skill_ids=req.enabled_skill_ids,
+            song_id=req.song_id,
+        )
         broadcaster.publish("capture_requested", request)
         return {"capture_request": request, "background": background.status()}
 
@@ -1036,6 +1212,103 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             rerunnable=rerunnable,
             limit=limit,
         )
+
+    @app.get("/sessions")
+    def sessions_endpoint() -> dict[str, object]:
+        return background.sessions()
+
+    @app.post("/sessions")
+    def session_create_endpoint(req: SessionCreateRequest) -> dict[str, object]:
+        session = background.create_session(req.name)
+        broadcaster.publish("session_changed", {"action": "created", "session": session})
+        return {"session": session, **background.sessions()}
+
+    @app.post("/sessions/{session_id}/activate")
+    def session_activate_endpoint(session_id: str) -> dict[str, object]:
+        try:
+            session = background.activate_session(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown listening session: {session_id}") from exc
+        broadcaster.publish("session_changed", {"action": "activated", "session": session})
+        return {"session": session, **background.sessions()}
+
+    @app.patch("/sessions/{session_id}")
+    def session_rename_endpoint(session_id: str, req: SessionRenameRequest) -> dict[str, object]:
+        try:
+            session = background.rename_session(session_id, req.name)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown listening session: {session_id}") from exc
+        broadcaster.publish("session_changed", {"action": "renamed", "session": session})
+        return {"session": session, **background.sessions()}
+
+    @app.patch("/sessions/{session_id}/events/{event_id}")
+    def session_event_rename_endpoint(session_id: str, event_id: str, req: EventRenameRequest) -> dict[str, object]:
+        try:
+            event = background.rename_event(session_id, event_id, req.title)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown listening result: {event_id}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        broadcaster.publish(
+            "session_changed",
+            {"action": "event_renamed", "session_id": session_id, "listening_event": event},
+        )
+        return {"listening_event": event, **background.sessions()}
+
+    @app.delete("/sessions/{session_id}/events/{event_id}")
+    def session_event_delete_endpoint(session_id: str, event_id: str) -> dict[str, object]:
+        try:
+            event = background.delete_event(session_id, event_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown listening result: {event_id}") from exc
+        broadcaster.publish(
+            "session_changed",
+            {"action": "event_deleted", "session_id": session_id, "listening_event": event},
+        )
+        return {"deleted": True, "listening_event": event, **background.sessions()}
+
+    @app.post("/sessions/{session_id}/remember")
+    def session_remember_endpoint(session_id: str) -> dict[str, object]:
+        events = background.session_events(session_id)
+        if not events:
+            raise HTTPException(status_code=404, detail=f"listening session has no stored results: {session_id}")
+        remembered = []
+        for event in events:
+            remembered.append(remember_event(dict(event), tags=[f"session:{session_id}", "listening-session"]))
+        return {
+            "session_id": session_id,
+            "remembered_count": len(remembered),
+            "trace_ids": [item["trace"]["id"] for item in remembered],
+            "akousma_ids": [item["akousma_id"] for item in remembered if item.get("akousma_id")],
+            "shared_errors": [item["shared_error"] for item in remembered if item.get("shared_error")],
+        }
+
+    @app.post("/sessions/{session_id}/archive")
+    def session_archive_endpoint(session_id: str) -> dict[str, object]:
+        try:
+            session = background.archive_session(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown listening session: {session_id}") from exc
+        broadcaster.publish("session_changed", {"action": "archived", "session": session})
+        return {"session": session, **background.sessions()}
+
+    @app.post("/sessions/{session_id}/restore")
+    def session_restore_endpoint(session_id: str) -> dict[str, object]:
+        try:
+            session = background.restore_session(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown archived session: {session_id}") from exc
+        broadcaster.publish("session_changed", {"action": "restored", "session": session})
+        return {"session": session, **background.sessions()}
+
+    @app.delete("/sessions/{session_id}")
+    def session_delete_endpoint(session_id: str) -> dict[str, object]:
+        try:
+            session = background.delete_session(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown listening session: {session_id}") from exc
+        broadcaster.publish("session_changed", {"action": "deleted", "session": session})
+        return {"deleted": True, "session": session, **background.sessions()}
 
     @app.get("/background/history/export")
     def background_history_export_endpoint() -> dict[str, object]:
@@ -1093,6 +1366,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 privacy_mode="incognito" if background.config.incognito else "ephemeral",
                 enabled_skill_ids=req.enabled_skill_ids,
                 disabled_skill_ids=req.disabled_skill_ids,
+                song_id=req.song_id,
             )
             event = analyzed.get("listening_event") if isinstance(analyzed.get("listening_event"), dict) else None
             trace = None
@@ -1100,7 +1374,6 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             if should_remember and event:
                 trace = memory.remember(event, tags=["background-capture"])
                 event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
-            background.finish_action(event)
             return {"action_id": action_id, **analyzed, "trace": trace, "background": background.status()}
         except (RuntimeError, ValueError) as exc:
             background.fail_action(str(exc))
@@ -1258,6 +1531,19 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 disabled_skill_ids=req.disabled_skill_ids,
                 privacy_mode=privacy_mode,
                 raw_audio_policy=raw_audio_policy,
+            )
+            song_identity_withheld = None
+            if req.song_id and preset.id == "music" and covenant_engine is not None and covenant_engine.forbids_song_identity():
+                song_identity_withheld = f"Song identity withheld under covenant {covenant_engine.covenant.id}."
+                covenant_withheld.append(
+                    {"rule": "do_not_reveal", "subject": "song-identity", "count": 1}
+                )
+            enrich_music_id(
+                event,
+                path,
+                preset_id=preset.id,
+                requested=req.song_id,
+                withheld_reason=song_identity_withheld,
             )
             if capture_info:
                 event["capture"] = capture_info
@@ -1532,6 +1818,23 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         try:
             preset = route_preset(req.route_preset)
             path = _require_existing_path(req.path)
+            covenant_engine = covenant_store.engine()
+            covenant_rules_applied: list[str] = []
+            covenant_withheld: list[dict[str, object]] = []
+            passes = list(preset.moss_passes)
+            if covenant_engine is not None:
+                refusal = covenant_engine.refuse_source("system_output") or covenant_engine.refuse_quiet_hours()
+                if refusal:
+                    broadcaster.publish(
+                        "listen_withheld",
+                        {"covenant": covenant_engine.covenant.id, "rule": refusal, "source": "system_output"},
+                    )
+                    raise HTTPException(
+                        status_code=423,
+                        detail=f"withheld under covenant {covenant_engine.covenant.id}: {refusal}",
+                    )
+                passes, pass_rules = covenant_engine.filter_passes(passes)
+                covenant_rules_applied.extend(pass_rules)
             source_route = normalize_system_audio_source_route(req.source_route)
             source_label = system_audio_source_label(req.source_label, source_route)
             source = source_for_path(
@@ -1555,6 +1858,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                     "source_adapter": "macos-screencapturekit-system-audio",
                     "raw_audio_policy": "temp",
                     "capture_duration_s": req.duration_s,
+                    "capture_direction": req.capture_direction,
+                    "capture_trigger": req.capture_trigger,
                     "analysis_user_initiated": True,
                     "source_route": source_route,
                     "capture_scope": source_route.get("capture_scope"),
@@ -1563,9 +1868,15 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 },
             )
             broadcaster.publish("listen_started", {"path": str(path), "route_preset": preset.id, "source": "system-audio"})
-            perception = report(engine, str(path), "oida-native-system-audio", passes=preset.moss_passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
+            perception = report(engine, str(path), "oida-native-system-audio", passes=passes, chunk_seconds=config.moss_chunk_seconds, overlap_seconds=_chunk_overlap(config))
             perception_dict = report_to_dict(perception)
+            if covenant_engine is not None:
+                perception_dict, perception_withheld = covenant_engine.redact_perception(perception_dict)
+                covenant_withheld.extend(perception_withheld)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
+            if covenant_engine is not None:
+                command_output, claim_withheld = covenant_engine.redact_command_output(command_output)
+                covenant_withheld.extend(claim_withheld)
             event = listening_event_dict(
                 perception_dict,
                 command_output=command_output,
@@ -1576,9 +1887,37 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 privacy_mode=_privacy_mode(req.privacy_mode),
                 raw_audio_policy="temp",
             )
+            song_identity_withheld = None
+            if req.song_id and preset.id == "music" and covenant_engine is not None and covenant_engine.forbids_song_identity():
+                song_identity_withheld = f"Song identity withheld under covenant {covenant_engine.covenant.id}."
+                covenant_withheld.append(
+                    {"rule": "do_not_reveal", "subject": "song-identity", "count": 1}
+                )
+            enrich_music_id(
+                event,
+                path,
+                preset_id=preset.id,
+                requested=req.song_id,
+                withheld_reason=song_identity_withheld,
+            )
+            if req.capture_direction or req.duration_s or req.capture_trigger:
+                event["capture"] = {
+                    "direction": _capture_direction(req.capture_direction or "past"),
+                    "seconds": req.duration_s,
+                    "trigger": req.capture_trigger or "native-listener",
+                }
+            if covenant_engine is not None:
+                event["covenant"] = covenant_engine.event_block(
+                    rules_applied=covenant_rules_applied, withheld=covenant_withheld
+                )
             event = memory.enrich_event(event)
             trace = None
-            if req.remember and _privacy_mode(req.privacy_mode) != "incognito":
+            memory_retention_rule = covenant_engine.forbids_retention("memory") if covenant_engine is not None else None
+            if req.remember and memory_retention_rule:
+                event.setdefault("covenant", {}).setdefault("withheld", []).append(
+                    {"rule": memory_retention_rule, "subject": "memory-retention", "count": 1}
+                )
+            elif req.remember and _privacy_mode(req.privacy_mode) != "incognito":
                 trace = memory.remember(event, tags=["native-system-audio"])
                 event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
             background.finish_action(event)
@@ -1734,9 +2073,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 privacy_mode="ephemeral",
                 enabled_skill_ids=req.enabled_skill_ids,
                 disabled_skill_ids=req.disabled_skill_ids,
+                song_id=req.song_id,
             )
-            if isinstance(analyzed.get("listening_event"), dict):
-                background.finish_action(analyzed["listening_event"])
             return analyzed
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1993,9 +2331,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     @app.post("/memory/remember")
     def memory_remember_endpoint(req: MemoryRememberRequest) -> dict[str, object]:
         event = dict(req.event)
-        trace = memory.remember(event, user_notes=req.user_notes, tags=req.tags)
-        event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
-        return {"trace": trace, "event": event}
+        return remember_event(event, user_notes=req.user_notes, tags=req.tags)
 
     @app.post("/memory/forget")
     def memory_forget_endpoint(req: MemoryForgetRequest) -> dict[str, object]:
@@ -2026,16 +2362,20 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 _CAPTURE_DIRECTIONS = {"past", "future", "live"}
 
 
+def _capture_direction(value: str) -> str:
+    direction = str(value or "").strip().lower()
+    if direction not in _CAPTURE_DIRECTIONS:
+        raise ValueError(f"capture_direction must be one of {sorted(_CAPTURE_DIRECTIONS)}, got {direction!r}")
+    return direction
+
+
 def _capture_info(req: "ListenEventRequest") -> dict[str, object] | None:
     """Normalize the spec v1.2 capture block from a listen request."""
     if req.capture_direction is None and req.capture_seconds is None and not req.capture_trigger:
         return None
     info: dict[str, object] = {}
     if req.capture_direction is not None:
-        direction = str(req.capture_direction).strip().lower()
-        if direction not in _CAPTURE_DIRECTIONS:
-            raise ValueError(f"capture_direction must be one of {sorted(_CAPTURE_DIRECTIONS)}, got {direction!r}")
-        info["direction"] = direction
+        info["direction"] = _capture_direction(req.capture_direction)
     if req.capture_seconds is not None:
         seconds = float(req.capture_seconds)
         if seconds < 0:

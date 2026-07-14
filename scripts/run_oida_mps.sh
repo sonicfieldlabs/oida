@@ -11,8 +11,22 @@ export OIDA_MOSS_AUDIO_REPO="${OIDA_MOSS_AUDIO_REPO:-${AEAR_MOSS_AUDIO_REPO:-$RO
 export OIDA_MOSS_INSTRUCT_MODEL="${OIDA_MOSS_INSTRUCT_MODEL:-${AEAR_MOSS_INSTRUCT_MODEL:-$ROOT_DIR/weights/MOSS-Audio-4B-Instruct}}"
 export OIDA_MOSS_THINKING_MODEL="${OIDA_MOSS_THINKING_MODEL:-${AEAR_MOSS_THINKING_MODEL:-$ROOT_DIR/weights/MOSS-Audio-4B-Thinking}}"
 export OIDA_MOSS_RESIDENT="${OIDA_MOSS_RESIDENT:-${AEAR_MOSS_RESIDENT:-single}}"
-TORCH_LIB="$(uv run --no-sync python -c 'import pathlib, torch; print(pathlib.Path(torch.__file__).parent / "lib")')"
+
+# A native app launch must be self-sufficient: install the optional MOSS
+# runtime without pruning any developer extras already present, then execute
+# the gateway directly so the supervisor owns the actual server process.
+# The sync is pinned to the repo (the script may be invoked from any CWD), and
+# a sync that cannot run right now (offline, transient resolver failure) falls
+# back to the existing environment; a genuinely incomplete environment still
+# fails clearly on the torch probe below.
+if ! (cd "$ROOT_DIR" && uv sync --extra moss --extra songid --inexact); then
+  echo "oida: uv sync failed; starting with the existing environment" >&2
+fi
+TORCH_LIB="$("$ROOT_DIR/.venv/bin/python" -c 'import pathlib, torch; print(pathlib.Path(torch.__file__).parent / "lib")')"
 FFMPEG_LIB="$(brew --prefix ffmpeg)/lib"
 export DYLD_LIBRARY_PATH="$TORCH_LIB:$FFMPEG_LIB${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 
-exec uv run --no-sync oida --profile mac-mps --host "${OIDA_HOST:-${AEAR_HOST:-127.0.0.1}}" --port "${OIDA_PORT:-${AEAR_PORT:-8765}}"
+exec "$ROOT_DIR/.venv/bin/oida" \
+  --profile "${OIDA_ENGINE_PROFILE:-mac-mps}" \
+  --host "${OIDA_HOST:-${AEAR_HOST:-127.0.0.1}}" \
+  --port "${OIDA_PORT:-${AEAR_PORT:-8765}}"

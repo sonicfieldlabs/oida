@@ -16,6 +16,10 @@ final class ShellStore: ObservableObject {
     @Published var background: BackgroundStatusResponse?
     @Published var liveSignal: LiveSignalResponse?
     @Published var latestEvent: ListeningEventSummary?
+    /// Session-scoped reading shown by the floating listener. Persisted
+    /// background history still hydrates `latestEvent` for the control center,
+    /// but must not fill a newly launched floating panel with an old result.
+    @Published private(set) var floatingEvent: ListeningEventSummary?
     @Published var recentEvents: [ListeningEventSummary] = []
     @Published var pinnedEvents: [ListeningEventSummary] = []
     @Published var latestHistoryExport: BackgroundHistoryResponse?
@@ -59,9 +63,28 @@ final class ShellStore: ObservableObject {
         }
     }
     @Published var hotkeyStatus = "No global hotkey"
-    @Published var isListening = false
+    @Published private(set) var listeningPhase = ListeningPhase.idle
+    @Published private(set) var listeningProgress = 0.0
+    @Published private(set) var listeningSecondsRemaining: Double?
+    @Published private(set) var listeningStatusText = "Ready"
     @Published var micLevel: Double = 0
     @Published var presets: [RoutePresetModel] = []
+    @Published var customSkillIDs: [String]?
+    @Published var musicIDEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(musicIDEnabled, forKey: Defaults.musicIDEnabled)
+        }
+    }
+    @Published var appearanceMode: String {
+        didSet {
+            let normalized = appearanceMode == "dark" ? "dark" : "light"
+            UserDefaults.standard.set(normalized, forKey: Defaults.appearanceMode)
+            floatingPanel?.setAppearance(
+                NSAppearance(named: normalized == "dark" ? .darkAqua : .aqua)
+            )
+        }
+    }
+    @Published var currentSessionName = ""
     @Published var selectedSource: String {
         didSet {
             UserDefaults.standard.set(selectedSource, forKey: Defaults.listenSource)
@@ -70,6 +93,9 @@ final class ShellStore: ObservableObject {
     @Published var selectedPreset: String {
         didSet {
             UserDefaults.standard.set(selectedPreset, forKey: Defaults.routePreset)
+            if oldValue != selectedPreset {
+                customSkillIDs = nil
+            }
         }
     }
     /// Temporal direction of the listen gesture (spec v1.2 capture):
@@ -78,6 +104,11 @@ final class ShellStore: ObservableObject {
     @Published var selectedDirection: String {
         didSet {
             UserDefaults.standard.set(selectedDirection, forKey: Defaults.listenDirection)
+        }
+    }
+    @Published var selectedCaptureSeconds: Double {
+        didSet {
+            UserDefaults.standard.set(selectedCaptureSeconds, forKey: Defaults.captureSeconds)
         }
     }
 
@@ -90,6 +121,9 @@ final class ShellStore: ObservableObject {
     private var micTapStartedAt: Date?
     private var floatingPanel: FloatingPanelController?
     private var hasBootstrapped = false
+    private var hasEstablishedFloatingEventBaseline = false
+    private var floatingEventBaselineId: String?
+    private var hasRequestedLaunchPrewarm = false
     private var claimedCaptureRequestIds: Set<String> = []
 
     init() {
@@ -99,7 +133,12 @@ final class ShellStore: ObservableObject {
         toggleHotkey = UserDefaults.standard.string(forKey: Defaults.toggleHotkey) ?? "control+option+h"
         selectedSource = UserDefaults.standard.string(forKey: Defaults.listenSource) ?? "system"
         selectedPreset = UserDefaults.standard.string(forKey: Defaults.routePreset) ?? "basic"
+        customSkillIDs = nil
+        musicIDEnabled = UserDefaults.standard.bool(forKey: Defaults.musicIDEnabled)
+        appearanceMode = UserDefaults.standard.string(forKey: Defaults.appearanceMode) == "dark" ? "dark" : "light"
         selectedDirection = UserDefaults.standard.string(forKey: Defaults.listenDirection) ?? "past"
+        let savedSeconds = UserDefaults.standard.double(forKey: Defaults.captureSeconds)
+        selectedCaptureSeconds = savedSeconds > 0 ? savedSeconds : 10
         client = DaemonClient(baseURLString: url)
         micTap.onLevel = { [weak self] level in
             Task { @MainActor in
@@ -115,6 +154,16 @@ final class ShellStore: ObservableObject {
         }
         systemAudioTap.onStateChange = { [weak self] state in
             self?.nativeSystemAudioState = state
+            switch state {
+            case .failed(let reason):
+                self?.appendDaemonLog("System audio tap failed: \(reason)")
+            case .unavailable(let reason):
+                self?.appendDaemonLog("System audio tap unavailable: \(reason)")
+            case .capturing:
+                self?.appendDaemonLog("System audio tap ready")
+            default:
+                break
+            }
         }
         systemAudioTap.onSnapshot = { [weak self] snapshot in
             self?.nativeSystemAudioBands = snapshot.bands
@@ -146,6 +195,18 @@ final class ShellStore: ObservableObject {
         health?.ok == true
     }
 
+    var isListening: Bool {
+        listeningPhase == .capturing
+    }
+
+    var isProcessing: Bool {
+        listeningPhase == .processing
+    }
+
+    var isListenBusy: Bool {
+        isListening || isProcessing
+    }
+
     var engineState: String {
         health?.engine?.state ?? "unknown"
     }
@@ -161,9 +222,14 @@ final class ShellStore: ObservableObject {
         }
     }
 
+    var preferredColorScheme: ColorScheme {
+        appearanceMode == "dark" ? .dark : .light
+    }
+
     var floatingStatusText: String {
         if !daemonOnline { return "daemon offline" }
-        if isListening { return "listening…" }
+        if isListening { return listeningStatusText }
+        if isProcessing { return "operating listening…" }
         if engineState == "warming" { return "warming the ear" }
         if nativeSystemAudioActive { return "hearing the system" }
         return engineState == "ready" ? "idle · ready" : "idle · \(engineLabel.lowercased())"
@@ -200,6 +266,10 @@ final class ShellStore: ObservableObject {
 
     var memoryMatchCount: Int {
         latestEvent?.memory?.similarTraceIds?.count ?? 0
+    }
+
+    var floatingMemoryMatchCount: Int {
+        floatingEvent?.memory?.similarTraceIds?.count ?? 0
     }
 
     var recentHistoryPersistent: Bool {
@@ -284,6 +354,9 @@ final class ShellStore: ObservableObject {
         if !daemonOnline {
             await startDaemon()
         }
+        Task { @MainActor [weak self] in
+            await self?.ensureEngineWarmOnLaunch()
+        }
         if !nativeSystemAudioActive {
             await startNativeSystemAudioTap()
         }
@@ -291,14 +364,57 @@ final class ShellStore: ObservableObject {
         showFloatingListener()
     }
 
+    func shutdownManagedDaemon() {
+        supervisor.stop()
+    }
+
+    /// The daemon normally prewarms from its lifespan hook. The shell also
+    /// asks once at launch so attaching to an existing cold or previously
+    /// degraded mac-mps daemon recovers without requiring a dashboard click.
+    private func ensureEngineWarmOnLaunch() async {
+        guard !hasRequestedLaunchPrewarm else { return }
+
+        // `uv run --extra moss` may still be syncing on a first launch. Give
+        // the managed daemon a short window to become reachable before the
+        // one launch-time warm request.
+        for _ in 0..<20 {
+            if daemonOnline, let engine = health?.engine {
+                guard engine.profile == "mac-mps" else {
+                    hasRequestedLaunchPrewarm = true
+                    return
+                }
+                let hasResidentModel = !(engine.loadedModels ?? []).isEmpty
+                if engine.state == "warming" || (engine.state == "ready" && hasResidentModel) {
+                    hasRequestedLaunchPrewarm = true
+                    return
+                }
+                hasRequestedLaunchPrewarm = true
+                do {
+                    _ = try await client.warmEngine()
+                    appendDaemonLog("Requested MOSS prewarm at app launch")
+                    await refresh()
+                } catch {
+                    appendDaemonLog("Launch prewarm request failed: \(error.localizedDescription)")
+                }
+                return
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            await refresh()
+        }
+        appendDaemonLog("Daemon did not become reachable for launch prewarm")
+    }
+
     func loadPresets() async {
         guard let manifest = try? await client.akouoSkills() else { return }
-        let loaded = (manifest.routePresets ?? []).filter { $0.enabledByDefault != false }
+        let visiblePresetIDs = Set(["basic", "field", "signal", "music", "voice", "deep"])
+        let loaded = (manifest.routePresets ?? []).filter {
+            $0.enabledByDefault != false && visiblePresetIDs.contains($0.id)
+        }
         if !loaded.isEmpty {
             presets = loaded
             // Pre-v0.6 preset ids saved in UserDefaults follow the rename instead of
             // resetting to the first preset (mirrors the daemon's LEGACY_PRESET_ALIASES).
-            let legacyAliases = ["environment": "field", "speech": "voice", "memory": "recall"]
+            let legacyAliases = ["environment": "field", "speech": "voice"]
             if let renamed = legacyAliases[selectedPreset], loaded.contains(where: { $0.id == renamed }) {
                 selectedPreset = renamed
             }
@@ -355,7 +471,7 @@ final class ShellStore: ObservableObject {
     /// this native shell is the only process that can actually hear the
     /// system output, so it claims and performs the capture.
     private func claimPendingCaptureRequestIfAny(_ request: CaptureRequestModel?) async {
-        guard let request, !isListening, !claimedCaptureRequestIds.contains(request.id) else { return }
+        guard let request, !isListenBusy, !claimedCaptureRequestIds.contains(request.id) else { return }
         claimedCaptureRequestIds.insert(request.id)
         if claimedCaptureRequestIds.count > 32 {
             claimedCaptureRequestIds.removeAll()
@@ -369,39 +485,142 @@ final class ShellStore: ObservableObject {
         }
         let seconds = request.seconds
         let preset = request.routePreset
+        let direction = request.direction
+        let source = request.source ?? "system"
+        customSkillIDs = request.enabledSkillIDs
+        if let songID = request.songID {
+            musicIDEnabled = songID
+        }
         Task { @MainActor [weak self] in
-            await self?.listenNow(seconds: seconds, preset: preset, source: "system")
+            await self?.listenNow(
+                seconds: seconds,
+                preset: preset,
+                source: source,
+                direction: direction,
+                enabledSkillIDs: request.enabledSkillIDs,
+                musicID: request.songID
+            )
         }
     }
 
     /// The one listen gesture, source-aware and cancellable. Used by the
     /// floating listener, the global hotkey, and dashboard capture requests.
     /// System/mic wait for the ring buffer to fill; Stop cancels the wait.
-    func listenNow(seconds: Double? = nil, preset: String? = nil, source: String? = nil) async {
-        guard !isListening else { return }
-        isListening = true
+    func listenNow(
+        seconds: Double? = nil,
+        preset: String? = nil,
+        source: String? = nil,
+        direction: String? = nil,
+        enabledSkillIDs: [String]? = nil,
+        musicID: Bool? = nil
+    ) async {
+        guard !isListenBusy else { return }
+        let captureSeconds = max(0.25, seconds ?? selectedCaptureSeconds)
+        let routePreset = preset ?? selectedPreset
+        let listenSource = source ?? selectedSource
+        let requestedDirection = direction ?? selectedDirection
+        let captureDirection = requestedDirection == "future" ? "future" : "past"
+        let listenSkillIDs = enabledSkillIDs ?? customSkillIDs
+        let useMusicID = (musicID ?? musicIDEnabled) && routePreset == "music"
+        selectedCaptureSeconds = captureSeconds
+        selectedPreset = routePreset
+        selectedSource = listenSource
+        selectedDirection = captureDirection
+        beginListening(captureSeconds: captureSeconds, direction: captureDirection, source: listenSource)
         listenTask = Task { @MainActor [weak self] in
-            await self?.performListen(seconds: seconds, preset: preset, source: source ?? self?.selectedSource ?? "system")
+            await self?.performListen(
+                seconds: captureSeconds,
+                preset: routePreset,
+                source: listenSource,
+                direction: captureDirection,
+                enabledSkillIDs: listenSkillIDs,
+                musicID: useMusicID
+            )
         }
-        await listenTask?.value
+        let task = listenTask
+        await task?.value
         listenTask = nil
-        isListening = false
+        if task?.isCancelled == true {
+            finishListeningAsIdle(status: "Stopped")
+            return
+        }
+        if listeningPhase == .result {
+            try? await Task.sleep(nanoseconds: 800_000_000)
+        } else if listeningPhase == .failed {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+        }
+        if !isListenBusy {
+            finishListeningAsIdle(status: listeningPhase == .result ? "Result ready" : listeningStatusText)
+        }
     }
 
     func stopListening() {
+        guard isListening else { return }
         listenTask?.cancel()
+        appendDaemonLog("Listening capture stopped by the user")
+        finishListeningAsIdle(status: "Stopped")
     }
 
-    private func performListen(seconds: Double?, preset: String?, source: String) async {
-        let captureSeconds = seconds ?? defaultCaptureSeconds
-        let routePreset = preset ?? selectedPreset
+    private func beginListening(captureSeconds: Double, direction: String, source: String) {
+        listeningPhase = .capturing
+        listeningProgress = 0
+        listeningSecondsRemaining = captureSeconds
+        listeningStatusText = "Hearing · \(Int(ceil(captureSeconds)))s"
+        errorMessage = nil
+        appendDaemonLog("Listening started: \(source), \(direction), \(captureSeconds.formatted()) s, preset \(selectedPreset)")
+    }
+
+    private func beginProcessing(source: String) {
+        listeningPhase = .processing
+        listeningProgress = 1
+        listeningSecondsRemaining = nil
+        listeningStatusText = "Operating listening…"
+        appendDaemonLog("Capture complete; operating listening on \(source) with \(selectedPreset)")
+    }
+
+    private func completeListening(_ event: ListeningEventSummary?) {
+        listeningPhase = .result
+        listeningProgress = 1
+        listeningSecondsRemaining = nil
+        listeningStatusText = "Result ready"
+        if let event {
+            appendDaemonLog("Listening result ready: \(event.id)")
+        } else {
+            appendDaemonLog("Listening completed without a result payload")
+        }
+    }
+
+    private func failListening(_ message: String) {
+        listeningPhase = .failed
+        listeningProgress = 0
+        listeningSecondsRemaining = nil
+        listeningStatusText = "Listen failed"
+        errorMessage = message
+        appendDaemonLog("Listening failed: \(message)")
+    }
+
+    private func finishListeningAsIdle(status: String) {
+        listeningPhase = .idle
+        listeningProgress = 0
+        listeningSecondsRemaining = nil
+        listeningStatusText = status
+    }
+
+    private func performListen(
+        seconds: Double,
+        preset: String,
+        source: String,
+        direction: String,
+        enabledSkillIDs: [String]?,
+        musicID: Bool
+    ) async {
         switch source {
         case "mic":
-            await listenFromMic(captureSeconds: captureSeconds, preset: routePreset)
+            await listenFromMic(captureSeconds: seconds, preset: preset, direction: direction, enabledSkillIDs: enabledSkillIDs, musicID: musicID)
         case "file":
-            await listenFromFile(preset: routePreset)
+            await listenFromFile(preset: preset, enabledSkillIDs: enabledSkillIDs, musicID: musicID)
         default:
-            await listenFromSystem(captureSeconds: captureSeconds, preset: routePreset)
+            await listenFromSystem(captureSeconds: seconds, preset: preset, direction: direction, enabledSkillIDs: enabledSkillIDs, musicID: musicID)
         }
     }
 
@@ -412,55 +631,83 @@ final class ShellStore: ObservableObject {
     /// - future: the window starts at the trigger — wait the full length,
     ///   then the last N seconds are exactly [trigger, trigger + N].
     private func waitForDirection(_ direction: String, captureSeconds: Double, buffered: Double) async -> Bool {
-        let missing: Double
-        if direction == "future" {
-            missing = captureSeconds
-        } else {
-            let grace = min(captureSeconds, 1.0)
-            missing = buffered >= grace ? 0 : grace - buffered
+        let target = max(0.25, captureSeconds)
+        let alreadyBuffered = direction == "past" ? min(target, max(0, buffered)) : 0
+        let missing = direction == "future" ? target : max(0, target - alreadyBuffered)
+        if missing <= 0 {
+            listeningProgress = 1
+            listeningSecondsRemaining = 0
+            return !Task.isCancelled
         }
-        if missing > 0 {
-            guard (try? await Task.sleep(nanoseconds: UInt64(missing * 1_000_000_000))) != nil else { return false }
+        let startedAt = Date()
+        while !Task.isCancelled {
+            let elapsed = Date().timeIntervalSince(startedAt)
+            if elapsed >= missing { break }
+            let captured = min(target, alreadyBuffered + elapsed)
+            listeningProgress = min(1, captured / target)
+            listeningSecondsRemaining = max(0, missing - elapsed)
+            listeningStatusText = "Hearing · \(Int(ceil(max(0, missing - elapsed))))s"
+            do {
+                try await Task.sleep(nanoseconds: 200_000_000)
+            } catch {
+                return false
+            }
         }
-        return !Task.isCancelled
+        guard !Task.isCancelled else { return false }
+        listeningProgress = 1
+        listeningSecondsRemaining = 0
+        return true
     }
 
-    private func listenFromSystem(captureSeconds: Double, preset: String?) async {
+    private func listenFromSystem(captureSeconds: Double, preset: String, direction: String, enabledSkillIDs: [String]?, musicID: Bool) async {
         if !nativeSystemAudioActive {
             await startNativeSystemAudioTap()
-            guard nativeSystemAudioActive else { return }
+            guard nativeSystemAudioActive else {
+                failListening(nativeSystemAudioState.label)
+                return
+            }
         }
-        guard await waitForDirection(selectedDirection, captureSeconds: captureSeconds, buffered: bufferedSeconds()) else { return }
-        await analyzeNativeSystemAudio(seconds: captureSeconds, preset: preset)
+        guard await waitForDirection(direction, captureSeconds: captureSeconds, buffered: bufferedSeconds()) else { return }
+        beginProcessing(source: "system audio")
+        await analyzeNativeSystemAudio(
+            seconds: captureSeconds,
+            preset: preset,
+            direction: direction,
+            enabledSkillIDs: enabledSkillIDs,
+            musicID: musicID
+        )
     }
 
-    private func listenFromMic(captureSeconds: Double, preset: String?) async {
+    private func listenFromMic(captureSeconds: Double, preset: String, direction: String, enabledSkillIDs: [String]?, musicID: Bool) async {
         if !micTap.isCapturing {
             do {
                 try micTap.start()
                 micTapStartedAt = Date()
             } catch {
-                errorMessage = error.localizedDescription
+                failListening(error.localizedDescription)
                 return
             }
         }
-        let direction = selectedDirection
         guard await waitForDirection(direction, captureSeconds: captureSeconds, buffered: micTap.bufferedSeconds) else { return }
+        beginProcessing(source: "microphone audio")
         do {
             let output = try micTap.writeRecentAudio(seconds: captureSeconds)
             let response = try await client.listenEvent(
                 path: output.path,
-                routePreset: preset ?? defaultRoutePreset,
+                routePreset: preset,
                 sourceType: "live_input",
                 sourceLabel: "Native microphone",
                 privacyMode: "ephemeral",
                 rawAudioPolicy: "temp",
                 captureDirection: direction,
                 captureSeconds: captureSeconds,
-                captureTrigger: "floating-listener"
+                captureTrigger: "floating-listener",
+                enabledSkillIDs: enabledSkillIDs,
+                songID: musicID
             )
             latestRouteComparison = nil
-            latestEvent = response.listeningEvent ?? latestEvent
+            presentFloatingEvent(response.listeningEvent)
+            completeListening(response.listeningEvent)
             resetConversation()
             applyBackgroundStatus(response.background)
             errorMessage = nil
@@ -468,11 +715,11 @@ final class ShellStore: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            failListening(error.localizedDescription)
         }
     }
 
-    private func listenFromFile(preset: String?) async {
+    private func listenFromFile(preset: String, enabledSkillIDs: [String]?, musicID: Bool) async {
         let panel = NSOpenPanel()
         panel.title = "Choose audio to listen to"
         panel.allowsMultipleSelection = false
@@ -481,11 +728,22 @@ final class ShellStore: ObservableObject {
             panel.allowedContentTypes = [.audio, .movie]
         }
         NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        listeningStatusText = "Choose an audio file"
+        guard panel.runModal() == .OK, let url = panel.url else {
+            finishListeningAsIdle(status: "Cancelled")
+            return
+        }
+        beginProcessing(source: url.lastPathComponent)
         do {
-            let response = try await client.listenEvent(path: url.path, routePreset: preset ?? defaultRoutePreset)
+            let response = try await client.listenEvent(
+                path: url.path,
+                routePreset: preset,
+                enabledSkillIDs: enabledSkillIDs,
+                songID: musicID
+            )
             latestRouteComparison = nil
-            latestEvent = response.listeningEvent ?? latestEvent
+            presentFloatingEvent(response.listeningEvent)
+            completeListening(response.listeningEvent)
             resetConversation()
             applyBackgroundStatus(response.background)
             errorMessage = nil
@@ -493,7 +751,7 @@ final class ShellStore: ObservableObject {
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            failListening(error.localizedDescription)
         }
     }
 
@@ -552,6 +810,15 @@ final class ShellStore: ObservableObject {
         }
     }
 
+    func openSystemAudioCaptureSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
+            errorMessage = SystemAudioTapManager.capturePermissionMessage
+            return
+        }
+        NSWorkspace.shared.open(url)
+        appendDaemonLog("Opened Screen & System Audio Recording privacy settings")
+    }
+
     func startNativeSystemAudioTap() async {
         await systemAudioTap.start()
         if nativeSystemAudioState == .capturing, tapStartedAt == nil {
@@ -571,10 +838,17 @@ final class ShellStore: ObservableObject {
         nativeSystemAudioRoute = nil
     }
 
-    func analyzeNativeSystemAudio(remember: Bool = false, seconds: Double? = nil, preset: String? = nil) async {
+    func analyzeNativeSystemAudio(
+        remember: Bool = false,
+        seconds: Double? = nil,
+        preset: String? = nil,
+        direction: String? = nil,
+        enabledSkillIDs: [String]? = nil,
+        musicID: Bool? = nil
+    ) async {
         guard !isAnalyzingNativeSystemAudio else { return }
         guard nativeSystemAudioActive else {
-            errorMessage = "Start the native system audio tap before analyzing system output."
+            failListening("Start the native system audio tap before analyzing system output.")
             return
         }
         isAnalyzingNativeSystemAudio = true
@@ -587,10 +861,15 @@ final class ShellStore: ObservableObject {
                 durationSeconds: capture.durationSeconds,
                 routePreset: preset ?? defaultRoutePreset,
                 remember: remember,
-                sourceRoute: capture.sourceRoute
+                sourceRoute: capture.sourceRoute,
+                captureDirection: direction ?? selectedDirection,
+                captureTrigger: "oida-listener",
+                enabledSkillIDs: enabledSkillIDs ?? customSkillIDs,
+                songID: (musicID ?? musicIDEnabled) && (preset ?? defaultRoutePreset) == "music"
             )
             latestRouteComparison = nil
-            latestEvent = response.listeningEvent ?? latestEvent
+            presentFloatingEvent(response.listeningEvent)
+            completeListening(response.listeningEvent)
             resetConversation()
             applyBackgroundStatus(response.background)
             nativeSystemAudioRoute = response.sourceRoute ?? nativeSystemAudioRoute
@@ -598,8 +877,10 @@ final class ShellStore: ObservableObject {
             historyActionMessage = nil
             errorMessage = nil
             await refresh()
+        } catch is CancellationError {
+            return
         } catch {
-            errorMessage = error.localizedDescription
+            failListening(error.localizedDescription)
         }
     }
 
@@ -666,7 +947,7 @@ final class ShellStore: ObservableObject {
                 remember: remember
             )
             latestRouteComparison = nil
-            latestEvent = response.listeningEvent ?? response.background?.state.latestEvent
+            presentFloatingEvent(response.listeningEvent ?? response.background?.state.latestEvent)
             resetConversation()
             applyBackgroundStatus(response.background)
             historyActionMessage = nil
@@ -689,7 +970,7 @@ final class ShellStore: ObservableObject {
         do {
             let response = try await client.rerun(event: event, routePreset: routePreset, remember: remember)
             latestRouteComparison = response.routeComparison
-            latestEvent = response.listeningEvent ?? latestEvent
+            presentFloatingEvent(response.listeningEvent)
             resetConversation()
             applyBackgroundStatus(response.background)
             historyActionMessage = nil
@@ -874,6 +1155,39 @@ final class ShellStore: ObservableObject {
         ensureFloatingPanel().show()
     }
 
+    @discardableResult
+    func renameFloatingEvent(to requestedTitle: String) async -> Bool {
+        let title = requestedTitle
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return false }
+        guard let event = floatingEvent else { return false }
+        guard title != event.aggregate?.title else { return true }
+        guard let sessionId = background?.state.activeSession?.id ?? background?.state.activeLiveSessionId,
+              !sessionId.isEmpty else {
+            errorMessage = "No active listening session is available for renaming this result."
+            appendDaemonLog("Listening result rename failed: no active session")
+            return false
+        }
+        do {
+            let response = try await client.renameListeningEvent(
+                sessionId: sessionId,
+                eventId: event.id,
+                title: title
+            )
+            presentFloatingEvent(response.listeningEvent)
+            recentEvents = recentEvents.map { $0.id == event.id ? response.listeningEvent : $0 }
+            pinnedEvents = pinnedEvents.map { $0.id == event.id ? response.listeningEvent : $0 }
+            errorMessage = nil
+            appendDaemonLog("Listening result renamed: \(title)")
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            appendDaemonLog("Listening result rename failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     private func ensureFloatingPanel() -> FloatingPanelController {
         if let floatingPanel {
             return floatingPanel
@@ -882,6 +1196,9 @@ final class ShellStore: ObservableObject {
             guard let self else { return NSView() }
             return ListenerHostingView(rootView: FloatingListenerView().environmentObject(self))
         }
+        controller.setAppearance(
+            NSAppearance(named: appearanceMode == "dark" ? .darkAqua : .aqua)
+        )
         floatingPanel = controller
         return controller
     }
@@ -944,6 +1261,21 @@ final class ShellStore: ObservableObject {
         let nextEvent = status.state.latestEvent ?? latestEvent
         background = status
         latestEvent = nextEvent
+        if !hasEstablishedFloatingEventBaseline {
+            // The first status refresh establishes where persisted history
+            // ended before this app session. It deliberately does not present
+            // that historical reading in the floating listener.
+            hasEstablishedFloatingEventBaseline = true
+            floatingEventBaselineId = nextEvent?.id
+        } else if nextEvent?.id != floatingEventBaselineId {
+            // A genuinely new event may arrive from the dashboard, MCP, or a
+            // second Oida surface. Keep cross-surface sync after the blank
+            // launch state without resurrecting the startup history item.
+            floatingEventBaselineId = nextEvent?.id
+            if let nextEvent {
+                floatingEvent = nextEvent
+            }
+        }
         if nextEvent?.id != previousEventId {
             resetConversation()
         }
@@ -957,6 +1289,14 @@ final class ShellStore: ObservableObject {
         resetConversation()
         pinnedEvents = history.pinnedEvents ?? []
         recentEvents = history.recentEvents ?? []
+    }
+
+    private func presentFloatingEvent(_ event: ListeningEventSummary?) {
+        guard let event else { return }
+        latestEvent = event
+        floatingEvent = event
+        floatingEventBaselineId = event.id
+        hasEstablishedFloatingEventBaseline = true
     }
 
     private func resetConversation() {
@@ -1005,4 +1345,7 @@ private enum Defaults {
     static let listenSource = "oida.listenSource"
     static let routePreset = "oida.routePreset"
     static let listenDirection = "oida.listenDirection"
+    static let captureSeconds = "oida.captureSeconds"
+    static let musicIDEnabled = "oida.musicIDEnabled"
+    static let appearanceMode = "oida.appearanceMode"
 }

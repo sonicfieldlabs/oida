@@ -30,6 +30,18 @@ final class DaemonSupervisor {
         process?.isRunning == true
     }
 
+    deinit {
+        // A daemon launched with Pipe-backed logging must not outlive the app
+        // that owns the read ends. Otherwise a later model load can fail with
+        // BrokenPipeError after a UI relaunch. External daemons are untouched
+        // because `process` is populated only for a daemon we started here.
+        outputPipe?.fileHandleForReading.readabilityHandler = nil
+        errorPipe?.fileHandleForReading.readabilityHandler = nil
+        if process?.isRunning == true {
+            process?.terminate()
+        }
+    }
+
     func start(profile: String = "mac-mps", host: String = "127.0.0.1", port: Int = 8765) throws {
         guard process?.isRunning != true else {
             throw DaemonSupervisorError.alreadyRunning
@@ -41,22 +53,16 @@ final class DaemonSupervisor {
         let outputPipe = Pipe()
         let errorPipe = Pipe()
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = [
-            "uv",
-            "run",
-            "oida",
-            "--profile",
-            profile,
-            "--host",
-            host,
-            "--port",
-            "\(port)"
-        ]
+        proc.executableURL = root.appendingPathComponent("scripts/run_oida_mps.sh")
+        proc.arguments = []
         proc.currentDirectoryURL = root
         proc.standardOutput = outputPipe
         proc.standardError = errorPipe
-        proc.environment = mergedEnvironment()
+        var environment = mergedEnvironment()
+        environment["OIDA_ENGINE_PROFILE"] = profile
+        environment["OIDA_HOST"] = host
+        environment["OIDA_PORT"] = "\(port)"
+        proc.environment = environment
 
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData

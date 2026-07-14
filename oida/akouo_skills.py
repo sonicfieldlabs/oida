@@ -277,7 +277,7 @@ SKILLS: list[ListeningSkillManifest] = [
 PRESETS: list[RoutePreset] = [
     RoutePreset(
         id="basic",
-        name="Basic",
+        name="General",
         description="Fast first pass: one MOSS caption plus DSP signal facts under AKOÚŌ uncertainty discipline.",
         skill_ids=["basic-listener", "spectral-cartographer", "signal-health"],
         akouo_command="/listen",

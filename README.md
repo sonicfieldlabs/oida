@@ -49,17 +49,25 @@ name **oída**.
   zero-crossing, centroid/rolloff/flatness, band energy, onsets/BPM candidate,
   stereo correlation/width/balance. One inspection per file per listen (results
   are memoized on path+mtime).
-- **Route presets** scope the MOSS passes: Basic (one caption pass), Signal
-  (DSP-only, instant), Field, Music, Voice, Recall (read-only memory
-  comparison), Remember (memory comparison + registration into the shared
-  akousmata, AKOÚŌ `/remember`), and Deep (the full report). Preset ids follow
+- **Route presets** scope the MOSS passes: General (id `basic`; one caption
+  pass), Signal (DSP-only, instant), Field, Music, Voice, Recall (read-only
+  memory comparison), Remember (memory comparison + registration into the
+  shared akousmata, AKOÚŌ `/remember`), and Deep (the full report). Preset ids follow
   AKOÚŌ v0.6's portable preset vocabulary (pre-v0.6 ids `environment`/`speech`/
   `memory` still resolve as aliases). Presets come from the AKOÚŌ skill
   registry (`/akouo/skills`) and the dashboard skill manager can deviate per
   listen.
-- **Akousmata memory** (private traces): remember/list/search/similar/export/
-  forget over local JSON traces with deterministic DSP similarity. This is
-  oída's private store — distinct from the shared akousmata below.
+- **Akousmata memory**: remember/list/search/similar/export/forget over local
+  JSON traces with deterministic DSP similarity — and every Remember also
+  files the listen as an **akousma** in the shared store, so the dashboard's
+  Memory rail navigates one library (rename and forget there never delete the
+  referenced audio).
+- **Listening sessions**: results group into daemon-owned sessions shared by
+  every surface — dashboard, floating listener, hotkeys, MCP, and agents file
+  into the same active session. `/sessions` covers create/activate/rename/
+  archive/restore/delete plus per-result rename/delete and batch remember;
+  history persists across restarts, and deleting history removes derived
+  references only, never raw audio.
 - **germ handoff** (shared akousmata store): after a listen, three actions —
   *Sound*, *Prompt*, *Lineage* — persist the listen as an **akousma** in the
   shared store (`~/workspace/akousmata`, via earworm's `py-akousma`) and
@@ -75,16 +83,22 @@ name **oída**.
   creation prompts from listening events; audio rendering is delegated to
   optional adapters, and `relisten` compares generated audio back to source.
 - **Web dashboard** served by the daemon at `/`: one Listen surface (System /
-  Mic / File), presets and skill manager, claims rendered by AKOÚŌ category,
-  Ask / Remember / Explore / JSON / germ actions, recent history, and memory
-  search. Every surface syncs over `/events/stream` (SSE).
+  Mic / File with past/future direction), the session feed in the center
+  (inline rename, tag filters, per-result actions), claims rendered by AKOÚŌ
+  category with a sonogram + frequency-energy view of the measured layer,
+  opt-in per-listen **Music ID** in Music mode, the Rules (covenant) control,
+  light/dark appearance, an activity console, and shared-store memory search.
+  Every surface syncs over `/events/stream` (SSE).
 - **Native macOS shell** (`apps/macos`, SwiftPM): menu bar extra, a control
   center that embeds the same daemon-served dashboard (WKWebView — web and app
-  cannot diverge), daemon supervision, ScreenCaptureKit system-output tap, and
-  the **floating listener** — a borderless, transparent, always-on-top
-  listening-result box with a small reactive waveform in its corner; its
-  controls float just outside the box and appear on hover. Global hotkeys
-  default to ⌃⌥L (listen) and ⌃⌥H (show/hide it).
+  cannot diverge) behind native titlebar chrome (sidebar toggles, source
+  popovers, settings), daemon supervision (a managed daemon stops with the
+  app), ScreenCaptureKit system-output tap with permission preflight, and the
+  **floating listener** — a borderless, transparent, always-on-top
+  listening-result box with a small reactive waveform, an in-place editable
+  result title, and share/copy actions; its controls float just outside the
+  box and appear on hover. Global hotkeys default to ⌃⌥L (listen) and ⌃⌥H
+  (show/hide it).
 - CLI (`oida listen/live/background/memory/chat/sweep/corpus-qa/bench`), `ear`
   and `akoe` helper CLIs, and an official MCP server exposing compact
   `oida_*` listening, harness, memory, and live tools (legacy aliases kept on
@@ -138,7 +152,7 @@ rules the daemon can execute are enforced at its input/content/output/
 retention gates, every line it cannot execute is carried verbatim as a
 commitment, and withholding lands on the record as counted, attributed
 absence — never silence. Write and activate covenants from the dashboard's
-Covenant panel, `PUT /covenant` + `POST /covenant/activate`, or the
+Rules control, `PUT /covenant` + `POST /covenant/activate`, or the
 `oida_covenant` MCP tool. The layer is **empty by default**: sovereignty is
 opted into, never imposed, and a covenant governs the listener that adopted
 it — it protects the listened-to.
@@ -194,9 +208,11 @@ signal (system tap or mic) and animating only while something is being heard.
 
 Every control floats just outside the box and fades in on hover: the listening
 mode (preset) at the top-left, close at the top-right, and the source switch
-(System / Mic / File), Listen/Stop, and control-center buttons in a row below.
-Grab the box to drag it. It floats over every Space, never steals focus, and
-its controls stay out of the way until you reach for them.
+(System / Mic / File), direction, Listen/Stop, and control-center buttons in a
+row below. The result title edits in place (renaming the session result), and
+share/copy actions sit beside the live meter. Grab the box to drag it. It
+floats over every Space, never steals focus, and its controls stay out of the
+way until you reach for them.
 
 The dashboard's system capture asks the shell for help: the browser cannot hear
 macOS output, so `System · Listen` files a capture request that the native
