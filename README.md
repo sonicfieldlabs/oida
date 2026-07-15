@@ -1,19 +1,76 @@
 # oída
 
-The public Python distribution is named `sonicfield-oida`; the import package
-and commands remain `oida`, `oida-daemon`, and `oida-mcp`. The shorter `oida`
+> **Public alpha · Open research release · Local-first · Open-source · Under active development**
+
+Oída is a local listening instrument for sound files, microphones, and system
+audio. It combines deterministic signal analysis with optional audio models,
+keeps observation separate from interpretation, and can remember a listening
+only when asked. A sound can enter Oída, become an inspectable listening event,
+pass into GERM as material or lineage, enter Akousmata as memory, and be heard
+again without erasing the earlier account.
+
+![Oída dashboard showing a model-free signal listening](docs/assets/oida-dashboard.png)
+
+## Try It Without a Model
+
+The public-alpha path needs no model weights or GPU:
+
+```bash
+uv sync --extra dev
+uv run oida serve --profile stub
+```
+
+Open `http://127.0.0.1:8765`, choose a WAV file, and begin with **Signal**.
+Install `ffmpeg` to use non-WAV files or browser recordings. The stub profile
+still performs deterministic DSP; it does not invent a semantic caption.
+
+## What You Can Do
+
+- Listen to files, microphone input, or macOS system output through the web
+  dashboard, CLI, REST gateway, MCP server, or native macOS shell.
+- Choose a bounded route for general, signal, field, music, voice, recall,
+  remember, or deep listening.
+- Inspect heard, measured, inferred, interpreted, speculative, and
+  undetermined claims separately.
+- Discuss a listening event with a deterministic local reasoner or an
+  explicitly enabled model provider while keeping the original event fixed.
+- Remember, compare, export, or forget selected events, then hand sound,
+  prompt, or lineage to GERM for cultivation.
+
+## Requirements
+
+| Path | Operating system | Hardware and software |
+| --- | --- | --- |
+| Model-free service | macOS or Linux | Python 3.12+, `uv`; CPU only; `ffmpeg` for non-WAV input and browser recording |
+| Embedded MOSS-Audio | Apple Silicon macOS | Local MOSS-Audio code and weights, PyTorch/MPS, and sufficient unified memory for the selected checkpoint |
+| CUDA service | Operator-managed Linux/NVIDIA host | A separately running compatible MOSS-Audio SGLang endpoint |
+| Native shell and system audio | macOS 13+ | Swift 5.9/Xcode command-line tools; Screen Recording permission for system output |
+
+Windows is not part of the current tested release matrix. Model memory varies
+by checkpoint and runtime; the dashboard reports estimates and compatibility
+instead of promising one universal RAM minimum.
+
+## Release Guide
+
+| Question | Where to begin |
+| --- | --- |
+| How does it work? | [Architecture](docs/architecture.md) and [gateway contract](docs/gateway-contract.md) |
+| How does it connect? | [The Listening Stack](https://sonicfield.org/stack) and [GERM handoff](#stack-compatibility) |
+| Which models and licenses apply? | [Models and licensing](docs/models-and-licensing.md) |
+| What is unfinished? | [Known limitations](#known-limitations) and [roadmap](ROADMAP.md) |
+| How can I help? | [Contribution guide](CONTRIBUTING.md) |
+| How should I cite it? | [CITATION.cff](CITATION.cff) |
+
+The public Python distribution is `sonicfield-oida`; the import package and
+commands remain `oida`, `oida-daemon`, and `oida-mcp`. The shorter `oida`
 distribution name on PyPI belongs to an unrelated project.
 
-`oida` is the unified local agentic listening stack: the AKOÚŌ listening
-harness, Earworm provenance and memory protocol, and Akousmata listening
-library behind one agent, CLI, gateway, and install. It can listen through its
-own optional local engine (including MOSS-Audio plus deterministic DSP), or it
-can harness the audio perception already produced by Hermes, Codex, Claude, or
-another audio-input-capable host. Both paths produce the same accountable
-AKOÚŌ claims, Earworm session context, and optional durable Akousmata memory.
-An event-grounded reasoning layer can then discuss those results through a
-local model, an existing host login, or an explicitly enabled cloud provider
-without letting the reasoner rewrite what was heard.
+Oída brings the AKOÚŌ listening contract, Earworm provenance protocol, and
+Akousmata library behind one agent, CLI, gateway, and install. It can listen
+through an optional local engine, including MOSS-Audio plus deterministic DSP,
+or harness perception supplied by an audio-capable host. Both paths produce
+the same accountable claim structure and optional durable memory. A separate
+reasoning layer can discuss those results without rewriting what was heard.
 
 This project was previously named **AEAR**, then **hmm**; it is now **oída**.
 The Python package and primary CLI are `oida`; `hmm` and `aear` remain as
@@ -62,7 +119,7 @@ name **oída**.
   pass), Signal (DSP-only, instant), Field, Music, Voice, Recall (read-only
   memory comparison), Remember (memory comparison + registration into the
   shared akousmata, AKOÚŌ `/remember`), and Deep (the full report). Preset ids follow
-  AKOÚŌ v0.6's portable preset vocabulary (pre-v0.6 ids `environment`/`speech`/
+  AKOÚŌ v0.7's portable preset vocabulary (pre-v0.6 ids `environment`/`speech`/
   `memory` still resolve as aliases). Presets come from the AKOÚŌ skill
   registry (`/akouo/skills`) and the dashboard skill manager can deviate per
   listen.
@@ -134,6 +191,11 @@ name **oída**.
 
 ## Stack compatibility
 
+**Oída hears. GERM cultivates. Akousmata remembers. AKOÚŌ structures. Earworm
+routes.** The five projects form [The Listening Stack](https://sonicfield.org/stack),
+an open research infrastructure for listening, re-listening, sonic memory,
+and cultivation.
+
 | Component | Version / contract | Role in OÍDA |
 | --- | --- | --- |
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.7.0` / `akouo/v0.7` | 15 listening modes, router, reference layer, 18 commands, presets, evidence permissions, and covenants. |
@@ -151,10 +213,18 @@ recordings. From this source workspace, one sync installs Oída together with
 the canonical AKOÚŌ, Earworm/akousma, and Akousmata packages:
 
 ```bash
-uv sync --extra dev --extra moss
+uv sync --extra dev
 ```
 
-Start the singleton gateway, then open the agent or library:
+Start the model-free service first. Add the `moss` extra only when installing
+the separately obtained local MOSS-Audio runtime and weights.
+
+```bash
+uv run oida serve --profile stub
+uv sync --extra dev --extra moss       # optional embedded MOSS-Audio route
+```
+
+The singleton commands can then open the agent or library:
 
 ```bash
 uv run oida start                         # add --profile stub for model-free use
@@ -338,6 +408,28 @@ conversation persistence. Credentials are kept in
 the macOS Keychain or an available system keyring, with read-only environment
 variables as the fallback; they are never written into reasoning settings.
 
+## Known Limitations
+
+- This is a public alpha. Gateway contracts are versioned, but interface and
+  workflow details can still change before 1.0.
+- Audio-model output can be incomplete or wrong. Claim categories and evidence
+  links make those limits visible; they do not make a model infallible.
+- The model-free profile measures signal properties but cannot provide a
+  reliable semantic account of a recording.
+- Long audio is chunked for embedded MOSS-Audio. Boundary deduplication is
+  conservative and may miss relationships that span distant chunks.
+- Embedded MOSS-Audio currently targets Apple Silicon. The CUDA path requires
+  an operator-managed service, and Windows is not in the tested matrix.
+- The native macOS app is built locally and is not distributed as a signed,
+  notarized installer from this repository.
+- Host CLI and cloud providers are optional integrations. Their availability,
+  costs, data handling, and model terms are controlled by their operators.
+- Oída does not publish a remote endpoint or configure TLS. Exposing the
+  service beyond loopback is an operator decision and requires authentication.
+
+The [roadmap](ROADMAP.md) states the public research priorities without
+promising production stability.
+
 ## Repository Notes
 
 - `docs/native-macos-shell.md` — shell layout, supervision, hotkeys, listener.
@@ -349,6 +441,9 @@ variables as the fallback; they are never written into reasoning settings.
   integration boundaries.
 - `docs/reasoning-providers.md` — prompt ownership, provider setup, model roles,
   evidence boundaries, and host prepare/commit flow.
+- `docs/models-and-licensing.md` — model attribution, installation boundaries,
+  and third-party terms.
+- `ROADMAP.md` — current public-alpha priorities and non-goals.
 - `integrations/` — the bundled Hermes, Codex, Claude, OpenClaw, OpenCode, and
   remote adapters.
 - CI (`.github/workflows/ci.yml`) runs pytest, compileall, a JS syntax check,

@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 title: "oida: local listening agent for the Listening Stack"
-message: "If you use oida in research, please cite the software and the Listening Stack paper."
+message: "If you use Oída in research, please cite this software release."
 type: software
 authors:
   - name: "Sonic Field Labs"
@@ -8,10 +8,5 @@ version: 0.6.0
 date-released: 2026-07-14
 license: Apache-2.0
 repository-code: "https://github.com/sonicfieldlabs/oida"
-preferred-citation:
-  type: article
-  title: "The Listening Stack: Agentic Sonic Computation for Hybrid Listening Ecologies"
-  authors:
-    - family-names: "Isaza"
-      given-names: "eme"
-  year: 2026
+url: "https://sonicfield.org/stack"
+abstract: "Oída is a local-first listening instrument that produces evidence-structured listening events and connects them to the Sonic Field Listening Stack."

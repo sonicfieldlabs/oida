@@ -1,12 +1,12 @@
-"""oída → germ bridge over the shared akousma protocol.
+"""Oída → GERM bridge over the shared akousma protocol.
 
-oída is generative ears; germ is generative voice. After a listen, oída persists an
-**akousma** (the sound's memory record) into the shared **akousmata** store and hands germ
-an ``akousma_id`` via a deep link. The three UI buttons map to three modes:
+Oída hears; GERM cultivates. After a listen, Oída persists an **akousma** (the
+sound's memory record) into the shared **Akousmata** store and hands GERM an
+``akousma_id`` via a deep link. The three UI buttons map to three modes:
 
-- ``sound``   — "open as sound":    load the listened fragment as an audio source in germ.
-- ``prompt``  — "open as prompt":   open the listening result as a generation prompt in germ.
-- ``lineage`` — "explore lineage":  open germ's genetic-ancestry explorer on this akousma.
+- ``sound``   — "open as sound":    load the listened fragment as an audio source in GERM.
+- ``prompt``  — "open as prompt":   open the listening result as a generation prompt in GERM.
+- ``lineage`` — "explore lineage":  open GERM's ancestry explorer on this akousma.
 
 Requires the ``akousma`` package (earworm/packages/py-akousma).
 """

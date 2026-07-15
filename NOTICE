@@ -1,12 +1,15 @@
-hmm
+Oída
 Copyright 2026 Sonic Field Labs
 
 This product includes software developed by Sonic Field Labs.
 
-hmm integrates with MOSS-Audio model code and weights when the operator installs
-them separately. MOSS-Audio is developed by OpenMOSS / MOSI.AI and is not
-redistributed in this repository.
+Oída can integrate with MOSS-Audio model code and weights when the operator
+installs them separately. MOSS-Audio is developed by the OpenMOSS team and is
+not redistributed in this repository. Upstream code, model cards, and terms
+remain authoritative for those optional components.
 
-AKOUO and Earworm are Sonic Field Labs listening-stack companion projects. Their
-local checkouts or released packages are referenced as optional integration
-surfaces; this repository embeds only hmm-specific glue code and schemas.
+AKOÚŌ, Earworm, Akousmata, and GERM are Sonic Field Labs Listening Stack
+projects. Oída installs versioned companion packages or connects to their
+published contracts; it does not relicense them or third-party models.
+
+See docs/models-and-licensing.md for attribution and installation boundaries.
