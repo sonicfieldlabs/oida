@@ -190,7 +190,7 @@ struct FloatingListenerView: View {
         }
         .buttonStyle(.plain)
         .frost(cornerRadius: 13)
-        .help("Hide the floating listener (\(store.toggleHotkey))")
+        .help("Hide the floating listener")
     }
 
     private var sourcePill: some View {

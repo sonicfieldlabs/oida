@@ -13,7 +13,7 @@
   </script>
   <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/styles.css?v=26" />
+  <link rel="stylesheet" href="/static/styles.css?v=29" />
   <link rel="manifest" href="/static/manifest.webmanifest" />
 </head>
 <body>
@@ -47,11 +47,10 @@
           <div class="history-list" id="archiveList"></div>
         </details>
         <details class="side-section" id="memorySection" open>
-          <summary class="side-head"><h3>Memory</h3><span class="section-caret" aria-hidden="true"></span></summary>
+          <summary class="side-head"><h3>Memory</h3><span class="side-head-actions"><button class="memory-search-icon" id="memoryGo" aria-label="Search memory" title="Search memory">
+            <svg class="ci" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg></button><span class="section-caret" aria-hidden="true"></span></span></summary>
           <div class="memory-search">
             <input type="text" id="memorySearch" placeholder="search Akousmata memory…" />
-            <button class="memory-search-icon" id="memoryGo" aria-label="Search memory" title="Search memory">
-              <svg class="ci" viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg></button>
           </div>
           <div class="memory-list" id="memoryList"></div>
         </details>
@@ -162,16 +161,24 @@
               <h3 id="conversationTitle">Ask about this listening</h3>
               <p id="conversationAnchor">Choose a listening result first.</p>
             </div>
-            <button class="modal-close" id="conversationClose" type="button" aria-label="Close conversation">×</button>
-          </div>
-          <div class="conversation-toolbar" aria-label="Conversation model">
-            <label class="cfg"><span class="cfg-label">Provider</span><select id="conversationProvider" class="quiet-select"></select></label>
-            <label class="cfg"><span class="cfg-label">Model</span><select id="conversationModel" class="quiet-select"></select></label>
-            <label class="cfg"><span class="cfg-label">Profile</span><select id="conversationProfile" class="quiet-select"></select></label>
-            <span class="reasoning-badge" id="conversationLocality">local</span>
+            <div class="conversation-head-actions" aria-label="Conversation options">
+              <div class="dropdown conversation-reasoning-menu" id="conversationReasoningMenu">
+                <button class="conversation-option-trigger" id="conversationReasoningButton" type="button" aria-haspopup="true" aria-expanded="false" title="Reasoning provider, model, and profile" aria-label="Reasoning provider, model, and profile">
+                  <svg class="ci reasoning-glyph" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="2.2"/><path d="M12 9.8V5.5M10.4 10.5 7.2 7.6M13.6 10.5 16.8 7.6M10.4 13.5 7.2 16.4M13.6 13.5 16.8 16.4"/><circle cx="12" cy="4" r="1"/><circle cx="6" cy="6.5" r="1"/><circle cx="18" cy="6.5" r="1"/><circle cx="6" cy="17.5" r="1"/><circle cx="18" cy="17.5" r="1"/></svg>
+                  <span>Reasoning</span>
+                </button>
+                <div class="drop-menu conversation-reasoning-popover" role="group" aria-label="Conversation reasoning" hidden>
+                  <div class="conversation-reasoning-head"><strong>Reasoning</strong><span class="reasoning-badge" id="conversationLocality">local</span></div>
+                  <label class="cfg"><span class="cfg-label">Provider</span><select id="conversationProvider" class="quiet-select"></select></label>
+                  <label class="cfg"><span class="cfg-label">Model</span><select id="conversationModel" class="quiet-select"></select></label>
+                  <label class="cfg"><span class="cfg-label">Profile</span><select id="conversationProfile" class="quiet-select"></select></label>
+                </div>
+              </div>
+              <button class="modal-close" id="conversationClose" type="button" aria-label="Close conversation">×</button>
+            </div>
           </div>
           <details class="conversation-context">
-            <summary>Context and privacy <span id="conversationContextSummary">filtered evidence only</span></summary>
+            <summary><span class="conversation-context-label"><svg class="ci" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 3.5 19 6v5.3c0 4.1-2.6 7.4-7 9.2-4.4-1.8-7-5.1-7-9.2V6Z"/><path d="M9.5 11.8 11.2 13.5 15 9.7"/></svg><span>Context &amp; privacy</span><span class="conversation-context-caret" aria-hidden="true"></span></span><span id="conversationContextSummary">filtered evidence only</span></summary>
             <div class="conversation-context-body">
               <div class="conversation-compare">
                 <span class="cfg-label">Compare with up to 3 other results</span>
@@ -274,11 +281,24 @@
     </div>
   </dialog>
 
-  <!-- ────────────── Settings / Skill / Wiki modals ──────────── -->
-  <dialog class="modal settings-modal" id="settingsModal" aria-label="Settings">
-    <div class="modal-head"><h3>Settings</h3><button class="modal-close" data-close aria-label="Close">×</button></div>
-    <div class="modal-content settings-content">
-      <section class="settings-section">
+  <!-- ────────────── Full-workspace Settings ──────────── -->
+  <section class="settings-page" id="settingsPage" aria-labelledby="settingsTitle" hidden>
+    <header class="settings-page-head">
+      <div><span class="settings-page-kicker">oída</span><h2 id="settingsTitle">Settings</h2></div>
+      <button class="settings-page-close" id="settingsClose" type="button" aria-label="Close settings" title="Close settings">
+        <svg class="ci" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="settings-page-body">
+      <nav class="settings-sidebar" aria-label="Settings sections">
+        <button class="settings-nav-item active" type="button" data-settings-target="settings-system"><svg class="ci" viewBox="0 0 24 24" width="15" height="15"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg><span>General</span></button>
+        <button class="settings-nav-item" type="button" data-settings-target="settings-engine"><svg class="ci" viewBox="0 0 24 24" width="15" height="15"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 9h6v6H9ZM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M19 9h3M2 15h3M19 15h3"/></svg><span>Engine</span></button>
+        <button class="settings-nav-item" type="button" data-settings-target="settings-reasoning"><svg class="ci" viewBox="0 0 24 24" width="15" height="15"><path d="M8.2 7.3a4.8 4.8 0 0 1 7.7 1.1 4.3 4.3 0 0 1-.3 8.2H9a4 4 0 0 1-.8-7.9Z"/><path d="M9 11.2c1.2-1.7 4.6-1.7 5.8.2M10.2 15h3.6"/></svg><span>Reasoning</span></button>
+        <button class="settings-nav-item native-settings-nav" type="button" data-settings-target="settings-shortcuts"><svg class="ci" viewBox="0 0 24 24" width="15" height="15"><rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M7 10h.01M10.5 10h.01M14 10h.01M17.5 10h.01M8 14.5h8"/></svg><span>Shortcuts</span></button>
+        <button class="settings-nav-item" type="button" data-settings-target="settings-path"><svg class="ci" viewBox="0 0 24 24" width="15" height="15"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg><span>Audio path</span></button>
+      </nav>
+      <div class="settings-content" id="settingsContent" tabindex="-1">
+      <section class="settings-section" id="settings-system" data-settings-section>
         <div class="settings-section-head"><h4>System</h4><span class="settings-note">Appearance, interface, and access</span></div>
         <div class="settings-system-row">
           <div class="theme-selector" role="radiogroup" aria-label="Appearance">
@@ -292,7 +312,7 @@
           </div>
         </div>
       </section>
-      <section class="settings-section">
+      <section class="settings-section" id="settings-engine" data-settings-section>
         <div class="settings-section-head"><h4>Engine</h4><span class="tab-note" id="engineNote">…</span></div>
         <div class="engine-body">
           <div class="engine-facts" id="engineFacts"></div>
@@ -309,7 +329,7 @@
           </div>
         </div>
       </section>
-      <section class="settings-section reasoning-settings" id="reasoningSettingsSection">
+      <section class="settings-section reasoning-settings" id="settings-reasoning" data-settings-section>
         <div class="settings-section-head">
           <div><h4>Reasoning</h4><span class="settings-note">Local until you explicitly enable and select another provider</span></div>
           <button class="pill-button small" id="reasoningRefresh" type="button">Refresh</button>
@@ -391,15 +411,26 @@
           <button class="pill-button" id="reasoningSave" type="button">Save reasoning settings</button>
         </div>
       </section>
-      <section class="settings-section">
+      <section class="settings-section native-settings-section" id="settings-shortcuts" data-settings-section>
+        <div class="settings-section-head"><div><h4>Global shortcuts</h4><span class="settings-note">Available anywhere while Oída is running</span></div></div>
+        <div class="shortcut-settings-grid">
+          <label class="shortcut-setting"><span><strong>Summon and listen</strong><small>Show the floating listener and begin listening immediately.</small></span><input id="nativeListenHotkey" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="control+option+l" aria-label="Summon and listen shortcut" /></label>
+          <label class="shortcut-setting"><span><strong>Summon only</strong><small>Show the floating listener without starting a new listen.</small></span><input id="nativeSummonHotkey" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="control+option+h" aria-label="Summon floating listener shortcut" /></label>
+        </div>
+        <div class="shortcut-settings-foot"><span class="settings-note" id="nativeHotkeyStatus">Shortcuts are registered by the macOS app.</span><button class="pill-button" id="nativeHotkeyApply" type="button">Apply shortcuts</button></div>
+      </section>
+      <section class="settings-section" id="settings-path" data-settings-section>
         <div class="settings-section-head"><h4>Path</h4><span class="settings-note" id="audioDirNote"></span></div>
         <div class="path-row">
           <input type="text" id="audioPath" placeholder="~/Documents/oida/audio/…" spellcheck="false" />
           <button class="pill-button" id="analyzePath">Listen</button>
         </div>
       </section>
+      </div>
     </div>
-  </dialog>
+  </section>
+
+  <!-- ────────────── Skill / Wiki modals ──────────── -->
   <dialog class="modal" id="skillModal" aria-label="Skills">
     <div class="modal-head"><h3>Skills <span class="tab-note" id="skillNote"></span></h3><button class="modal-close" data-close aria-label="Close">×</button></div>
     <div class="modal-content"><div class="skill-list" id="skillList"></div></div>
@@ -429,6 +460,6 @@
   </dialog>
 
 </main>
-  <script src="/static/app.js?v=28"></script>
+  <script src="/static/app.js?v=29"></script>
 </body>
 </html>

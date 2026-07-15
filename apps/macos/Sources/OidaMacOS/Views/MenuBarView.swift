@@ -14,13 +14,13 @@ struct MenuBarView: View {
             Divider()
 
             Button(store.isListening ? "Listening…" : (store.isProcessing ? "Operating listening…" : "Listen now")) {
+                store.showFloatingListener()
                 Task { await store.listenNow() }
             }
             .disabled(store.isListenBusy || !store.daemonOnline)
-            .keyboardShortcut("l", modifiers: [.command, .option])
 
-            Button("Show/Hide Floating Listener") {
-                store.toggleFloatingListener()
+            Button("Show Floating Listener") {
+                store.showFloatingListener()
             }
 
             Button("Open Control Center") {
@@ -30,6 +30,12 @@ struct MenuBarView: View {
 
             Button("Open in Browser") {
                 store.openDashboard()
+            }
+
+            Button("Settings…") {
+                openWindow(id: "main")
+                store.presentSettings()
+                NSApp.activate(ignoringOtherApps: true)
             }
 
             Divider()

@@ -22,15 +22,14 @@ struct OidaMacOSApp: App {
         .commands {
             CommandMenu("oída") {
                 Button(store.isListening ? "Listening…" : (store.isProcessing ? "Operating listening…" : "Listen Now")) {
+                    store.showFloatingListener()
                     Task { await store.listenNow() }
                 }
-                .keyboardShortcut("l", modifiers: [.command, .option])
                 .disabled(store.isListenBusy)
 
-                Button("Show/Hide Floating Listener") {
-                    store.toggleFloatingListener()
+                Button("Show Floating Listener") {
+                    store.showFloatingListener()
                 }
-                .keyboardShortcut("h", modifiers: [.command, .option])
 
                 Button(store.isPaused ? "Resume Listening" : "Pause Listening") {
                     Task { await store.togglePause() }
@@ -42,18 +41,22 @@ struct OidaMacOSApp: App {
                 }
                 .keyboardShortcut("d", modifiers: [.command, .option])
             }
+
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    store.presentSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
 
-        Settings {
-            SettingsView()
-                .environmentObject(store)
-                .frame(width: 480)
-                .padding()
-        }
-
-        MenuBarExtra("oída", systemImage: "waveform.path") {
+        MenuBarExtra {
             MenuBarView()
                 .environmentObject(store)
+        } label: {
+            Image(nsImage: AppLogoSymbol.image())
+                .renderingMode(.template)
+                .accessibilityLabel("oída")
         }
     }
 }

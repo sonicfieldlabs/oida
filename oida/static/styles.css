@@ -2261,3 +2261,295 @@ body:not(.native) .side-top .sources { gap: 5px; }
 .external-audio-check {
   grid-column: 1 / -1;
 }
+
+/* ═══════════════ v29 — balanced rails + workspace settings ═══════════════ */
+
+/* Sessions, their listening results, and memories meet at one calm density.
+   Context controls float over the row instead of consuming layout width. */
+.side-left .history-list,
+.side-left .memory-list { gap: 3px; }
+.side-left .session-group { padding: 2px 0 8px; }
+.side-left .session-summary,
+.side-left .session-event,
+.side-left .memory-item {
+  min-height: 31px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.side-left .session-summary { gap: 7px; }
+.side-left .session-events {
+  gap: 3px;
+  padding: 3px 0 4px 12px;
+}
+.side-left .session-event-row,
+.side-left .memory-row { width: 100%; }
+.side-left .session-summary > .session-menu,
+.side-left .session-event-row > .session-menu,
+.side-left .memory-row > .session-menu {
+  position: absolute;
+  z-index: 28;
+  top: 50%;
+  right: 4px;
+  margin: 0;
+  transform: translateY(-50%);
+}
+.side-left .session-menu .drop-menu {
+  top: calc(100% + 5px);
+  right: 0;
+  bottom: auto;
+  z-index: 52;
+}
+.side-left .session-more {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--faint);
+  opacity: .7;
+  background: transparent;
+}
+.side-left .session-more:hover,
+.side-left .session-more[aria-expanded="true"] {
+  color: var(--ink);
+  opacity: 1;
+  background: transparent;
+}
+.sidebar-action-glyph { stroke-width: 1.3; }
+.side-left .session-meta,
+.side-left .memory-item .ri-meta { transition: opacity .12s ease; }
+.side-left .session-summary:hover .session-meta,
+.side-left .session-summary:focus-within .session-meta,
+.side-left .memory-row:hover .ri-meta,
+.side-left .memory-row:focus-within .ri-meta { opacity: 0; }
+
+/* Search belongs to the Memory heading, in the same position as New Session. */
+.side-head .memory-search-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+.side-head .memory-search-icon:hover { background: var(--well); }
+.side-left .memory-search { margin-bottom: 6px; }
+
+/* Settings replaces the application workspace and keeps every section in one
+   scrollable page, with a stable source-list style navigator. */
+body.settings-open { overflow: hidden; }
+.settings-page {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+}
+.settings-page[hidden] { display: none; }
+.settings-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  min-height: 64px;
+  padding: 11px 20px 10px 22px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-page-head > div { display: flex; flex-direction: column; gap: 0; }
+.settings-page-kicker {
+  color: var(--faint);
+  font: 9px/1.2 var(--mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.settings-page-head h2 {
+  margin: 1px 0 0;
+  font-size: 19px;
+  font-weight: 620;
+  letter-spacing: -.02em;
+}
+.settings-page-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.settings-page-close:hover { color: var(--ink); background: var(--well); }
+.settings-page-body {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 16px 12px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12.5px;
+}
+.settings-nav-item .ci { flex: none; color: var(--faint); }
+.settings-nav-item:hover { background: var(--well); color: var(--ink); }
+.settings-nav-item.active { background: var(--sel); color: var(--ink); }
+.settings-nav-item.active .ci { color: var(--ink); }
+.settings-page .settings-content {
+  display: block;
+  height: 100%;
+  max-height: none;
+  min-width: 0;
+  padding: 0 clamp(24px, 5vw, 72px) 64px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: 18px;
+}
+.settings-page .settings-section {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  padding: 30px 0 38px;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 18px;
+}
+.settings-page .settings-section:first-child { padding-top: 28px; border-top: 0; }
+.settings-page .settings-section-head { margin-bottom: 15px; }
+.settings-page .engine-models .cfg { flex: 1 1 220px; }
+.settings-page .engine-models select { width: 100%; }
+.settings-page .path-row { display: flex; gap: 7px; }
+.settings-page .path-row input { flex: 1; min-width: 0; }
+body:not(.native) .native-settings-section,
+body:not(.native) .native-settings-nav { display: none; }
+.shortcut-settings-grid { display: grid; gap: 7px; }
+.shortcut-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
+  align-items: center;
+  gap: 18px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--well);
+}
+.shortcut-setting > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.shortcut-setting strong { font-size: 12.5px; font-weight: 610; }
+.shortcut-setting small { color: var(--faint); font-size: 10.5px; line-height: 1.4; }
+.shortcut-setting input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--ctl);
+  font: 11px var(--mono);
+}
+.shortcut-settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+/* The ask surface exposes advanced controls only when requested. */
+.conversation-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.conversation-heading { flex: 1; }
+.conversation-option-trigger {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.conversation-option-trigger > span { display: none; }
+.conversation-option-trigger:hover,
+.conversation-option-trigger[aria-expanded="true"] { color: var(--ink); background: var(--well); }
+.conversation-reasoning-menu { position: relative; }
+.conversation-reasoning-popover {
+  top: calc(100% + 6px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+  width: min(320px, calc(100vw - 40px));
+  min-width: 280px;
+  padding: 12px;
+  gap: 9px;
+  z-index: 70;
+}
+.conversation-reasoning-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 1px;
+}
+.conversation-reasoning-head strong { font-size: 12px; font-weight: 610; }
+.conversation-reasoning-popover .cfg {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.conversation-reasoning-popover select { width: 100%; min-width: 0; }
+.conversation-context > summary {
+  padding-block: 8px;
+  transition: background .12s ease, color .12s ease;
+}
+.conversation-context > summary:hover { background: color-mix(in srgb, var(--well) 55%, transparent); color: var(--ink); }
+.conversation-context-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font: inherit;
+}
+.conversation-context > summary .conversation-context-label,
+.conversation-context > summary .conversation-context-label > span:not(.conversation-context-caret) {
+  color: var(--muted);
+  font: 500 11px/1.2 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.conversation-context-label .ci { color: var(--faint); }
+.conversation-context-caret {
+  width: 6px;
+  height: 6px;
+  margin-left: 2px;
+  border-right: 1.4px solid var(--faint);
+  border-bottom: 1.4px solid var(--faint);
+  transform: rotate(45deg);
+  transition: transform .14s ease;
+}
+.conversation-context[open] .conversation-context-caret { transform: rotate(225deg); }
+
+@media (max-width: 720px) {
+  .settings-page-body { grid-template-columns: 58px minmax(0, 1fr); }
+  .settings-sidebar { padding-inline: 8px; }
+  .settings-nav-item { justify-content: center; padding-inline: 0; }
+  .settings-nav-item span { display: none; }
+  .settings-page .settings-content { padding-inline: 18px; }
+  .shortcut-setting { grid-template-columns: 1fr; gap: 8px; }
+  .shortcut-settings-foot { align-items: stretch; flex-direction: column; }
+}

@@ -57,12 +57,13 @@ final class ShellStore: ObservableObject {
             UserDefaults.standard.set(listenHotkey, forKey: Defaults.captureHotkey)
         }
     }
-    @Published var toggleHotkey: String {
+    @Published var summonHotkey: String {
         didSet {
-            UserDefaults.standard.set(toggleHotkey, forKey: Defaults.toggleHotkey)
+            UserDefaults.standard.set(summonHotkey, forKey: Defaults.summonHotkey)
         }
     }
     @Published var hotkeyStatus = "No global hotkey"
+    @Published private(set) var settingsRequestID = 0
     @Published private(set) var listeningPhase = ListeningPhase.idle
     @Published private(set) var listeningProgress = 0.0
     @Published private(set) var listeningSecondsRemaining: Double?
@@ -130,7 +131,7 @@ final class ShellStore: ObservableObject {
         let url = UserDefaults.standard.string(forKey: Defaults.daemonBaseURL) ?? "http://127.0.0.1:8765"
         daemonBaseURL = url
         listenHotkey = UserDefaults.standard.string(forKey: Defaults.captureHotkey) ?? "control+option+l"
-        toggleHotkey = UserDefaults.standard.string(forKey: Defaults.toggleHotkey) ?? "control+option+h"
+        summonHotkey = UserDefaults.standard.string(forKey: Defaults.summonHotkey) ?? "control+option+h"
         selectedSource = UserDefaults.standard.string(forKey: Defaults.listenSource) ?? "system"
         selectedPreset = UserDefaults.standard.string(forKey: Defaults.routePreset) ?? "basic"
         customSkillIDs = nil
@@ -1212,17 +1213,23 @@ final class ShellStore: ObservableObject {
         NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
     }
 
+    func presentSettings() {
+        settingsRequestID &+= 1
+        openControlCenter()
+    }
+
     // MARK: - Hotkeys
 
     private enum HotkeyID {
         static let listen: UInt32 = 1
-        static let toggle: UInt32 = 2
+        static let summon: UInt32 = 2
     }
 
     func registerHotkeys() {
         var parts: [String] = []
         switch GlobalHotkeyManager.shared.register(id: HotkeyID.listen, bindingText: listenHotkey, action: { [weak self] in
             Task { @MainActor in
+                self?.showFloatingListener()
                 await self?.listenNow()
             }
         }) {
@@ -1233,15 +1240,15 @@ final class ShellStore: ObservableObject {
         case .failed(let status):
             parts.append("listen failed (\(status))")
         }
-        switch GlobalHotkeyManager.shared.register(id: HotkeyID.toggle, bindingText: toggleHotkey, action: { [weak self] in
-            self?.toggleFloatingListener()
+        switch GlobalHotkeyManager.shared.register(id: HotkeyID.summon, bindingText: summonHotkey, action: { [weak self] in
+            self?.showFloatingListener()
         }) {
         case .registered(let display):
-            parts.append("panel \(display)")
+            parts.append("summon \(display)")
         case .invalid(let reason):
-            parts.append("panel: \(reason)")
+            parts.append("summon: \(reason)")
         case .failed(let status):
-            parts.append("panel failed (\(status))")
+            parts.append("summon failed (\(status))")
         }
         hotkeyStatus = parts.joined(separator: " · ")
     }
@@ -1341,7 +1348,9 @@ final class ShellStore: ObservableObject {
 private enum Defaults {
     static let daemonBaseURL = "oida.daemonBaseURL"
     static let captureHotkey = "oida.captureHotkey"
-    static let toggleHotkey = "oida.toggleHotkey"
+    // Preserve the original defaults key so existing user bindings migrate
+    // from the old toggle behavior to the new summon-only behavior.
+    static let summonHotkey = "oida.toggleHotkey"
     static let listenSource = "oida.listenSource"
     static let routePreset = "oida.routePreset"
     static let listenDirection = "oida.listenDirection"

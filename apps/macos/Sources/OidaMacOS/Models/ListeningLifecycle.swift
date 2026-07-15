@@ -24,6 +24,10 @@ struct DashboardNativeState: Codable, Equatable {
     let selectedSkillIDs: [String]?
     let musicIDEnabled: Bool
     let appearance: String
+    let settingsRequestID: Int
+    let listenHotkey: String
+    let summonHotkey: String
+    let hotkeyStatus: String
 }
 
 struct DashboardShellMessage {
@@ -37,6 +41,8 @@ struct DashboardShellMessage {
     let musicIDEnabled: Bool?
     let appearance: String?
     let sessionName: String?
+    let listenHotkey: String?
+    let summonHotkey: String?
 
     init?(body: Any) {
         if let action = body as? String {
@@ -50,6 +56,8 @@ struct DashboardShellMessage {
             musicIDEnabled = nil
             appearance = nil
             sessionName = nil
+            listenHotkey = nil
+            summonHotkey = nil
             return
         }
         guard let payload = body as? [String: Any], let action = payload["action"] as? String else {
@@ -64,6 +72,8 @@ struct DashboardShellMessage {
         musicIDEnabled = (payload["musicId"] as? NSNumber)?.boolValue
         appearance = payload["appearance"] as? String
         sessionName = payload["sessionName"] as? String
+        listenHotkey = payload["listenHotkey"] as? String
+        summonHotkey = payload["summonHotkey"] as? String
         if let value = payload["seconds"] as? NSNumber {
             seconds = value.doubleValue
         } else {

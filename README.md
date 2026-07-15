@@ -189,8 +189,8 @@ name **oída**.
   **floating listener** — a borderless, transparent, always-on-top
   listening-result box with a small reactive waveform, an in-place editable
   result title, and share/copy actions; its controls float just outside the
-  box and appear on hover. Global hotkeys default to ⌃⌥L (listen) and ⌃⌥H
-  (show/hide it).
+  box and appear on hover. Global hotkeys default to ⌃⌥L (summon the
+  listener and listen) and ⌃⌥H (summon it without starting a listen).
 - CLI (`oida listen/live/background/memory/chat/sweep/corpus-qa/bench`), `ear`
   and `akoe` helper CLIs, and an official MCP server exposing compact
   `oida_*` listening, harness, memory, and live tools (legacy aliases kept on

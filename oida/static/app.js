@@ -39,6 +39,10 @@ const state = {
   monitor: null, // {stream, ctx, analyser, raf, peak}
   diagnostics: [],
   nativeEventId: null,
+  nativeSettingsRequestID: 0,
+  nativeListenHotkey: "",
+  nativeSummonHotkey: "",
+  nativeHotkeyDraftDirty: false,
   historyRequestSerial: 0,
   activeSpectrogram: null,
   reasoningSettings: null,
@@ -102,7 +106,9 @@ const ui = {
   configButton: el("configButton"),
   sourceModal: el("sourceModal"),
   sourceModalTitle: el("sourceModalTitle"),
-  settingsModal: el("settingsModal"),
+  settingsPage: el("settingsPage"),
+  settingsClose: el("settingsClose"),
+  settingsContent: el("settingsContent"),
   themeLight: el("themeLight"),
   themeDark: el("themeDark"),
   resetInterface: el("resetInterface"),
@@ -131,6 +137,10 @@ const ui = {
   reasoningExternalAudio: el("reasoningExternalAudio"),
   reasoningSave: el("reasoningSave"),
   reasoningSaveNote: el("reasoningSaveNote"),
+  nativeListenHotkey: el("nativeListenHotkey"),
+  nativeSummonHotkey: el("nativeSummonHotkey"),
+  nativeHotkeyApply: el("nativeHotkeyApply"),
+  nativeHotkeyStatus: el("nativeHotkeyStatus"),
   conversationPanel: el("conversationPanel"),
   conversationClose: el("conversationClose"),
   conversationTitle: el("conversationTitle"),
@@ -488,27 +498,99 @@ ui.warmEngine.addEventListener("click", async () => {
   }
 });
 
-/* ─────────────────────── settings / skill / source modals ───────────── */
+/* ─────────────────────── settings page / auxiliary modals ───────────── */
 
-const PANEL_DIALOGS = { skill: "skillModal", settings: "settingsModal" };
+const PANEL_DIALOGS = { skill: "skillModal" };
+const workspaceShell = document.querySelector(".shell");
 
-// Callable from the native shell and the rail icons; renders each panel as a
-// modal dialog. Modals are exclusive: opening one closes whatever is open.
+function setActiveSettingsSection(sectionId) {
+  document.querySelectorAll("[data-settings-target]").forEach((button) => {
+    const active = button.dataset.settingsTarget === sectionId;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "true" : "false");
+  });
+}
+
+function syncNativeHotkeyFields() {
+  if (ui.nativeListenHotkey && state.nativeListenHotkey) {
+    ui.nativeListenHotkey.value = state.nativeListenHotkey;
+  }
+  if (ui.nativeSummonHotkey && state.nativeSummonHotkey) {
+    ui.nativeSummonHotkey.value = state.nativeSummonHotkey;
+  }
+}
+
+function openSettingsPage(sectionId = null) {
+  if (!ui.settingsPage) return;
+  document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
+  ui.settingsPage.hidden = false;
+  document.body.classList.add("settings-open");
+  workspaceShell?.setAttribute("aria-hidden", "true");
+  if (workspaceShell) workspaceShell.inert = true;
+  refreshReasoning();
+  const target = sectionId ? document.getElementById(sectionId) : null;
+  if (target) {
+    setActiveSettingsSection(sectionId);
+    requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
+  } else {
+    ui.settingsContent?.scrollTo({ top: 0 });
+    setActiveSettingsSection("settings-system");
+  }
+  requestAnimationFrame(() => ui.settingsClose?.focus());
+}
+
+function closeSettingsPage() {
+  if (!ui.settingsPage || ui.settingsPage.hidden) return;
+  ui.settingsPage.hidden = true;
+  document.body.classList.remove("settings-open");
+  workspaceShell?.removeAttribute("aria-hidden");
+  if (workspaceShell) workspaceShell.inert = false;
+  state.nativeHotkeyDraftDirty = false;
+  syncNativeHotkeyFields();
+  ui.configButton?.focus();
+}
+
+// Callable from both the native shell and the dashboard. Settings replaces the
+// workspace; smaller auxiliary surfaces continue to use scoped dialogs.
 window.oidaOpenPanel = (name) => {
+  if (name === "settings") {
+    openSettingsPage();
+    return;
+  }
   const target = document.getElementById(PANEL_DIALOGS[name]);
   if (!target || typeof target.showModal !== "function") return;
+  closeSettingsPage();
   document.querySelectorAll("dialog[open]").forEach((other) => { if (other !== target) other.close(); });
   if (!target.open) target.showModal();
-  if (name === "settings") {
-    refreshReasoning();
-  }
 };
+
+ui.settingsClose?.addEventListener("click", closeSettingsPage);
+document.querySelectorAll("[data-settings-target]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const target = document.getElementById(button.dataset.settingsTarget);
+    if (!target) return;
+    setActiveSettingsSection(target.id);
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+});
+ui.settingsContent?.addEventListener("scroll", () => {
+  const sections = [...document.querySelectorAll("[data-settings-section]")]
+    .filter((section) => section.offsetParent !== null);
+  const contentTop = ui.settingsContent.getBoundingClientRect().top;
+  const current = sections
+    .map((section) => ({ section, distance: Math.abs(section.getBoundingClientRect().top - contentTop - 18) }))
+    .sort((a, b) => a.distance - b.distance)[0]?.section;
+  if (current) setActiveSettingsSection(current.id);
+});
 
 document.querySelectorAll(".modal").forEach((dialog) => {
   dialog.querySelector("[data-close]")?.addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
 });
 ui.sonogramModal?.addEventListener("close", () => { state.activeSpectrogram = null; });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !ui.settingsPage?.hidden) closeSettingsPage();
+});
 window.addEventListener("resize", () => {
   if (ui.sonogramModal?.open && state.activeSpectrogram) {
     requestAnimationFrame(() => drawSpectrogram(state.activeSpectrogram, ui.sonogramModalCanvas));
@@ -557,6 +639,19 @@ document.querySelectorAll("[data-theme-choice]").forEach((button) => {
 applyTheme(state.theme, false);
 
 ui.configButton?.addEventListener("click", () => window.oidaOpenPanel("settings"));
+[ui.nativeListenHotkey, ui.nativeSummonHotkey].filter(Boolean).forEach((input) => {
+  input.addEventListener("input", () => { state.nativeHotkeyDraftDirty = true; });
+});
+ui.nativeHotkeyApply?.addEventListener("click", () => {
+  const listenHotkey = ui.nativeListenHotkey?.value.trim();
+  const summonHotkey = ui.nativeSummonHotkey?.value.trim();
+  if (!listenHotkey || !summonHotkey) {
+    ui.nativeHotkeyStatus.textContent = "Enter both shortcuts before applying.";
+    return;
+  }
+  shellAction({ action: "hotkeys", listenHotkey, summonHotkey });
+  ui.nativeHotkeyStatus.textContent = "Applying shortcuts…";
+});
 ui.resetInterface?.addEventListener("click", () => {
   for (const key of ["oida.side.left", "oida.side.right", "oida.side.left.width", "oida.side.right.width"]) {
     localStorage.removeItem(key);
@@ -601,6 +696,22 @@ window.oidaNativeState = (nativeState) => {
     localStorage.setItem("oida.music-id", state.musicIDEnabled ? "on" : "off");
   }
   if (nativeState.appearance) applyTheme(nativeState.appearance, false);
+  if (typeof nativeState.listenHotkey === "string") state.nativeListenHotkey = nativeState.listenHotkey;
+  if (typeof nativeState.summonHotkey === "string") state.nativeSummonHotkey = nativeState.summonHotkey;
+  if (state.nativeHotkeyDraftDirty &&
+      ui.nativeListenHotkey?.value === state.nativeListenHotkey &&
+      ui.nativeSummonHotkey?.value === state.nativeSummonHotkey) {
+    state.nativeHotkeyDraftDirty = false;
+  }
+  if (!state.nativeHotkeyDraftDirty) syncNativeHotkeyFields();
+  if (typeof nativeState.hotkeyStatus === "string" && ui.nativeHotkeyStatus) {
+    ui.nativeHotkeyStatus.textContent = nativeState.hotkeyStatus;
+  }
+  const settingsRequestID = Number(nativeState.settingsRequestID) || 0;
+  if (settingsRequestID > state.nativeSettingsRequestID) {
+    state.nativeSettingsRequestID = settingsRequestID;
+    openSettingsPage();
+  }
   renderPresets();
   renderSkills();
   if (Number(nativeState.captureSeconds) > 0) {
@@ -2329,6 +2440,8 @@ async function refreshHistory(options = {}) {
   }
 }
 
+const SIDEBAR_ACTION_ICON = `<svg class="ci sidebar-action-glyph" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M10.2 15.8a4.5 4.5 0 1 0-2-7.8"/><path d="M14.7 18.7A8 8 0 1 0 6 5.3" opacity=".72"/><circle cx="10.5" cy="11.5" r="1" fill="currentColor" stroke="none"/></svg>`;
+
 function renderSessionList(container, sessions, archived) {
   container.innerHTML = "";
   const filteredSessions = hasTagFilters()
@@ -2408,7 +2521,7 @@ function sessionMenu(session, archived) {
   const button = document.createElement("button");
   button.className = "session-more";
   button.type = "button";
-  button.textContent = "•••";
+  button.innerHTML = SIDEBAR_ACTION_ICON;
   button.title = `Session actions for ${session.name || "listening session"}`;
   button.setAttribute("aria-label", button.title);
   button.setAttribute("aria-haspopup", "true");
@@ -2462,7 +2575,7 @@ function listeningMenu(event, session) {
   const button = document.createElement("button");
   button.className = "session-more";
   button.type = "button";
-  button.textContent = "•••";
+  button.innerHTML = SIDEBAR_ACTION_ICON;
   button.title = `Listening actions for ${event.aggregate?.title || "listening result"}`;
   button.setAttribute("aria-label", button.title);
   button.setAttribute("aria-haspopup", "true");
@@ -2653,7 +2766,7 @@ function memoryMenu(record) {
   const button = document.createElement("button");
   button.className = "session-more";
   button.type = "button";
-  button.textContent = "•••";
+  button.innerHTML = SIDEBAR_ACTION_ICON;
   button.title = `Memory actions for ${record.summary || record.akousma_id}`;
   button.setAttribute("aria-label", button.title);
   button.setAttribute("aria-haspopup", "true");
@@ -2735,7 +2848,13 @@ async function handleMemoryAction(action, record) {
   }
 }
 
-ui.memoryGo.addEventListener("click", () => refreshMemory(ui.memorySearch.value.trim() || undefined));
+ui.memoryGo.addEventListener("click", (interaction) => {
+  interaction.preventDefault();
+  interaction.stopPropagation();
+  const query = ui.memorySearch.value.trim();
+  if (query) refreshMemory(query);
+  ui.memorySearch.focus();
+});
 ui.memorySearch.addEventListener("keydown", (event) => {
   if (event.key === "Enter") refreshMemory(ui.memorySearch.value.trim() || undefined);
 });

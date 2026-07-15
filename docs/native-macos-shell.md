@@ -89,12 +89,13 @@ Metal support; the visualization is pure SwiftUI.
 
 Global hotkeys are registered at startup and editable in Settings:
 
-- `⌃⌥L` — listen now (source-aware: system, mic, or file picker)
-- `⌃⌥H` — show/hide the floating listener
+- `⌃⌥L` — summon the floating listener and listen now (source-aware: system,
+  mic, or file picker)
+- `⌃⌥H` — summon the floating listener without starting a listen
 
 Bindings use Carbon `RegisterEventHotKey` with the format
-`control+option+l`. The same shortcuts work as app menu commands, alongside
-`⌃⌥P` (pause/resume) and `⌃⌥D` (open dashboard in browser).
+`control+option+l`. The app menu exposes the same listening and summon actions,
+alongside `⌘⌥P` (pause/resume) and `⌘⌥D` (open dashboard in browser).
 
 ## Native System Audio
 

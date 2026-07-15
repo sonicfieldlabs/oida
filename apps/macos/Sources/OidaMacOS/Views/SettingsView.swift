@@ -41,13 +41,13 @@ struct SettingsView: View {
             }
 
             Section("Global Hotkeys") {
-                LabeledContent("Listen (capture system audio)") {
+                LabeledContent("Summon and listen") {
                     TextField("control+option+l", text: $store.listenHotkey)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 180)
                 }
-                LabeledContent("Show/hide floating listener") {
-                    TextField("control+option+h", text: $store.toggleHotkey)
+                LabeledContent("Summon floating listener") {
+                    TextField("control+option+h", text: $store.summonHotkey)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 180)
                 }

@@ -54,7 +54,8 @@ struct ContentView: View {
                 store.selectedSource = "file"
                 Task { await store.listenNow(source: "file") }
             },
-            onOpenSettings: { openDashboardPanel("settings") },
+            onToggleFloating: { store.toggleFloatingListener() },
+            onOpenSettings: { store.presentSettings() },
             onToggleRight: { toggleDashboardSidebar("right") }
         ))
         .onChange(of: store.daemonOnline) { online in
@@ -101,7 +102,11 @@ struct ContentView: View {
             customMode: store.customSkillIDs != nil,
             selectedSkillIDs: store.customSkillIDs,
             musicIDEnabled: store.musicIDEnabled,
-            appearance: store.appearanceMode
+            appearance: store.appearanceMode,
+            settingsRequestID: store.settingsRequestID,
+            listenHotkey: store.listenHotkey,
+            summonHotkey: store.summonHotkey,
+            hotkeyStatus: store.hotkeyStatus
         )
     }
 
@@ -112,10 +117,6 @@ struct ContentView: View {
     private func selectDashboardSource(_ source: String) {
         store.selectedSource = source
         web.webView?.evaluateJavaScript("window.oidaSelectSource?.('\(source)');")
-    }
-
-    private func openDashboardPanel(_ panel: String) {
-        web.webView?.evaluateJavaScript("window.oidaOpenPanel?.('\(panel)');")
     }
 
     private func handleShellMessage(_ message: DashboardShellMessage) {
@@ -151,6 +152,16 @@ struct ContentView: View {
             store.openDashboard()
         case "capture-permission":
             store.openSystemAudioCaptureSettings()
+        case "hotkeys":
+            if let listenHotkey = message.listenHotkey?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !listenHotkey.isEmpty {
+                store.listenHotkey = listenHotkey
+            }
+            if let summonHotkey = message.summonHotkey?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !summonHotkey.isEmpty {
+                store.summonHotkey = summonHotkey
+            }
+            store.registerHotkeys()
         case "listen":
             Task {
                 await store.listenNow(
