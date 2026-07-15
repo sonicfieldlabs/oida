@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
-from urllib import request
+
+from oida.reasoning.providers.base import UrllibJsonTransport, join_url
+
+
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
 def _headers(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -14,23 +17,32 @@ def _headers(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def get_json(server: str, endpoint: str, timeout: int = 120) -> dict[str, object]:
-    url = f"{server.rstrip('/')}/{endpoint.lstrip('/')}"
-    req = request.Request(url, headers=_headers(), method="GET")
-    with request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    return _request_json("GET", server, endpoint, timeout=timeout)
 
 
 def post_json(server: str, endpoint: str, payload: dict[str, object], timeout: int = 600) -> dict[str, object]:
-    url = f"{server.rstrip('/')}/{endpoint.lstrip('/')}"
-    data = json.dumps(payload).encode("utf-8")
-    req = request.Request(url, data=data, headers=_headers({"Content-Type": "application/json"}), method="POST")
-    with request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    return _request_json("POST", server, endpoint, payload=payload, timeout=timeout)
 
 
 def put_json(server: str, endpoint: str, payload: dict[str, object], timeout: int = 600) -> dict[str, object]:
-    url = f"{server.rstrip('/')}/{endpoint.lstrip('/')}"
-    data = json.dumps(payload).encode("utf-8")
-    req = request.Request(url, data=data, headers=_headers({"Content-Type": "application/json"}), method="PUT")
-    with request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    return _request_json("PUT", server, endpoint, payload=payload, timeout=timeout)
+
+
+def _request_json(
+    method: str,
+    server: str,
+    endpoint: str,
+    *,
+    payload: dict[str, object] | None = None,
+    timeout: int,
+) -> dict[str, object]:
+    response = UrllibJsonTransport(max_response_bytes=MAX_RESPONSE_BYTES).request(
+        method,
+        join_url(server, endpoint),
+        payload=payload,
+        headers=_headers(),
+        timeout=timeout,
+    )
+    if not isinstance(response.data, dict):
+        raise ValueError("Oída server returned a non-object JSON response")
+    return response.data

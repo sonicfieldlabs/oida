@@ -191,7 +191,7 @@ class CovenantEndpointTests(unittest.TestCase):
             block = event["covenant"]
             self.assertEqual(block["id"], "river-covenant/2")
             self.assertEqual(block["commitments"], 2)
-            self.assertIn("max window: 30 s", block["rules_applied"])
+            self.assertIn("max_window:30", block["rules_applied"])
             self.assertEqual(event["capture"]["seconds"], 30.0)
             self.assertGreaterEqual(event["location"]["accuracy_m"], 1000.0)
             subjects = {item["subject"] for item in block.get("withheld", [])}
@@ -204,6 +204,25 @@ class CovenantEndpointTests(unittest.TestCase):
             )
             self.assertEqual(clean.status_code, 200)
             self.assertNotIn("covenant", clean.json()["listening_event"])
+
+    def test_max_window_refuses_an_unsliced_file_before_perception(self):
+        short_window = "# short window\n## rules\n- max window: 0.1 s\n"
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, self._client_env(tmp), clear=False):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            client.put(
+                "/covenant",
+                json={"name": "short-window", "text": short_window, "activate": True},
+            )
+            path = _write_tone(Path(tmp) / "one-second.wav")
+            with patch("oida.server.report") as report:
+                response = client.post(
+                    "/listen-event",
+                    json={"path": str(path), "source_type": "file"},
+                )
+
+            self.assertEqual(response.status_code, 423, response.text)
+            self.assertIn("already be bounded to 0.1 seconds", response.json()["detail"])
+            report.assert_not_called()
 
     def test_gateway_listen_memory_retention_gate(self):
         memory_covenant = "# quiet house\n## rules\n- do not retain: memory\n"

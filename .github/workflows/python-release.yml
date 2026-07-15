@@ -1,0 +1,117 @@
+name: Publish Python stack
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify distributions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Oída
+        uses: actions/checkout@v4
+        with:
+          path: oida
+
+      - name: Checkout AKOÚŌ contract
+        uses: actions/checkout@v4
+        with:
+          repository: sonicfieldlabs/akouo
+          ref: v0.7.0
+          path: akouo
+
+      - name: Checkout Earworm
+        uses: actions/checkout@v4
+        with:
+          repository: sonicfieldlabs/earworm
+          ref: v0.4.0
+          path: earworm
+
+      - name: Checkout Akousmata
+        uses: actions/checkout@v4
+        with:
+          repository: sonicfieldlabs/akousmata
+          ref: v0.4.0
+          path: akousmata
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify release tag and project version
+        working-directory: oida
+        run: |
+          release_version="${GITHUB_REF_NAME#v}"
+          project_version="$(uv version --short)"
+          test "$release_version" = "$project_version"
+
+      - name: Build all canonical distributions
+        run: |
+          mkdir -p release/akouo release/akousma release/akousmata release/oida
+          uv build --out-dir "$GITHUB_WORKSPACE/release/akouo" akouo
+          uv build --out-dir "$GITHUB_WORKSPACE/release/akousma" earworm/packages/py-akousma
+          uv build --out-dir "$GITHUB_WORKSPACE/release/akousmata" akousmata
+          uv build --out-dir "$GITHUB_WORKSPACE/release/oida" oida
+
+      - name: Verify Oída wheel in an isolated environment
+        run: |
+          cd "$RUNNER_TEMP"
+          uv run --isolated --no-project \
+            --find-links "$GITHUB_WORKSPACE/release/akouo" \
+            --find-links "$GITHUB_WORKSPACE/release/akousma" \
+            --find-links "$GITHUB_WORKSPACE/release/akousmata" \
+            --with "$GITHUB_WORKSPACE"/release/oida/sonicfield_oida-*.whl \
+            python -c 'import oida, oida.server; print(oida.__version__)'
+
+      - name: Upload verified distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: release
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish verified stack to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: release
+
+      - name: Publish AKOÚŌ contract
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: release/akouo
+          skip-existing: true
+
+      - name: Publish Akousma
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: release/akousma
+          skip-existing: true
+
+      - name: Publish Akousmata
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: release/akousmata
+          skip-existing: true
+
+      - name: Publish Oída
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: release/oida
+          skip-existing: true

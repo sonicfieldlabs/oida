@@ -20,6 +20,9 @@ describe its structured observations with oida_harness instead; Oída will add
 AKOÚŌ routing and claim discipline, Earworm provenance, and Akousmata memory.
 Never label model narrative as measured evidence unless a DSP/metadata/human
 measurement source exists. Remembering is explicit and raw audio stays local.
+For a follow-up answered by the current host model, use oida_prepare_turn and
+oida_commit_turn so Oída still owns evidence, privacy, and persistence. Use
+oida_ask for a daemon-managed reasoner.
 """.strip()
 
 MCP = FastMCP(
@@ -124,23 +127,88 @@ async def oida_harness(
 @MCP.tool(structured_output=True)
 async def oida_ask(
     question: str,
+    event_id: str | None = None,
     event: dict[str, Any] | None = None,
     conversation_id: str | None = None,
     include_memory: bool = True,
+    provider_id: str | None = None,
+    model_id: str | None = None,
+    profile_id: str | None = None,
+    comparison_event_ids: list[str] | None = None,
+    allow_targeted_relisten: bool | None = None,
+    include_transcript: bool | None = None,
+    include_memory_content: bool | None = None,
 ) -> dict[str, Any]:
-    """Ask a grounded follow-up question about a normalized listening event."""
+    """Ask a daemon-managed reasoner a grounded question about one immutable event."""
     return await asyncio.to_thread(
         post_json,
         _server(),
         "/conversation/ask",
         {
             "question": question,
+            "event_id": event_id,
             "event": event,
             "conversation_id": conversation_id,
             "include_memory": include_memory,
-            "allow_remote_model": False,
-            "provider": "local_structured",
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "profile_id": profile_id,
+            "comparison_event_ids": comparison_event_ids or [],
+            "allow_targeted_relisten": allow_targeted_relisten,
+            "include_transcript": include_transcript,
+            "include_memory_content": include_memory_content,
         },
+    )
+
+
+@MCP.tool(structured_output=True)
+async def oida_prepare_turn(
+    question: str,
+    event_id: str | None = None,
+    event: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
+    provider_id: str | None = None,
+    model_id: str | None = None,
+    profile_id: str | None = None,
+    comparison_event_ids: list[str] | None = None,
+    include_memory: bool = True,
+    allow_targeted_relisten: bool | None = None,
+    include_transcript: bool | None = None,
+    include_memory_content: bool | None = None,
+) -> dict[str, Any]:
+    """Prepare Oída's protected prompt/evidence packet for this active host to answer."""
+    return await asyncio.to_thread(
+        post_json,
+        _server(),
+        "/conversation/prepare",
+        {
+            "question": question,
+            "event_id": event_id,
+            "event": event,
+            "conversation_id": conversation_id,
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "profile_id": profile_id,
+            "comparison_event_ids": comparison_event_ids or [],
+            "include_memory": include_memory,
+            "allow_targeted_relisten": allow_targeted_relisten,
+            "include_transcript": include_transcript,
+            "include_memory_content": include_memory_content,
+        },
+    )
+
+
+@MCP.tool(structured_output=True)
+async def oida_commit_turn(
+    prepare_token: str,
+    response: dict[str, Any] | str,
+) -> dict[str, Any]:
+    """Validate and commit a prepared host response; may return one follow-up re-listen packet."""
+    return await asyncio.to_thread(
+        post_json,
+        _server(),
+        "/conversation/commit",
+        {"prepare_token": prepare_token, "response": response},
     )
 
 

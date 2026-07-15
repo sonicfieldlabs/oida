@@ -295,7 +295,7 @@ def report(
     if "music" in selected:
         music_obj, music_result = music(engine, path, _float_or_none(features.get("bpmCandidate")) if isinstance(features, dict) else None)
         engine_results.append(music_result)
-        description, music_note = _guard_prose(music_obj.description)
+        _, music_note = _guard_prose(music_obj.description)
         if music_note:
             music_obj = Music(
                 present=False,
@@ -394,7 +394,7 @@ def chunked_report(
             music_obj, music_result = music(engine, str(chunk_paths[0]), _float_or_none(features.get("bpmCandidate")) if isinstance(features, dict) else None)
             music_obj.notes.append("Long-audio report: music interpretation was evaluated on the first chunk only; DSP metrics cover the source file.")
             engine_results.append(music_result)
-            description, music_note = _guard_prose(music_obj.description)
+            _, music_note = _guard_prose(music_obj.description)
             if music_note:
                 music_obj = Music(
                     present=False,

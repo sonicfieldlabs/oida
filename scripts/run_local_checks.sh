@@ -16,6 +16,7 @@ case "$MODE" in
   default)
     ;;
   --release|release)
+    uv build
     apps/macos/script/build_and_run.sh --verify
     apps/macos/script/package_unsigned.sh
     scripts/release_smoke_with_stub.sh

@@ -97,6 +97,7 @@ class OidaFoundationTests(unittest.TestCase):
         self.assertIn("loopback", status.capture_strategy)
         self.assertEqual(status.details["native_signal_tap_raw_audio_policy"], "not_stored_until_explicit_analysis")
         self.assertEqual(status.details["native_temp_analysis_raw_audio_policy"], "temp")
+        self.assertIn("ScreenCaptureKit", status.summary)
 
     def test_browser_device_classification_detects_loopback_labels(self) -> None:
         classified = classify_browser_audio_device("BlackHole 2ch", "device-1")

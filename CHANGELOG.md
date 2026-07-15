@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.6.0 - 2026-07-14
+
+- **Installable Python release chain**: the public distribution is now
+  `sonicfield-oida` because the shorter PyPI name belongs to an unrelated
+  project; imports and CLIs remain `oida`. A tag-gated Trusted Publishing
+  workflow builds, isolates, and publishes the canonical `akouo-contract`,
+  `akousma`, `akousmata`, and Oída distributions without repository tokens.
+
+- **Oída-owned reasoning layer**: event conversation now has a fixed prompt
+  hierarchy, a whitelist-built evidence packet, and a strict response contract.
+  Listening results remain immutable; answer blocks and hypotheses cite stable
+  evidence refs, uncertainty stays explicit, and chain-of-thought is never part
+  of the contract or stored audit data. Conversation records move to v0.2 with
+  read compatibility for v0.1, one primary event anchor, and up to three
+  explicitly selected comparison events.
+- **Choose what each model does**: Reasoning settings assign fast perception,
+  deep perception, transcription, music analysis, conversation, and targeted
+  re-listening independently. The
+  shared dashboard manages provider/model selection and conversation profiles
+  for tone, depth, initiative, focus, language, and bounded custom instructions.
+  Profile text cannot override evidence, covenant, privacy, or output rules.
+- **Capability-aware audio model catalog**: embedded/local-host presets cover
+  MOSS-Audio 8B, MOSS-Music 8B, MOSS Transcribe + Diarize, MiDashengLM,
+  MiMo-Audio, Qwen3-Omni, Gemma 3n, and experimental Mellow. API presets cover
+  Gemini 3.5 Flash, Alibaba Qwen Omni, NVIDIA Nemotron, and the OpenRouter free
+  Nemotron route. Large Qwen/Nemotron targets are configuration-only and were
+  not executed on this machine.
+- **RAM-aware routing**: settings report physical RAM, estimated peak local
+  model memory, residency mode, platform requirements, gated/experimental
+  status, and explicit warnings when a selection exceeds the machine. Models
+  are not downloaded or loaded to calculate this assessment.
+- **Separate external-audio consent**: conversation packets still never contain
+  audio. Cloud perception receives audio bytes only when its provider/model is
+  assigned and enabled and the new default-off permission is on; incognito and
+  raw-audio covenant rules still block it. Requests never expose a local path;
+  larger NVIDIA inputs use a temporary NVCF asset deleted after the call.
+  Targeted re-listening remains local.
+- **Local, host, and explicit cloud providers**: deterministic local reasoning
+  remains the no-model fallback; existing Ollama and OpenAI-compatible endpoints
+  can be added without model downloads. Codex, Claude, Hermes, OpenClaw, and
+  OpenCode can reason through their existing host authentication, while
+  OpenRouter supports BYOK and a localhost PKCE flow. All host and network
+  providers are disabled until the operator enables them.
+- **Evidence stays smaller than the event**: reasoning packets contain only
+  covenant-filtered derived evidence. Raw audio, local paths, source URIs,
+  credentials, and arbitrary event fields are excluded. Transcript and memory
+  content have separate, default-off permissions. Incognito forces local-only
+  reasoning and prevents conversation persistence.
+- **One disclosed local re-listen**: a model may request at most one focused
+  covenant-compliant MOSS/audio pass per turn. Its observation is added as new
+  derived evidence before one final reasoning pass; it never modifies the
+  original listening event. Oída never downloads or pulls a local model to
+  satisfy the request.
+- **Predictable failure behavior**: malformed provider output gets one repair
+  attempt with the same provider. A failure then returns a visible deterministic
+  local answer; Oída does not silently send the packet to a different external
+  service.
+- **Host turn handoff**: `/conversation/prepare` and
+  `/conversation/commit`, mirrored as `oida_prepare_turn` and
+  `oida_commit_turn`, let an active host run the supplied system prompt and
+  schema without recursively invoking its own CLI. `oida_ask` remains the
+  daemon-managed path. OpenCode and OpenClaw join `oida integrate` and doctor.
+- **Credential boundary**: provider secrets use the macOS Keychain or an
+  available cross-platform keyring; an environment-only store is the fallback
+  when secure persistence is unavailable. Secrets are excluded from settings,
+  logs, URLs, and process arguments.
+
 ## 0.5.0 - 2026-07-13
 
 - **Listening sessions**: one listening session now holds many results, and

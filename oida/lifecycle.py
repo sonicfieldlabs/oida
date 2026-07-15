@@ -163,7 +163,13 @@ def doctor() -> dict[str, Any]:
     """Read-only integration diagnostics suitable for humans and installers."""
     config = load_config()
     packages = {}
-    for name in ("oida", "akouo-contract", "akousma", "akousmata", "mcp"):
+    for name in (
+        "sonicfield-oida",
+        "akouo-contract",
+        "akousma",
+        "akousmata",
+        "mcp",
+    ):
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -174,7 +180,10 @@ def doctor() -> dict[str, Any]:
     }
     checks = {
         "packages": packages,
-        "executables": {name: shutil.which(name) for name in ("ffmpeg", "private-network", "hermes", "codex", "claude")},
+        "executables": {
+            name: shutil.which(name)
+            for name in ("ffmpeg", "private-network", "hermes", "codex", "claude", "openclaw", "opencode")
+        },
         "gateway": gateway_status(),
         "models": model_paths,
         "directories": {
@@ -187,7 +196,13 @@ def doctor() -> dict[str, Any]:
             ),
         },
     }
-    required_packages = ("oida", "akouo-contract", "akousma", "akousmata", "mcp")
+    required_packages = (
+        "sonicfield-oida",
+        "akouo-contract",
+        "akousma",
+        "akousmata",
+        "mcp",
+    )
     checks["ok"] = all(packages[name] for name in required_packages) and bool(checks["executables"]["ffmpeg"])
     return checks
 

@@ -1,0 +1,10 @@
+{
+  "oida": {
+    "command": "oida",
+    "args": ["gateway", "--stdio", "--ensure-daemon"],
+    "env": {
+      "OIDA_MCP_ENSURE_DAEMON": "1",
+      "OIDA_MOSS_PREWARM": "0"
+    }
+  }
+}

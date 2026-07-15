@@ -1,0 +1,8 @@
+{
+  "name": "oida",
+  "version": "0.3.0",
+  "description": "Accountable local listening and grounded sound conversation through Oída.",
+  "author": {"name": "Sonic Field Labs"},
+  "homepage": "https://github.com/sonicfieldlabs/oida",
+  "repository": "https://github.com/sonicfieldlabs/oida"
+}

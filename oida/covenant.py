@@ -359,11 +359,26 @@ class CovenantEngine:
         return None
 
     def clamp_window(self, seconds: float | None) -> tuple[float | None, str | None]:
-        for rule in self.covenant.rules_for("max_window"):
-            cap = float(rule.get("args", {}).get("seconds", 0) or 0)
-            if cap > 0 and seconds is not None and float(seconds) > cap:
-                return cap, str(rule["text"])
+        cap = self.max_window_seconds()
+        if cap is not None and seconds is not None and float(seconds) > cap:
+            rule = next(
+                (
+                    item
+                    for item in self.covenant.rules_for("max_window")
+                    if float(item.get("args", {}).get("seconds", 0) or 0) == cap
+                ),
+                None,
+            )
+            return cap, str(rule.get("text") if rule else f"max window: {cap:g} s")
         return seconds, None
+
+    def max_window_seconds(self) -> float | None:
+        caps = [
+            float(rule.get("args", {}).get("seconds", 0) or 0)
+            for rule in self.covenant.rules_for("max_window")
+        ]
+        positive = [cap for cap in caps if cap > 0]
+        return min(positive) if positive else None
 
     # -- content + output gates over the perception passes -------------------
     def _withheld_aspects(self) -> list[str]:
@@ -416,6 +431,37 @@ class CovenantEngine:
             _drop("transcript", rule, subject)
             if "speech" in classes or "speaker-identity" in aspects:
                 _drop("speech", rule, "speech" if "speech" in classes else "speaker-identity")
+            observations = redacted.get("host_observations")
+            if isinstance(observations, list):
+                kept = []
+                removed = 0
+                for item in observations:
+                    speech_content = isinstance(item, dict) and (
+                        item.get("speech_content") is True
+                        or str(item.get("source") or "").lower() == "transcript"
+                    )
+                    trusted_non_speech_measurement = isinstance(item, dict) and (
+                        str(item.get("category") or "").lower() == "measured"
+                        and str(item.get("source") or "").lower() in {"dsp", "metadata", "human"}
+                        and not speech_content
+                    )
+                    if speech_content or ("speech" in classes and not trusted_non_speech_measurement):
+                        removed += 1
+                    else:
+                        kept.append(item)
+                if removed:
+                    redacted["host_observations"] = kept
+                    withheld.append({"rule": rule, "subject": subject, "count": removed})
+            caption = redacted.get("caption")
+            if isinstance(caption, dict) and caption.get("speech_content"):
+                if caption.get("dense") or caption.get("brief"):
+                    withheld.append({"rule": rule, "subject": subject, "count": 1})
+                redacted["caption"] = {
+                    "dense": None,
+                    "brief": None,
+                    "speech_content": True,
+                    "withheld": True,
+                }
         if "music" in classes:
             _drop("music", "ignore", "music")
         if "events" in aspects:

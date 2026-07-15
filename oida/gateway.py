@@ -31,7 +31,7 @@ from oida.memory import earworm_context_for_event
 
 GATEWAY_CONTRACT = "oida/gateway/v0.2"
 HOST_PERCEPTION_CONTRACT = "oida/host-perception/v0.1"
-SUPPORTED_HOSTS = ("hermes", "codex", "claude", "generic")
+SUPPORTED_HOSTS = ("hermes", "codex", "claude", "openclaw", "opencode", "generic")
 CLAIM_CATEGORIES = ("heard", "measured", "inferred", "interpreted", "speculative", "undetermined")
 
 
@@ -102,8 +102,13 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
     dsp = _dsp_block(measurements, source, apparatus)
     transcript = _transcript_block(payload.get("transcript"))
     events = _events_block(payload.get("events"))
-    caption = _caption_block(payload.get("caption"), observations)
     speech = _speech_block(payload.get("speech"))
+    caption = _caption_block(
+        payload.get("caption"),
+        observations,
+        transcript_present=bool(transcript.get("present")),
+        speech_present=bool(speech.get("present")),
+    )
     music = _music_block(payload.get("music"))
     uncertainty = _string_list(payload.get("uncertainty"))
     uncertainty.extend(_string_list(apparatus.get("known_blind_spots")))
@@ -165,11 +170,29 @@ def harness_host_perception(
     raw_audio_policy: RawAudioPolicy = "not_stored",
     enabled_skill_ids: list[str] | None = None,
     disabled_skill_ids: list[str] | None = None,
+    covenant_engine: Any | None = None,
 ) -> dict[str, Any]:
     """Run host perception through the complete listening harness."""
     preset = route_preset(route_preset_id)
+    rules_applied: list[str] = []
+    withheld: list[dict[str, Any]] = []
+    if covenant_engine is not None:
+        source = _dict(payload.get("source"))
+        source_type = str(source.get("type") or "external_stream")
+        refusal = covenant_engine.refuse_source(source_type) or covenant_engine.refuse_quiet_hours()
+        if refusal:
+            raise PermissionError(refusal)
+        if covenant_engine.forbids_retention("raw-audio"):
+            raw_audio_policy = "not_stored"
+            rules_applied.append("do_not_retain:raw-audio")
     perception = normalize_host_perception(payload)
+    if covenant_engine is not None:
+        perception, perception_withheld = covenant_engine.redact_perception(perception)
+        withheld.extend(perception_withheld)
     command_output = build_harness_output(perception, command=command or preset.akouo_command, question=question)
+    if covenant_engine is not None:
+        command_output, command_withheld = covenant_engine.redact_command_output(command_output)
+        withheld.extend(command_withheld)
     segment = _host_segment(perception, privacy_mode=privacy_mode, raw_audio_policy=raw_audio_policy)
     event = listening_event_dict(
         perception,
@@ -181,10 +204,22 @@ def harness_host_perception(
         privacy_mode=privacy_mode,
         raw_audio_policy=raw_audio_policy,
     )
+    if covenant_engine is not None:
+        event["covenant"] = covenant_engine.event_block(
+            rules_applied=rules_applied,
+            withheld=withheld,
+        )
     trace = None
     if memory is not None:
         event = memory.enrich_event(event)
-        if remember and privacy_mode != "incognito":
+        memory_refusal = covenant_engine.forbids_retention("memory") if covenant_engine is not None else None
+        if memory_refusal:
+            rules_applied.append("do_not_retain:memory")
+            event["covenant"] = covenant_engine.event_block(
+                rules_applied=rules_applied,
+                withheld=withheld,
+            )
+        if remember and privacy_mode != "incognito" and not memory_refusal:
             host_id = str(perception.get("host", {}).get("id") or "generic")
             trace = memory.remember(event, tags=["host-perception", f"host-{host_id}"])
             event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
@@ -278,13 +313,17 @@ def _normalize_observations(value: Any, *, model: str) -> list[dict[str, Any]]:
         category = str(item.get("category") or "heard")
         if category not in CLAIM_CATEGORIES:
             category = "undetermined"
+        source = str(item.get("source") or "model")
+        if source not in {"audio", "dsp", "metadata", "model", "transcript", "context", "memory", "human"}:
+            source = "model"
         result.append(
             {
                 "statement": " ".join(str(item["statement"]).split()),
                 "category": category,
                 "confidence": str(item.get("confidence") or "medium"),
                 "basis": str(item.get("basis") or f"{model} host audio perception"),
-                "source": str(item.get("source") or "model"),
+                "source": source,
+                "speech_content": bool(item.get("speech_content")) or source == "transcript",
                 "time_range": item.get("time_range") if isinstance(item.get("time_range"), dict) else None,
             }
         )
@@ -340,12 +379,41 @@ def _events_block(value: Any) -> list[dict[str, Any]]:
     return result
 
 
-def _caption_block(value: Any, observations: list[dict[str, Any]]) -> dict[str, Any]:
+def _caption_block(
+    value: Any,
+    observations: list[dict[str, Any]],
+    *,
+    transcript_present: bool = False,
+    speech_present: bool = False,
+) -> dict[str, Any]:
     if isinstance(value, str):
-        return {"dense": value.strip() or None, "brief": value.strip() or None}
+        return {
+            "dense": value.strip() or None,
+            "brief": value.strip() or None,
+            "speech_content": bool(value.strip()),
+        }
     block = _dict(value)
-    fallback = next((item["statement"] for item in observations if item["category"] in {"heard", "inferred"}), None)
-    return {"dense": block.get("dense") or fallback, "brief": block.get("brief") or fallback}
+    fallback_item = next(
+        (item for item in observations if item["category"] in {"heard", "inferred"}),
+        None,
+    )
+    fallback = fallback_item.get("statement") if isinstance(fallback_item, dict) else None
+    # Caption text is free-form and may contain verbatim speech even when the
+    # host omitted a transcript marker. Taint all non-empty caption prose.
+    speech_content = bool(
+        block.get("dense")
+        or block.get("brief")
+        or fallback
+        or block.get("speech_content")
+        or transcript_present
+        or speech_present
+        or (isinstance(fallback_item, dict) and fallback_item.get("speech_content"))
+    )
+    return {
+        "dense": block.get("dense") or fallback,
+        "brief": block.get("brief") or fallback,
+        "speech_content": speech_content,
+    }
 
 
 def _speech_block(value: Any) -> dict[str, Any]:

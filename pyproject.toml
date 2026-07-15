@@ -1,24 +1,30 @@
 [project]
-name = "oida"
-version = "0.5.0"
+name = "sonicfield-oida"
+version = "0.6.0"
 description = "oída unified local listening agent and gateway: AKOÚŌ, Earworm, Akousmata, and optional local audio engines."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Sonic Field Labs" }]
 dependencies = [
-  "akouo-contract>=0.6.2",
-  "akousma>=0.2.2",
-  "akousmata>=0.2.0",
+  "akouo-contract>=0.7.0",
+  "akousma>=0.4.0",
+  "akousmata>=0.4.0",
   "fastapi>=0.115",
   "jsonschema>=4.22",
   "mcp>=1.27,<2",
   "numpy>=1.26",
   "pydantic>=2.8",
+  "referencing>=0.35",
   "scipy>=1.12",
   "soundfile>=0.12",
   "uvicorn[standard]>=0.30",
 ]
+
+[project.urls]
+Homepage = "https://github.com/sonicfieldlabs/oida"
+Repository = "https://github.com/sonicfieldlabs/oida"
+Issues = "https://github.com/sonicfieldlabs/oida/issues"
 
 [tool.uv.sources]
 akousma = { path = "../earworm/packages/py-akousma", editable = true }
@@ -34,7 +40,7 @@ moss = [
   "torchcodec==0.8.1"
 ]
 dev = [
-  "httpx>=0.27",
+  "httpx2>=2.7",
   "pytest>=8.2"
 ]
 songid = [

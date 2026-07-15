@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from harness.akouo.command import build_apparatus
 from harness.claim_mapper import map_report_to_claims
+from oida.covenant import CovenantEngine, parse_covenant
 from oida.gateway import GATEWAY_CONTRACT, HOST_PERCEPTION_CONTRACT, harness_host_perception, normalize_host_perception
 from oida.memory import AkousmataStore
 from oida.server import create_app
@@ -90,6 +91,34 @@ class GatewayContractTests(unittest.TestCase):
         self.assertIsNotNone(result["trace"])
         self.assertEqual(result["trace"]["earworm"]["session"]["app_id"], "oida.akousmata")
         self.assertEqual(result["earworm"]["version"], "0.2.2")
+
+    def test_ignore_speech_removes_host_transcript_observation_and_caption(self) -> None:
+        payload = host_payload()
+        payload["observations"] = [
+            {
+                "statement": "The speaker says launch at dawn.",
+                "category": "heard",
+                "confidence": "high",
+                "source": "transcript",
+                "speech_content": True,
+            },
+            {
+                "statement": "A steady 440 Hz tone is measured.",
+                "category": "measured",
+                "confidence": "high",
+                "source": "dsp",
+            },
+        ]
+        covenant = CovenantEngine(parse_covenant("## rules\n- ignore: speech\n"))
+
+        result = harness_host_perception(payload, covenant_engine=covenant)
+
+        serialized = json.dumps(result)
+        self.assertNotIn("launch at dawn", serialized)
+        self.assertEqual(result["perception_report"]["host_observations"][0]["source"], "dsp")
+        self.assertIsNone(result["perception_report"]["caption"]["dense"])
+        subjects = {item["subject"] for item in result["listening_event"]["covenant"]["withheld"]}
+        self.assertIn("speech", subjects)
 
     def test_gateway_endpoint_accepts_host_perception(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(

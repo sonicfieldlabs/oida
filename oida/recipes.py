@@ -28,6 +28,14 @@ INSTRUCT_EXTRACTION = GenerationSettings(
     max_new_tokens=1024,
 )
 
+TRANSCRIPTION_EXTRACTION = GenerationSettings(
+    model_kind="transcription",
+    temperature=0.0,
+    top_p=1.0,
+    top_k=50,
+    max_new_tokens=2048,
+)
+
 INSTRUCT_CAPTION = GenerationSettings(
     model_kind="instruct",
     temperature=0.7,
@@ -44,6 +52,22 @@ THINKING_REASONING = GenerationSettings(
     max_new_tokens=1536,
 )
 
+MUSIC_REASONING = GenerationSettings(
+    model_kind="music",
+    temperature=1.0,
+    top_p=1.0,
+    top_k=50,
+    max_new_tokens=1536,
+)
+
+TARGETED_RELISTEN_REASONING = GenerationSettings(
+    model_kind="targeted_relisten",
+    temperature=0.4,
+    top_p=1.0,
+    top_k=50,
+    max_new_tokens=1024,
+)
+
 STRUCTURED_ANALYSIS = GenerationSettings(
     model_kind="instruct",
     temperature=0.3,
@@ -57,17 +81,17 @@ RECIPES: dict[str, Recipe] = {
     "transcribe": Recipe(
         task="transcribe",
         prompt="Transcribe the audio.",
-        settings=INSTRUCT_EXTRACTION,
+        settings=TRANSCRIPTION_EXTRACTION,
     ),
     "transcribe_sentence": Recipe(
         task="transcribe",
         prompt="Transcribe the audio with sentence-level timestamps in [start]text[end] format.",
-        settings=INSTRUCT_EXTRACTION,
+        settings=TRANSCRIPTION_EXTRACTION,
     ),
     "transcribe_word": Recipe(
         task="transcribe",
         prompt="Transcribe with word-level timestamps.",
-        settings=INSTRUCT_EXTRACTION,
+        settings=TRANSCRIPTION_EXTRACTION,
     ),
     "events": Recipe(
         task="events",
@@ -95,7 +119,7 @@ RECIPES: dict[str, Recipe] = {
     "music": Recipe(
         task="music",
         prompt="Analyze this music: instrumentation, tempo feel, structure over time, production character, and emotional arc.",
-        settings=THINKING_REASONING,
+        settings=MUSIC_REASONING,
     ),
     "environment": Recipe(
         task="environment",

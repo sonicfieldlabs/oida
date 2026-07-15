@@ -37,16 +37,20 @@ class MpsMossEngine(MossEngine):
         return "cpu"
 
     def _model_id(self, settings: GenerationSettings) -> str:
-        return self.model_id_for_kind("thinking" if settings.model_kind == "thinking" else "instruct")
+        return self.model_id_for_kind(settings.model_kind)
 
     def model_id_for_kind(self, model_kind: str) -> str:
         override = self._model_overrides.get(model_kind)
         if override:
             return override
-        return self.config.thinking_model if model_kind == "thinking" else self.config.instruct_model
+        return (
+            self.config.thinking_model
+            if model_kind in {"thinking", "music", "targeted_relisten"}
+            else self.config.instruct_model
+        )
 
     def set_model(self, model_kind: str, model_id: str) -> None:
-        if model_kind not in {"instruct", "thinking"}:
+        if model_kind not in {"instruct", "thinking", "transcription", "music", "targeted_relisten"}:
             raise ValueError(f"unknown model kind: {model_kind}")
         self._model_overrides[model_kind] = model_id
 
@@ -116,9 +120,13 @@ class MpsMossEngine(MossEngine):
             # mutate the dict mid-iteration (without blocking on the load lock)
             "loaded_models": [Path(model_id).name for model_id in list(self._models)],
             "device": device,
+            "thinking_budget_supported": False,
             "assignments": {
                 "instruct": Path(self.model_id_for_kind("instruct")).name,
                 "thinking": Path(self.model_id_for_kind("thinking")).name,
+                "transcription": Path(self.model_id_for_kind("transcription")).name,
+                "music": Path(self.model_id_for_kind("music")).name,
+                "targeted_relisten": Path(self.model_id_for_kind("targeted_relisten")).name,
             },
         }
 
@@ -146,6 +154,13 @@ class MpsMossEngine(MossEngine):
         settings: GenerationSettings,
         thinking_budget: int | None = None,
     ) -> EngineResult:
+        if thinking_budget is not None:
+            if thinking_budget < 0:
+                raise ValueError("thinking_budget must be greater than or equal to zero")
+            raise EngineUnavailable(
+                "thinking budgets are not supported by the embedded Transformers runtime; "
+                "omit the budget or use SGLang with its configured logit processor"
+            )
         try:
             import torch
             from src.audio_io import load_audio

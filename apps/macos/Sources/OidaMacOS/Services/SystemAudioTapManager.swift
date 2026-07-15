@@ -78,6 +78,8 @@ final class SystemAudioTapManager: NSObject, @unchecked Sendable {
     private let captureQueue = DispatchQueue(label: "org.sonicfield.oida.system-audio-tap")
     private var isCapturing = false
     private var ringSamples: [Float] = []
+    private var ringWriteIndex = 0
+    private var ringCount = 0
     private var ringSampleRate: Double = 48_000
     private var ringMaxSeconds: Double = 30
     private var currentSourceRoute: NativeSystemAudioRoutePayload?
@@ -102,6 +104,9 @@ final class SystemAudioTapManager: NSObject, @unchecked Sendable {
         }
 
         onStateChange?(.starting)
+        captureQueue.sync {
+            resetRingBuffer()
+        }
         do {
             try await startScreenCaptureKit()
             isCapturing = true
@@ -128,7 +133,7 @@ final class SystemAudioTapManager: NSObject, @unchecked Sendable {
         isCapturing = false
         currentSourceRoute = nil
         captureQueue.sync {
-            ringSamples.removeAll(keepingCapacity: true)
+            resetRingBuffer()
         }
         onRouteChange?(nil)
         onStateChange?(.stopped)
@@ -140,11 +145,11 @@ final class SystemAudioTapManager: NSObject, @unchecked Sendable {
         let sourceRoute = currentSourceRoute ?? fallbackDisplayMixRoute()
         let requestedSeconds = max(0.25, min(seconds, ringMaxSeconds))
         let snapshot: (samples: [Float], sampleRate: Double) = captureQueue.sync {
-            let frameCount = min(ringSamples.count, max(1, Int(round(requestedSeconds * ringSampleRate))))
+            let frameCount = min(ringCount, max(1, Int(round(requestedSeconds * ringSampleRate))))
             guard frameCount > 0 else {
                 return ([], ringSampleRate)
             }
-            return (Array(ringSamples.suffix(frameCount)), ringSampleRate)
+            return (recentRingSamples(frameCount: frameCount), ringSampleRate)
         }
         guard !snapshot.samples.isEmpty else { throw SystemAudioTapCaptureError.emptyBuffer }
 
@@ -153,7 +158,8 @@ final class SystemAudioTapManager: NSObject, @unchecked Sendable {
         } catch {
             throw SystemAudioTapCaptureError.dataDirectoryUnavailable
         }
-        let fileName = "\(timestampForFilename())-oida-native-system-output-\(Int(round(requestedSeconds)))s.wav"
+        let nonce = UUID().uuidString.prefix(8).lowercased()
+        let fileName = "\(timestampForFilename())-\(nonce)-oida-native-system-output-\(Int(round(requestedSeconds)))s.wav"
         let output = audioDirectory.appendingPathComponent(fileName)
         try writeMonoFloatWav(samples: snapshot.samples, sampleRate: snapshot.sampleRate, output: output)
         return NativeSystemAudioCapture(
@@ -366,12 +372,46 @@ final class SystemAudioTapManager: NSObject, @unchecked Sendable {
     }
 
     private func appendRingSamples(_ samples: [Float], sampleRate: Double) {
-        ringSampleRate = sampleRate > 0 ? sampleRate : ringSampleRate
-        ringSamples.append(contentsOf: samples)
+        let effectiveSampleRate = sampleRate > 0 ? sampleRate : ringSampleRate
+        let sampleRateChanged = abs(effectiveSampleRate - ringSampleRate) > 0.5
+        ringSampleRate = effectiveSampleRate
         let maxFrames = max(1, Int(round(ringSampleRate * ringMaxSeconds)))
-        if ringSamples.count > maxFrames {
-            ringSamples.removeFirst(ringSamples.count - maxFrames)
+        if sampleRateChanged || ringSamples.count != maxFrames {
+            ringSamples = Array(repeating: 0, count: maxFrames)
+            ringWriteIndex = 0
+            ringCount = 0
         }
+        if samples.count >= maxFrames {
+            let recent = samples.suffix(maxFrames)
+            ringSamples.replaceSubrange(0..<maxFrames, with: recent)
+            ringWriteIndex = 0
+            ringCount = maxFrames
+            return
+        }
+        for sample in samples {
+            ringSamples[ringWriteIndex] = sample
+            ringWriteIndex = (ringWriteIndex + 1) % maxFrames
+            ringCount = min(maxFrames, ringCount + 1)
+        }
+    }
+
+    private func recentRingSamples(frameCount: Int) -> [Float] {
+        let count = min(max(0, frameCount), ringCount)
+        guard count > 0, !ringSamples.isEmpty else { return [] }
+        let capacity = ringSamples.count
+        let start = (ringWriteIndex - count + capacity) % capacity
+        if start + count <= capacity {
+            return Array(ringSamples[start..<(start + count)])
+        }
+        let tail = ringSamples[start..<capacity]
+        let headCount = count - tail.count
+        return Array(tail) + Array(ringSamples[0..<headCount])
+    }
+
+    private func resetRingBuffer() {
+        ringSamples.removeAll(keepingCapacity: false)
+        ringWriteIndex = 0
+        ringCount = 0
     }
 
     private func bandValues(from samples: [Float], count: Int) -> [Double] {
@@ -422,9 +462,14 @@ extension SystemAudioTapManager: SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        captureQueue.async { [weak self] in
+            self?.resetRingBuffer()
+        }
         Task { @MainActor [weak self] in
             self?.isCapturing = false
             self?.stream = nil
+            self?.currentSourceRoute = nil
+            self?.onRouteChange?(nil)
             self?.onStateChange?(.failed(error.localizedDescription))
         }
     }

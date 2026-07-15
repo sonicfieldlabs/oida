@@ -87,7 +87,7 @@ struct DaemonClient {
     func askConversation(event: ListeningEventSummary?, conversationId: String?, question: String) async throws -> ConversationAskResponse {
         let payload = ConversationAskPayload(
             question: question,
-            event: event,
+            eventId: event?.id,
             conversationId: conversationId,
             includeMemory: true,
             allowRemoteModel: false,

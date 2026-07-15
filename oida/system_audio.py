@@ -46,13 +46,13 @@ def system_audio_status(platform: str | None = None) -> SystemAudioStatus:
             supported=True,
             capture_strategy="browser-live-input-with-loopback-device",
             adapter="browser-mediarecorder",
-            summary="macOS system output can be routed into oida today by selecting a virtual loopback device as live input.",
+            summary="The native macOS shell captures system output with ScreenCaptureKit; browser-only use can select a virtual loopback input.",
             setup_steps=[
                 "Install or enable a virtual loopback device such as BlackHole, Loopback, or Soundflower.",
                 "Route computer output to that device, or create a Multi-Output Device if you also need to hear it.",
                 "Grant browser microphone permission and choose the loopback device in oida's live source selector.",
                 "Use Live, then Capture last 10 seconds to analyze the system-output buffer.",
-                "For visual metering only, use the native macOS shell's ScreenCaptureKit system-output signal tap.",
+                "In the native macOS shell, start the ScreenCaptureKit system-output tap and use System · Listen for explicit analysis.",
             ],
             warnings=[
                 "The current web dashboard cannot directly capture macOS output without a loopback input device.",

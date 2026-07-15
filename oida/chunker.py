@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from difflib import SequenceMatcher
+import math
 from pathlib import Path
 import re
 
 import soundfile as sf
 
 from oida.dsp import AudioData, load_audio
+
+
+MAX_PLANNED_CHUNKS = 10_000
 
 
 @dataclass(frozen=True)
@@ -19,6 +23,12 @@ class Chunk:
 
 
 def plan_chunks(path: str | Path, chunk_seconds: float = 600.0, overlap_seconds: float = 15.0) -> list[Chunk]:
+    if not math.isfinite(chunk_seconds) or chunk_seconds <= 0:
+        raise ValueError("chunk_seconds must be a finite number greater than zero")
+    if not math.isfinite(overlap_seconds) or overlap_seconds < 0:
+        raise ValueError("overlap_seconds must be a finite number greater than or equal to zero")
+    if overlap_seconds >= chunk_seconds:
+        raise ValueError("overlap_seconds must be smaller than chunk_seconds")
     duration = audio_duration(path)
     if duration <= 0:
         return [Chunk(i=0, t0=0.0, t1=0.0, source_path=str(path))]
@@ -29,9 +39,12 @@ def plan_chunks(path: str | Path, chunk_seconds: float = 600.0, overlap_seconds:
     start = 0.0
     index = 0
     step = chunk_seconds - overlap_seconds
-    if step <= 0:
-        step = chunk_seconds
-    step = max(0.001, step)
+    estimated_chunks = 1 + math.ceil(max(0.0, duration - chunk_seconds) / step)
+    if estimated_chunks > MAX_PLANNED_CHUNKS:
+        raise ValueError(
+            f"chunk settings would create {estimated_chunks} model passes; "
+            f"the safety limit is {MAX_PLANNED_CHUNKS}"
+        )
     while start < duration:
         end = min(duration, start + chunk_seconds)
         chunks.append(Chunk(i=index, t0=round(start, 3), t1=round(end, 3), source_path=str(path)))

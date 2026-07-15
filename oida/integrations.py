@@ -12,7 +12,7 @@ from typing import Any
 from oida.config import REPO_ROOT, data_dir, integration_settings_path
 from oida.storage import write_json_atomic
 
-TARGETS = ("hermes", "codex", "claude", "remote")
+TARGETS = ("hermes", "codex", "claude", "openclaw", "opencode", "remote")
 
 
 def assets_root() -> Path:
@@ -35,6 +35,10 @@ def install(target: str, *, serve: bool = False, https_port: int = 8443) -> dict
         return _install_codex()
     if target == "claude":
         return _install_claude()
+    if target == "openclaw":
+        return _install_openclaw()
+    if target == "opencode":
+        return _install_opencode()
     if target == "remote":
         return _install_remote(serve=serve, https_port=https_port)
     raise ValueError(f"unknown integration {target!r}; choose {', '.join(TARGETS)} or all")
@@ -51,6 +55,12 @@ def inspect_integrations() -> dict[str, Any]:
         },
         "codex": {"available": bool(shutil.which("codex"))},
         "claude": {"available": bool(shutil.which("claude"))},
+        "openclaw": {"available": bool(shutil.which("openclaw"))},
+        "opencode": {
+            "available": bool(shutil.which("opencode")),
+            "config": str(_opencode_config_path()),
+            "installed": _opencode_installed(),
+        },
         "remote": remote_status(settings=settings),
     }
 
@@ -246,6 +256,115 @@ def _install_claude() -> dict[str, Any]:
         "marketplace_add": added_marketplace,
         "plugin_add": added_plugin,
         "restart_required": True,
+    }
+
+
+def _install_openclaw() -> dict[str, Any]:
+    """Install the Claude-compatible Oída bundle into OpenClaw.
+
+    OpenClaw owns its provider credentials and model selection.  This bundle
+    contributes only Oída's skill and local MCP gateway; it never copies or
+    reads OpenClaw authentication state.
+    """
+    executable = shutil.which("openclaw")
+    if not executable:
+        return {"target": "openclaw", "installed": False, "detail": "openclaw executable not found"}
+    marketplace = _stage_marketplace("openclaw")
+    listed = _run([executable, "plugins", "marketplace", "list", str(marketplace)])
+    installed = _run([executable, "plugins", "install", "--marketplace", str(marketplace), "oida"])
+    return {
+        "target": "openclaw",
+        "installed": installed["ok"] or "already" in installed["output"].lower(),
+        "marketplace": str(marketplace),
+        "marketplace_list": listed,
+        "plugin_install": installed,
+        "restart_required": True,
+        "auth_policy": "OpenClaw keeps ownership of provider credentials; Oída does not read them.",
+    }
+
+
+def _opencode_config_path() -> Path:
+    explicit = os.getenv("OPENCODE_CONFIG")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    root = Path(os.getenv("OPENCODE_CONFIG_DIR", Path.home() / ".config" / "opencode")).expanduser()
+    jsonc = root / "opencode.jsonc"
+    json_path = root / "opencode.json"
+    if jsonc.exists() and not json_path.exists():
+        return jsonc
+    return json_path
+
+
+def _opencode_installed() -> bool:
+    path = _opencode_config_path()
+    if not path.exists() or path.suffix.lower() == ".jsonc":
+        return False
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    mcp = value.get("mcp") if isinstance(value, dict) else None
+    return isinstance(mcp, dict) and isinstance(mcp.get("oida"), dict)
+
+
+def _install_opencode() -> dict[str, Any]:
+    """Install a global Oída skill and a pinned local stdio MCP entry.
+
+    OpenCode supports JSONC, but rewriting a user's commented configuration
+    would destroy comments.  In that case the installer stops with an explicit
+    instruction instead of guessing or replacing the file.
+    """
+    executable = shutil.which("opencode")
+    if not executable:
+        return {"target": "opencode", "installed": False, "detail": "opencode executable not found"}
+    config_path = _opencode_config_path()
+    if config_path.suffix.lower() == ".jsonc" and config_path.exists():
+        return {
+            "target": "opencode",
+            "installed": False,
+            "config": str(config_path),
+            "detail": "OpenCode uses a commented opencode.jsonc; add Oída through `opencode mcp add oida` or convert it to JSON before retrying so comments are not destroyed.",
+        }
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            return {"target": "opencode", "installed": False, "config": str(config_path), "detail": f"invalid JSON: {exc}"}
+        if not isinstance(loaded, dict):
+            return {"target": "opencode", "installed": False, "config": str(config_path), "detail": "OpenCode config root must be an object"}
+        config = loaded
+        backup = config_path.with_suffix(config_path.suffix + ".oida.bak")
+        shutil.copy2(config_path, backup)
+    else:
+        backup = None
+    config.setdefault("$schema", "https://opencode.ai/config.json")
+    mcp = config.get("mcp") if isinstance(config.get("mcp"), dict) else {}
+    mcp["oida"] = {
+        "type": "local",
+        "command": [sys.executable, "-m", "oida.cli", "gateway", "--stdio", "--ensure-daemon"],
+        "environment": {"OIDA_MCP_ENSURE_DAEMON": "1", "OIDA_MOSS_PREWARM": "0"},
+        "enabled": True,
+        "timeout": 45000,
+    }
+    config["mcp"] = mcp
+    write_json_atomic(config_path, config)
+
+    source_skill = assets_root() / "opencode" / "skills" / "oida-listening"
+    skill_root = Path(os.getenv("OPENCODE_CONFIG_DIR", config_path.parent)) / "skills" / "oida-listening"
+    skill_root.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_skill, skill_root, dirs_exist_ok=True)
+    status = _run([executable, "mcp", "list"], timeout=60)
+    return {
+        "target": "opencode",
+        "installed": True,
+        "config": str(config_path),
+        "backup": str(backup) if backup else None,
+        "skill": str(skill_root),
+        "mcp_status": status,
+        "restart_required": True,
+        "auth_policy": "OpenCode keeps ownership of provider credentials; Oída does not read them.",
     }
 
 

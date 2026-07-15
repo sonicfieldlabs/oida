@@ -58,6 +58,12 @@ class LiveManager:
         source_label: str | None = None,
         device_id: str | None = None,
     ) -> dict[str, Any]:
+        ring_value = float(ring_seconds)
+        vad_value = float(vad_threshold_dbfs)
+        if not math.isfinite(ring_value):
+            raise ValueError("ring_seconds must be finite")
+        if not math.isfinite(vad_value):
+            raise ValueError("vad_threshold_dbfs must be finite")
         session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid4().hex[:8]
         now = datetime.now(timezone.utc).isoformat()
         normalized_source_type = _source_type(source_type)
@@ -65,8 +71,8 @@ class LiveManager:
             session_id=session_id,
             created_at=now,
             updated_at=now,
-            ring_seconds=max(1.0, float(ring_seconds)),
-            vad_threshold_dbfs=float(vad_threshold_dbfs),
+            ring_seconds=max(1.0, min(3600.0, ring_value)),
+            vad_threshold_dbfs=vad_value,
             source_type=normalized_source_type,
             source_label=source_label or ("System audio" if normalized_source_type == "system_output" else "Live input"),
             device_id=device_id,
@@ -127,7 +133,10 @@ class LiveManager:
     @_synchronized
     def capture_last(self, session_id: str, seconds: float = 10.0) -> dict[str, Any]:
         session = self.ensure_active(session_id)
-        capture_seconds = max(0.25, min(float(seconds), session.ring_seconds))
+        seconds_value = float(seconds)
+        if not math.isfinite(seconds_value):
+            raise ValueError("capture seconds must be finite")
+        capture_seconds = max(0.25, min(seconds_value, session.ring_seconds))
         selected = self._recent_chunks_for_duration(session, capture_seconds)
         if not selected:
             raise ValueError(f"live session has no captured chunks: {session_id}")

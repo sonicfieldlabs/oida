@@ -1,5 +1,9 @@
 # oída
 
+The public Python distribution is named `sonicfield-oida`; the import package
+and commands remain `oida`, `oida-daemon`, and `oida-mcp`. The shorter `oida`
+distribution name on PyPI belongs to an unrelated project.
+
 `oida` is the unified local agentic listening stack: the AKOÚŌ listening
 harness, Earworm provenance and memory protocol, and Akousmata listening
 library behind one agent, CLI, gateway, and install. It can listen through its
@@ -7,6 +11,9 @@ own optional local engine (including MOSS-Audio plus deterministic DSP), or it
 can harness the audio perception already produced by Hermes, Codex, Claude, or
 another audio-input-capable host. Both paths produce the same accountable
 AKOÚŌ claims, Earworm session context, and optional durable Akousmata memory.
+An event-grounded reasoning layer can then discuss those results through a
+local model, an existing host login, or an explicitly enabled cloud provider
+without letting the reasoner rewrite what was heard.
 
 This project was previously named **AEAR**, then **hmm**; it is now **oída**.
 The Python package and primary CLI are `oida`; `hmm` and `aear` remain as
@@ -26,12 +33,12 @@ name **oída**.
   adapter can ensure/reuse that gateway itself. The same process serves the
   dashboard, REST API, streamable HTTP MCP at `/mcp`, and the complete
   Akousmata navigator at `/library/`.
-- **Local host integrations** installed by `oida integrate`: a native Hermes
-  plugin, Codex and Claude plugins, and a mobile-responsive private private-network
-  surface. Their generated MCP configs are pinned to the active Oída runtime,
-  so they do not depend on shell `PATH` or require a second app. Host adapters
-  start the gateway without prewarming MOSS; the host-perception path stays
-  lightweight until Oída-owned listening actually needs the local model.
+- **Local host integrations** installed by `oida integrate`: Hermes, Codex,
+  Claude, OpenClaw, and OpenCode integrations, plus a mobile-responsive private
+  private-network surface. Their generated MCP configs are pinned to the active Oída
+  runtime, so they do not depend on shell `PATH` or require a second app. Host
+  adapters start the gateway without prewarming MOSS; the host-perception path
+  stays lightweight until Oída-owned listening actually needs the local model.
 - FastAPI daemon (default `127.0.0.1:8765`) with task endpoints
   (`/transcribe`, `/events`, `/caption`, `/speech`, `/music`, `/qa`, `/think`,
   `/report`), the listening-event pipeline (`/listen-event`,
@@ -77,8 +84,26 @@ name **oída**.
 - **Sonic Field bridge**: "Explore in the wiki" searches the wiki, topics,
   journal, 93k-item library, paths, research, notes, and labs for related
   concepts, with taxonomy alias normalization and Finder reveal.
-- Event-grounded **conversation** (`/conversation/ask`): local, derived-data
-  answers that separate known facts from hypotheses; remote models stay opt-in.
+- Event-grounded **conversation** (`/conversation/ask`): Oída composes the
+  system prompt and covenant-filtered evidence packet, validates a cited
+  structured response, and keeps the listening event immutable. Conversation
+  can use deterministic local reasoning, Ollama, a user-supplied
+  OpenAI-compatible endpoint, Google Gemini, Alibaba Qwen, NVIDIA NIM,
+  OpenRouter, or an explicitly enabled Codex, Claude, Hermes, OpenClaw, or
+  OpenCode host. Invalid or failed provider output gets one repair attempt,
+  then a visible deterministic local fallback.
+- **Model roles and conversation profiles** in the shared dashboard: assign
+  separate providers/models to fast perception, deep perception, transcription,
+  music analysis, conversation, and targeted re-listening; shape tone, depth,
+  initiative, focus, language, and bounded custom instructions without
+  overriding evidence or privacy rules. The same panel reports physical RAM,
+  estimated peak model memory, runtime compatibility, and untested targets.
+  A conversation stays anchored to one event, with up to three comparison
+  events added explicitly.
+- **Local targeted re-listening**: a reasoner may request at most one focused
+  MOSS/audio pass per turn when the original local audio is available and the
+  covenant permits it. The new observation is disclosed as derived evidence;
+  the original listening result is never changed.
 - Prompt-only **generation bridge** (`/generation/*`): derives editable
   creation prompts from listening events; audio rendering is delegated to
   optional adapters, and `relisten` compares generated audio back to source.
@@ -133,6 +158,8 @@ Install the local adapters (each host can then start/reuse Oída automatically):
 uv run oida integrate hermes
 uv run oida integrate codex
 uv run oida integrate claude
+uv run oida integrate openclaw
+uv run oida integrate opencode
 uv run oida integrate remote --serve     # private responsive UI via private-network
 uv run oida doctor
 ```
@@ -243,12 +270,28 @@ the Instruct model in the background (`OIDA_MOSS_PREWARM=0` disables);
 `/engine/status` reports readiness, and the dashboard's Engine fold can
 reassign models and warm on demand.
 
+The same rule applies to local conversation and audio models. Oída can discover
+an existing Ollama or OpenAI-compatible endpoint, but it never pulls a model.
+The built-in catalog covers MOSS-Audio/Music/Transcribe, MiDashengLM,
+MiMo-Audio, Qwen3-Omni, Gemma 3n, Mellow, Gemini 3.5 Flash, Alibaba Qwen Omni,
+and NVIDIA Nemotron/OpenRouter presets. Provider setup, six-role assignment,
+prompt profiles, RAM warnings, and data-sharing permissions live in the
+dashboard's Reasoning settings. See
+[Reasoning providers and boundaries](docs/reasoning-providers.md).
+
 For CUDA, start the official MOSS-Audio SGLang fork separately:
 
 ```bash
 export OIDA_SGLANG_BASE_URL=http://127.0.0.1:30000
 uv run oida --profile cuda-server
 ```
+
+The OpenMOSS fork requires its serialized
+`Qwen3InstructionInjectionThinkingBudgetLogitProcessor` in addition to
+`custom_params` to enforce a thinking-token budget. Set that serialized value
+as `OIDA_SGLANG_THINKING_PROCESSOR` when using budgeted `/qa`, `/think`, or
+direct-analysis requests. Without it, Oída rejects a budgeted request instead
+of reporting a limit that SGLang would silently ignore.
 
 ## Privacy Defaults
 
@@ -269,6 +312,20 @@ Memory is explicit: events are saved only through `/memory/remember` or the
 dashboard's Remember. Incognito events stay out of durable history. The shared
 akousmata store is written only by the explicit germ handoff actions.
 
+Reasoning providers are also explicit. The deterministic local provider is the
+default; host CLIs and network endpoints remain disabled until the operator
+enables one. Conversation reasoners never receive raw audio: external packets
+are whitelist-built from covenant-filtered derived evidence, while transcript
+and memory content each require a separate opt-in. An assigned cloud audio
+model can receive audio only through the additional default-off
+**External audio models** permission; incognito and a covenant that withholds
+raw audio still block it. Requests use Base64 rather than local paths; larger
+NVIDIA inputs use a temporary NVCF asset that is deleted after the request.
+Incognito also forces local-only conversation and no
+conversation persistence. Credentials are kept in
+the macOS Keychain or an available system keyring, with read-only environment
+variables as the fallback; they are never written into reasoning settings.
+
 ## Repository Notes
 
 - `docs/native-macos-shell.md` — shell layout, supervision, hotkeys, listener.
@@ -280,9 +337,15 @@ akousmata store is written only by the explicit germ handoff actions.
   validates.
 - `docs/gateway-contract.md` — lifecycle, host-perception envelope, and local
   integration boundaries.
-- `integrations/` — the bundled Hermes, Codex, Claude, and remote adapters.
+- `docs/reasoning-providers.md` — prompt ownership, provider setup, model roles,
+  evidence boundaries, and host prepare/commit flow.
+- `integrations/` — the bundled Hermes, Codex, Claude, OpenClaw, OpenCode, and
+  remote adapters.
 - CI (`.github/workflows/ci.yml`) runs pytest, compileall, a JS syntax check,
-  the Swift build (including strict concurrency), packaging, and the stub
-  daemon release smoke. Development uses canonical sibling sources; the Oída
-  distribution declares them as versioned dependencies so they are installed
-  as one stack rather than copied into divergent forks.
+  an isolated Python-wheel install against freshly built canonical dependency
+  wheels, the Swift build (including strict concurrency), packaging, and the
+  stub daemon release smoke. Development uses canonical sibling sources; the
+  Oída distribution declares them as versioned dependencies so they are
+  installed as one stack rather than copied into divergent forks. Those
+  dependencies must be published to the target package index before a
+  public-index Oída release.

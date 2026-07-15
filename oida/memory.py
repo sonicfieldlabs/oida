@@ -245,7 +245,7 @@ class AkousmataStore:
     def _load_trace(self, path: Path) -> dict[str, Any] | None:
         try:
             stat = path.stat()
-        except FileNotFoundError:
+        except OSError:
             return None
         key = _cache_key(path)
         cached = self._trace_cache.get(key)
@@ -253,7 +253,7 @@ class AkousmataStore:
             return copy.deepcopy(cached[2])
         try:
             trace = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (OSError, json.JSONDecodeError):
             self._trace_cache.pop(key, None)
             return None
         if not isinstance(trace, dict):
@@ -265,7 +265,7 @@ class AkousmataStore:
     def _cache_trace(self, path: Path, trace: dict[str, Any]) -> None:
         try:
             stat = path.stat()
-        except FileNotFoundError:
+        except OSError:
             self._trace_cache.pop(_cache_key(path), None)
             return
         self._trace_cache[_cache_key(path)] = (stat.st_mtime_ns, stat.st_size, copy.deepcopy(trace))
@@ -606,7 +606,7 @@ def _cache_key(path: Path) -> str:
 
 
 def _trace_preview(trace: dict[str, Any]) -> dict[str, Any]:
-    return {
+    preview = {
         "id": trace.get("id"),
         "title": trace.get("title"),
         "createdAt": trace.get("createdAt"),
@@ -616,6 +616,13 @@ def _trace_preview(trace: dict[str, Any]) -> dict[str, Any]:
         "summary": (trace.get("summaries") if isinstance(trace.get("summaries"), dict) else {}).get("short"),
         "rawAudioPolicy": trace.get("rawAudioPolicy"),
     }
+    event = trace.get("event") if isinstance(trace.get("event"), dict) else {}
+    covenant = event.get("covenant") if isinstance(event.get("covenant"), dict) else None
+    if covenant is not None:
+        # Internal preview only: the evidence packet applies its own strict
+        # covenant whitelist before anything can reach a reasoner.
+        preview["covenant"] = copy.deepcopy(covenant)
+    return preview
 
 
 def _source_kind(source_type: str) -> str:

@@ -42,6 +42,19 @@ const state = {
   historyRequestSerial: 0,
   activeSpectrogram: null,
   mobileRemote: null,
+  reasoningSettings: null,
+  reasoningProviders: [],
+  reasoningModels: new Map(),
+  reasoningModelRequests: new Map(),
+  reasoningLoaded: false,
+  reasoningBusy: false,
+  conversationEvent: null,
+  conversationId: null,
+  conversationTurns: [],
+  conversationByEvent: new Map(),
+  conversationBusy: false,
+  conversationAbort: null,
+  conversationDraftAnswer: "",
 };
 
 const el = (id) => document.getElementById(id);
@@ -98,6 +111,46 @@ const ui = {
   mobileRemoteEnable: el("mobileRemoteEnable"),
   mobileRemoteCopy: el("mobileRemoteCopy"),
   mobileRemoteOpen: el("mobileRemoteOpen"),
+  reasoningStatus: el("reasoningStatus"),
+  reasoningResources: el("reasoningResources"),
+  reasoningRefresh: el("reasoningRefresh"),
+  reasoningProviders: el("reasoningProviders"),
+  reasoningRoles: el("reasoningRoles"),
+  reasoningProfileSelect: el("reasoningProfileSelect"),
+  reasoningProfileAdd: el("reasoningProfileAdd"),
+  reasoningProfileRemove: el("reasoningProfileRemove"),
+  reasoningProfileName: el("reasoningProfileName"),
+  reasoningTone: el("reasoningTone"),
+  reasoningDepth: el("reasoningDepth"),
+  reasoningInitiative: el("reasoningInitiative"),
+  reasoningLanguage: el("reasoningLanguage"),
+  reasoningFocus: el("reasoningFocus"),
+  reasoningInstructions: el("reasoningInstructions"),
+  reasoningInstructionCount: el("reasoningInstructionCount"),
+  reasoningTranscript: el("reasoningTranscript"),
+  reasoningMemory: el("reasoningMemory"),
+  reasoningRelisten: el("reasoningRelisten"),
+  reasoningExternalAudio: el("reasoningExternalAudio"),
+  reasoningSave: el("reasoningSave"),
+  reasoningSaveNote: el("reasoningSaveNote"),
+  conversationPanel: el("conversationPanel"),
+  conversationClose: el("conversationClose"),
+  conversationTitle: el("conversationTitle"),
+  conversationAnchor: el("conversationAnchor"),
+  conversationProvider: el("conversationProvider"),
+  conversationModel: el("conversationModel"),
+  conversationProfile: el("conversationProfile"),
+  conversationLocality: el("conversationLocality"),
+  conversationContextSummary: el("conversationContextSummary"),
+  conversationCompareList: el("conversationCompareList"),
+  conversationTranscript: el("conversationTranscript"),
+  conversationMemory: el("conversationMemory"),
+  conversationRelisten: el("conversationRelisten"),
+  conversationTurns: el("conversationTurns"),
+  conversationForm: el("conversationForm"),
+  conversationQuestion: el("conversationQuestion"),
+  conversationSend: el("conversationSend"),
+  conversationStatus: el("conversationStatus"),
   sessionContextRow: el("sessionContextRow"),
   tagFilterBar: el("tagFilterBar"),
   tagFilterChips: el("tagFilterChips"),
@@ -504,7 +557,10 @@ window.oidaOpenPanel = (name) => {
   if (!target || typeof target.showModal !== "function") return;
   document.querySelectorAll("dialog[open]").forEach((other) => { if (other !== target) other.close(); });
   if (!target.open) target.showModal();
-  if (name === "settings") refreshMobileRemote();
+  if (name === "settings") {
+    refreshMobileRemote();
+    refreshReasoning();
+  }
 };
 
 document.querySelectorAll(".modal").forEach((dialog) => {
@@ -1722,6 +1778,7 @@ function resultActions(event, session) {
   menu.className = "drop-menu";
   menu.hidden = true;
   const items = [
+    ["conversation", "Ask about this result"],
     ["remember", event.memory?.saved_trace_id ? "Remembered" : "Remember"],
     ["wiki", "Expand on Wiki"],
     ["json", "Export JSON"],
@@ -1771,7 +1828,19 @@ function resultActions(event, session) {
       setListenStatus(`Copy: ${error.message}`, "error");
     }
   });
-  actions.append(time, dropdown, copy);
+  const ask = document.createElement("button");
+  ask.className = "result-tool result-ask";
+  ask.type = "button";
+  ask.textContent = "Ask";
+  ask.title = "Ask about this listening result";
+  ask.setAttribute("aria-label", "Ask about this listening result");
+  ask.addEventListener("click", (interaction) => {
+    interaction.preventDefault();
+    interaction.stopPropagation();
+    selectEvent(event);
+    openConversation(event);
+  });
+  actions.append(time, ask, dropdown, copy);
   return actions;
 }
 
@@ -1981,6 +2050,7 @@ function renderBreakdown(groups, event) {
 
 async function openRelatedTrace(traceId) {
   if (!traceId) return;
+  closeConversation();
   try {
     const data = await fetchJson(`/memory/trace/${encodeURIComponent(traceId)}`);
     const trace = data.trace || {};
@@ -2122,6 +2192,10 @@ async function rememberReading(event, trigger = null) {
 
 function handleResultAction(action, event, session, trigger = null) {
   switch (action) {
+    case "conversation":
+      selectEvent(event);
+      openConversation(event);
+      break;
     case "remember":
       rememberReading(event, trigger);
       break;
@@ -2735,9 +2809,11 @@ const akousmataUi = {
 
 function showListeningView() {
   if (akousmataUi.modal) akousmataUi.modal.hidden = true;
+  closeConversation();
 }
 
 async function openAkousma(akousmaId) {
+  closeConversation();
   try {
     const data = await fetchJson(`/akousmata/records/${encodeURIComponent(akousmaId)}`);
     const record = data.record;
@@ -2914,6 +2990,1302 @@ function wireCovenant() {
   covenantUi.saveActivate.addEventListener("click", () => saveCovenant(true));
 }
 wireCovenant();
+
+/* ───────────────────── reasoning providers + profiles ─────────────────── */
+
+const REASONING_ROLES = [
+  ["fast_perception", "Fast perception", "Quick captions, transcripts, and event timelines."],
+  ["deep_perception", "Deep perception", "Slower musical, contextual, and analytical listening."],
+  ["transcription", "Transcription", "Speech-to-text and diarization passes."],
+  ["music_analysis", "Music analysis", "Music-specialized structure, instrumentation, and production listening."],
+  ["conversation", "Conversation", "Dialogue grounded in the selected listening result."],
+  ["targeted_relisten", "Targeted re-listen", "One focused local pass when the evidence needs detail."],
+];
+
+const DEFAULT_REASONING_PROFILE = {
+  id: "grounded_companion",
+  name: "Grounded companion",
+  tone: "warm",
+  depth: "balanced",
+  initiative: "suggest_followups",
+  focus: [],
+  language: "auto",
+  custom_instructions: "",
+};
+
+function collectionFromPayload(payload, key) {
+  const root = payload?.[key] ?? payload?.data?.[key] ?? payload;
+  if (Array.isArray(root)) return root;
+  if (root && typeof root === "object") {
+    return Object.entries(root).map(([id, value]) => (
+      value && typeof value === "object" ? { id, ...value } : { id, value }
+    ));
+  }
+  return [];
+}
+
+function normalizeReasoningSettings(payload) {
+  const raw = payload?.settings || payload?.data?.settings || payload || {};
+  let profiles = raw.profiles;
+  if (!Array.isArray(profiles) && profiles && typeof profiles === "object") {
+    profiles = Object.entries(profiles).map(([id, profile]) => ({ id, ...(profile || {}) }));
+  }
+  profiles = (profiles || []).map((profile, index) => ({
+    ...DEFAULT_REASONING_PROFILE,
+    ...(profile || {}),
+    id: String(profile?.id || `profile_${index + 1}`),
+    name: String(profile?.name || profile?.id || `Profile ${index + 1}`),
+    focus: Array.isArray(profile?.focus) ? profile.focus.map(String) : [],
+  }));
+  if (!profiles.length) profiles = [{ ...DEFAULT_REASONING_PROFILE }];
+  const assignments = raw.role_assignments || raw.roles || {};
+  const roleAssignments = {};
+  for (const [role] of REASONING_ROLES) {
+    const assignment = assignments?.[role];
+    roleAssignments[role] = typeof assignment === "string"
+      ? { provider_id: null, model_id: assignment }
+      : { provider_id: null, model_id: null, ...(assignment || {}) };
+  }
+  const conversation = roleAssignments.conversation;
+  if (!conversation.provider_id && raw.active_provider_id) conversation.provider_id = raw.active_provider_id;
+  if (!conversation.model_id && raw.active_model_id) conversation.model_id = raw.active_model_id;
+  const activeProfile = profiles.some((profile) => profile.id === raw.active_profile_id)
+    ? raw.active_profile_id
+    : profiles[0].id;
+  const configuredProviders = raw.providers && typeof raw.providers === "object" ? raw.providers : {};
+  const enabledProviderIds = Array.isArray(raw.enabled_provider_ids)
+    ? raw.enabled_provider_ids.map(String)
+    : Object.entries(configuredProviders).filter(([, provider]) => provider?.enabled).map(([id]) => id);
+  const providerOptions = { ...(raw.provider_options || {}) };
+  for (const [id, provider] of Object.entries(configuredProviders)) {
+    if (provider?.base_url || provider?.default_model || provider?.options) {
+      providerOptions[id] = {
+        ...(provider.options || {}),
+        ...(providerOptions[id] || {}),
+        ...(provider.base_url ? { base_url: provider.base_url } : {}),
+        ...(provider.default_model ? { default_model: provider.default_model } : {}),
+      };
+    }
+  }
+  return {
+    version: raw.version || raw.contract || "oida/reasoning-settings/v0.2",
+    active_provider_id: raw.active_provider_id || conversation.provider_id || "local_structured",
+    active_model_id: raw.active_model_id || conversation.model_id || null,
+    active_profile_id: activeProfile,
+    enabled_provider_ids: [...new Set(["local_structured", "oida_moss", ...enabledProviderIds])],
+    role_assignments: roleAssignments,
+    profiles,
+    provider_options: providerOptions,
+    include_transcript: Boolean(raw.include_transcript ?? raw.share_transcript),
+    include_memory_content: Boolean(raw.include_memory_content ?? raw.share_memory_content),
+    allow_targeted_relisten: raw.allow_targeted_relisten !== false,
+    allow_external_audio: Boolean(raw.allow_external_audio),
+    resources: raw.resources || null,
+    incognito: Boolean(raw.incognito),
+  };
+}
+
+function normalizeReasoningProvider(provider) {
+  const id = String(provider?.id || provider?.provider_id || provider?.name || "provider");
+  const locality = String(provider?.locality || provider?.data_locality || (id.startsWith("local") ? "local" : "unknown"));
+  const detail = String(provider?.detail || provider?.note || "");
+  const installed = provider?.installed ?? !/(not installed|not found|missing executable)/i.test(detail);
+  return {
+    ...provider,
+    id,
+    label: String(provider?.label || provider?.display_name || provider?.name || id.replaceAll("_", " ")),
+    locality,
+    installed,
+    authenticated: provider?.authenticated,
+    reachable: provider?.reachable ?? provider?.available,
+    enabled: Boolean(provider?.enabled),
+  };
+}
+
+function reasoningProviderById(providerId) {
+  return state.reasoningProviders.find((provider) => provider.id === providerId) || null;
+}
+
+function reasoningProviderEnabled(provider) {
+  if (!provider) return false;
+  return state.reasoningSettings?.enabled_provider_ids?.includes(provider.id) || provider.enabled;
+}
+
+function localityLabel(provider) {
+  const locality = provider?.locality || "unknown";
+  if (locality === "local") return "local";
+  if (locality === "external") return "external";
+  return "external / unknown";
+}
+
+function isLoopbackDashboard() {
+  return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(window.location.hostname);
+}
+
+function setReasoningStatus(text, tone = "") {
+  if (!ui.reasoningStatus) return;
+  ui.reasoningStatus.textContent = text || "";
+  ui.reasoningStatus.className = `reasoning-banner${tone ? ` ${tone}` : ""}`;
+}
+
+async function refreshReasoning(force = false) {
+  if (!ui.reasoningProviders || state.reasoningBusy || (state.reasoningLoaded && !force)) {
+    if (state.reasoningLoaded && ui.conversationPanel && !ui.conversationPanel.hidden) populateConversationControls();
+    return;
+  }
+  state.reasoningBusy = true;
+  setReasoningStatus("Loading reasoning providers…", "active");
+  try {
+    const [settingsPayload, providersPayload] = await Promise.all([
+      fetchJson("/reasoning/settings"),
+      fetchJson("/reasoning/providers"),
+    ]);
+    state.reasoningSettings = normalizeReasoningSettings(settingsPayload);
+    state.reasoningProviders = collectionFromPayload(providersPayload, "providers").map(normalizeReasoningProvider);
+    if (!state.reasoningProviders.some((provider) => provider.id === "local_structured")) {
+      state.reasoningProviders.unshift(normalizeReasoningProvider({
+        id: "local_structured",
+        label: "Oída local structured",
+        locality: "local",
+        installed: true,
+        authenticated: true,
+        reachable: true,
+        enabled: true,
+        note: "Deterministic evidence-grounded conversation",
+      }));
+    }
+    state.reasoningLoaded = true;
+    renderReasoningSettings();
+    populateConversationControls();
+    const enabled = state.reasoningProviders.filter(reasoningProviderEnabled).length;
+    setReasoningStatus(
+      state.reasoningSettings.incognito
+        ? "Incognito is active — reasoning is forced local and conversations are not retained."
+        : `${enabled} provider${enabled === 1 ? "" : "s"} enabled · filtered evidence is the default packet${state.reasoningSettings.allow_external_audio ? " · external audio opt-in is on" : ""}.`,
+      state.reasoningSettings.incognito ? "warning" : "ready",
+    );
+  } catch (error) {
+    state.reasoningLoaded = false;
+    setReasoningStatus(`Reasoning settings unavailable: ${error.message}`, "error");
+    logActivity(`Reasoning: ${error.message}`, "error");
+  } finally {
+    state.reasoningBusy = false;
+  }
+}
+
+function renderReasoningSettings() {
+  renderReasoningProviders();
+  renderReasoningRoles();
+  renderReasoningProfiles();
+  renderReasoningResources();
+  ui.reasoningTranscript.checked = Boolean(state.reasoningSettings.include_transcript);
+  ui.reasoningMemory.checked = Boolean(state.reasoningSettings.include_memory_content);
+  ui.reasoningRelisten.checked = state.reasoningSettings.allow_targeted_relisten !== false;
+  ui.reasoningExternalAudio.checked = Boolean(state.reasoningSettings.allow_external_audio);
+  for (const input of [ui.reasoningTranscript, ui.reasoningMemory, ui.reasoningRelisten, ui.reasoningExternalAudio]) {
+    input.disabled = Boolean(state.reasoningSettings.incognito && input !== ui.reasoningRelisten);
+  }
+}
+
+function renderReasoningResources() {
+  if (!ui.reasoningResources) return;
+  const resources = state.reasoningSettings?.resources;
+  if (!resources) {
+    ui.reasoningResources.hidden = true;
+    return;
+  }
+  ui.reasoningResources.hidden = false;
+  const physical = Number.isFinite(resources.physical_ram_gb) ? `${resources.physical_ram_gb} GB physical RAM` : "physical RAM unknown";
+  const peak = Number.isFinite(resources.estimated_peak_ram_gb) ? ` · estimated peak ${resources.estimated_peak_ram_gb} GB` : "";
+  const models = Array.isArray(resources.selected_local_models) ? resources.selected_local_models.length : 0;
+  const warnings = Array.isArray(resources.warnings) ? resources.warnings : [];
+  ui.reasoningResources.className = `reasoning-banner reasoning-resources ${resources.level === "exceeds" ? "error" : (warnings.length ? "warning" : "ready")}`;
+  ui.reasoningResources.replaceChildren();
+  const summary = document.createElement("strong");
+  summary.textContent = `Local model budget · ${physical}${peak} · ${resources.resident_mode || "single"} residency · ${models} selected`;
+  ui.reasoningResources.appendChild(summary);
+  if (warnings.length) {
+    const list = document.createElement("ul");
+    for (const warning of warnings.slice(0, 5)) {
+      const item = document.createElement("li");
+      item.textContent = warning;
+      list.appendChild(item);
+    }
+    ui.reasoningResources.appendChild(list);
+  } else {
+    const note = document.createElement("span");
+    note.textContent = resources.estimate_note || "Selected local models fit the planning estimate.";
+    ui.reasoningResources.appendChild(note);
+  }
+}
+
+function providerStatusText(provider) {
+  if (provider.note || provider.detail) return provider.note || provider.detail;
+  if (!provider.installed) return "Not installed on this computer.";
+  if (provider.authenticated === false) return "Installed · sign in with the provider before use.";
+  if (provider.reachable === false) return "Configured but not reachable.";
+  if (provider.reachable === true) return "Ready for a reasoning request.";
+  return "Available · probe to check readiness.";
+}
+
+function renderReasoningProviders() {
+  ui.reasoningProviders.replaceChildren();
+  const localCredentialAccess = isLoopbackDashboard();
+  for (const provider of state.reasoningProviders) {
+    const card = document.createElement("article");
+    card.className = `reasoning-provider${reasoningProviderEnabled(provider) ? " enabled" : ""}`;
+    card.dataset.providerId = provider.id;
+    const head = document.createElement("div");
+    head.className = "reasoning-provider-head";
+    const identity = document.createElement("div");
+    identity.className = "reasoning-provider-identity";
+    const title = document.createElement("strong");
+    title.textContent = provider.label;
+    const locality = document.createElement("span");
+    locality.className = `reasoning-badge ${provider.locality}`;
+    locality.textContent = localityLabel(provider);
+    identity.append(title, locality);
+    const actions = document.createElement("div");
+    actions.className = "reasoning-provider-actions";
+    const probe = document.createElement("button");
+    probe.type = "button";
+    probe.className = "pill-button small";
+    probe.textContent = "Probe";
+    probe.disabled = !provider.installed;
+    probe.addEventListener("click", () => probeReasoningProvider(provider, probe));
+    const enable = document.createElement("button");
+    enable.type = "button";
+    enable.className = "pill-button small provider-enable";
+    const enabled = reasoningProviderEnabled(provider);
+    const alwaysOn = ["local_structured", "oida_moss"].includes(provider.id);
+    enable.textContent = alwaysOn ? "Always on" : (enabled ? "Disable" : "Enable");
+    enable.setAttribute("aria-pressed", enabled ? "true" : "false");
+    enable.disabled = alwaysOn || !provider.installed || state.reasoningSettings.incognito;
+    enable.addEventListener("click", () => toggleReasoningProvider(provider, enable));
+    actions.append(probe, enable);
+    head.append(identity, actions);
+    const status = document.createElement("p");
+    status.className = "reasoning-provider-status";
+    status.textContent = providerStatusText(provider);
+    const signals = document.createElement("div");
+    signals.className = "reasoning-provider-signals";
+    const signalValues = [
+      [provider.installed ? "installed" : "not installed", provider.installed],
+      [provider.authenticated === true ? "authenticated" : (provider.authenticated === false ? "sign-in needed" : "host auth"), provider.authenticated !== false],
+      [provider.reachable === true ? "reachable" : (provider.reachable === false ? "unreachable" : "not probed"), provider.reachable !== false],
+    ];
+    for (const [text, okay] of signalValues) {
+      const signal = document.createElement("span");
+      signal.className = okay ? "" : "attention";
+      signal.textContent = text;
+      signals.appendChild(signal);
+    }
+    card.append(head, status, signals);
+
+    const configurableEndpoint = provider.endpoint_configurable || ["ollama", "openai_compatible", "local_audio", "google", "alibaba", "nvidia", "opencode"].includes(provider.id);
+    const modelConfigurable = !["local_structured", "oida_moss"].includes(provider.id);
+    const credentialSupported = provider.credential_supported || ["openrouter", "openai_compatible", "local_audio", "google", "alibaba", "nvidia"].includes(provider.id);
+    const oauthSupported = provider.oauth_supported || provider.id === "openrouter";
+    if (configurableEndpoint || modelConfigurable || credentialSupported || oauthSupported) {
+      const details = document.createElement("details");
+      details.className = "reasoning-provider-config";
+      const summary = document.createElement("summary");
+      summary.textContent = "Connection";
+      const body = document.createElement("div");
+      body.className = "reasoning-provider-config-body";
+      if (configurableEndpoint) {
+        const endpoint = document.createElement("label");
+        endpoint.className = "cfg provider-endpoint";
+        endpoint.innerHTML = `<span class="cfg-label">Endpoint</span>`;
+        const endpointInput = document.createElement("input");
+        endpointInput.type = "url";
+        endpointInput.spellcheck = false;
+        endpointInput.value = state.reasoningSettings.provider_options?.[provider.id]?.base_url || provider.base_url || "";
+        endpointInput.placeholder = provider.id === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:8000/v1";
+        endpointInput.addEventListener("change", () => {
+          const options = { ...(state.reasoningSettings.provider_options?.[provider.id] || {}) };
+          options.base_url = endpointInput.value.trim();
+          if (provider.id === "opencode") options.managed = !options.base_url;
+          state.reasoningSettings.provider_options = { ...state.reasoningSettings.provider_options, [provider.id]: options };
+          state.reasoningModels.delete(provider.id);
+          state.reasoningModelRequests.delete(provider.id);
+          ui.reasoningSaveNote.textContent = "Unsaved provider endpoint.";
+        });
+        endpoint.appendChild(endpointInput);
+        body.appendChild(endpoint);
+      }
+      if (modelConfigurable) {
+        const model = document.createElement("label");
+        model.className = "cfg provider-default-model";
+        model.innerHTML = `<span class="cfg-label">Default model ID</span>`;
+        const modelInput = document.createElement("input");
+        modelInput.type = "text";
+        modelInput.spellcheck = false;
+        modelInput.autocomplete = "off";
+        modelInput.maxLength = 255;
+        modelInput.value = state.reasoningSettings.provider_options?.[provider.id]?.default_model || "";
+        modelInput.placeholder = "Provider default, or enter an exact model ID";
+        modelInput.addEventListener("change", () => {
+          const options = { ...(state.reasoningSettings.provider_options?.[provider.id] || {}) };
+          options.default_model = modelInput.value.trim();
+          state.reasoningSettings.provider_options = { ...state.reasoningSettings.provider_options, [provider.id]: options };
+          state.reasoningModels.delete(provider.id);
+          state.reasoningModelRequests.delete(provider.id);
+          ui.reasoningSaveNote.textContent = "Unsaved provider model.";
+        });
+        model.appendChild(modelInput);
+        body.appendChild(model);
+      }
+      if (provider.id === "local_audio") {
+        const processor = document.createElement("label");
+        processor.className = "cfg provider-thinking-processor";
+        processor.innerHTML = `<span class="cfg-label">SGLang budget processor · advanced</span>`;
+        const processorInput = document.createElement("textarea");
+        processorInput.rows = 2;
+        processorInput.spellcheck = false;
+        processorInput.maxLength = 262144;
+        processorInput.value = state.reasoningSettings.provider_options?.[provider.id]?.sglang_thinking_processor || "";
+        processorInput.placeholder = "Serialized Qwen3InstructionInjectionThinkingBudgetLogitProcessor";
+        processorInput.addEventListener("change", () => {
+          const options = { ...(state.reasoningSettings.provider_options?.[provider.id] || {}) };
+          const value = processorInput.value.trim();
+          if (value) options.sglang_thinking_processor = value;
+          else delete options.sglang_thinking_processor;
+          state.reasoningSettings.provider_options = { ...state.reasoningSettings.provider_options, [provider.id]: options };
+          ui.reasoningSaveNote.textContent = "Unsaved SGLang budget processor.";
+        });
+        processor.appendChild(processorInput);
+        body.appendChild(processor);
+      }
+      if (credentialSupported) {
+        const credentialRow = document.createElement("div");
+        credentialRow.className = "provider-credential-row";
+        const credential = document.createElement("input");
+        credential.type = "password";
+        credential.autocomplete = "off";
+        credential.placeholder = localCredentialAccess ? "API key (never shown again)" : "Available only on this computer";
+        credential.setAttribute("aria-label", `${provider.label} API key`);
+        credential.disabled = !localCredentialAccess;
+        const save = document.createElement("button");
+        save.type = "button";
+        save.className = "pill-button small";
+        save.textContent = "Save key";
+        save.disabled = !localCredentialAccess;
+        save.addEventListener("click", () => saveReasoningCredential(provider, credential, save));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "pill-button small";
+        remove.textContent = "Remove";
+        remove.disabled = !localCredentialAccess;
+        remove.addEventListener("click", () => deleteReasoningCredential(provider, remove));
+        credentialRow.append(credential, save, remove);
+        body.appendChild(credentialRow);
+      }
+      if (oauthSupported) {
+        const connect = document.createElement("button");
+        connect.type = "button";
+        connect.className = "pill-button small provider-oauth";
+        connect.textContent = "Connect OpenRouter";
+        connect.disabled = !localCredentialAccess;
+        connect.addEventListener("click", () => startOpenRouterOAuth(connect));
+        body.appendChild(connect);
+      }
+      if (!localCredentialAccess && (credentialSupported || oauthSupported)) {
+        const note = document.createElement("p");
+        note.className = "settings-note";
+        note.textContent = "Credential changes are disabled on remote dashboard connections.";
+        body.appendChild(note);
+      }
+      details.append(summary, body);
+      card.appendChild(details);
+    }
+    ui.reasoningProviders.appendChild(card);
+  }
+}
+
+async function toggleReasoningProvider(provider, button) {
+  const enabled = new Set(state.reasoningSettings.enabled_provider_ids || []);
+  if (enabled.has(provider.id)) enabled.delete(provider.id);
+  else enabled.add(provider.id);
+  enabled.add("local_structured");
+  enabled.add("oida_moss");
+  state.reasoningSettings.enabled_provider_ids = [...enabled];
+  button.disabled = true;
+  try {
+    await saveReasoningSettings({ quiet: true });
+    await refreshReasoning(true);
+  } catch (_) {
+    renderReasoningProviders();
+  }
+}
+
+async function probeReasoningProvider(provider, button) {
+  button.disabled = true;
+  button.textContent = "Probing…";
+  try {
+    const result = await post(`/reasoning/providers/${encodeURIComponent(provider.id)}/probe`);
+    const merged = normalizeReasoningProvider({ ...provider, ...(result.provider || result) });
+    state.reasoningProviders = state.reasoningProviders.map((item) => item.id === provider.id ? merged : item);
+    renderReasoningProviders();
+    setReasoningStatus(`${provider.label}: ${providerStatusText(merged)}`, merged.reachable === false ? "warning" : "ready");
+  } catch (error) {
+    setReasoningStatus(`${provider.label}: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Probe";
+  }
+}
+
+async function saveReasoningCredential(provider, input, button) {
+  const credential = input.value.trim();
+  if (!credential) {
+    setReasoningStatus(`Enter a key for ${provider.label}.`, "warning");
+    return;
+  }
+  button.disabled = true;
+  try {
+    await fetchJson(`/reasoning/providers/${encodeURIComponent(provider.id)}/credential`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ credential }),
+    });
+    input.value = "";
+    setReasoningStatus(`${provider.label} credential saved securely.`, "ready");
+    await refreshReasoning(true);
+  } catch (error) {
+    setReasoningStatus(`${provider.label}: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteReasoningCredential(provider, button) {
+  button.disabled = true;
+  try {
+    await fetchJson(`/reasoning/providers/${encodeURIComponent(provider.id)}/credential`, { method: "DELETE" });
+    setReasoningStatus(`${provider.label} credential removed.`, "ready");
+    await refreshReasoning(true);
+  } catch (error) {
+    setReasoningStatus(`${provider.label}: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function startOpenRouterOAuth(button) {
+  const popup = window.open("about:blank", "oida-openrouter-oauth", "width=620,height=760");
+  button.disabled = true;
+  try {
+    const result = await post("/reasoning/openrouter/oauth/start");
+    const url = result.authorization_url || result.auth_url || result.url;
+    if (!url) throw new Error("The authorization URL was not returned.");
+    if (popup) popup.location.href = url;
+    else window.open(url, "_blank", "noopener");
+    setReasoningStatus("Finish connecting OpenRouter in the opened window, then refresh providers.", "active");
+  } catch (error) {
+    popup?.close();
+    setReasoningStatus(`OpenRouter: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function loadReasoningModels(providerId, force = false) {
+  if (!providerId) return [];
+  if (state.reasoningModels.has(providerId) && !force) return state.reasoningModels.get(providerId);
+  if (state.reasoningModelRequests.has(providerId) && !force) return state.reasoningModelRequests.get(providerId);
+  const provider = reasoningProviderById(providerId);
+  if (Array.isArray(provider?.models) && provider.models.length && !force) {
+    const models = provider.models.map((model) => typeof model === "string" ? { id: model, label: model } : model);
+    state.reasoningModels.set(providerId, models);
+    return models;
+  }
+  const request = (async () => {
+    const payload = await fetchJson(`/reasoning/models?provider_id=${encodeURIComponent(providerId)}`);
+    return collectionFromPayload(payload, "models").map((model) => ({
+      ...model,
+      id: String(model.id || model.model_id || model.name || "default"),
+      label: String(model.label || model.display_name || model.name || model.id || model.model_id || "Default"),
+    }));
+  })();
+  state.reasoningModelRequests.set(providerId, request);
+  try {
+    const models = await request;
+    state.reasoningModels.set(providerId, models);
+    return models;
+  } catch (error) {
+    logActivity(`Reasoning models (${providerId}): ${error.message}`, "error");
+    return [];
+  } finally {
+    state.reasoningModelRequests.delete(providerId);
+  }
+}
+
+async function fillReasoningModelSelect(select, providerId, selectedModelId, role = null) {
+  select.disabled = true;
+  select.replaceChildren(new Option(providerId ? "Loading models…" : "Choose a provider", "", true, true));
+  let models = await loadReasoningModels(providerId);
+  if (role && role !== "conversation") {
+    const capability = role;
+    if (capability) {
+      models = models.filter((model) => (
+        model.id === selectedModelId || (Array.isArray(model.capabilities) && model.capabilities.includes(capability))
+      ));
+    }
+  }
+  select.replaceChildren(new Option("Provider default", "", false, !selectedModelId));
+  for (const model of models) {
+    const ram = model.metadata?.recommended_ram_gb;
+    const label = Number.isFinite(ram) && model.locality === "local" ? `${model.label} · ~${ram} GB RAM` : model.label;
+    const option = new Option(label, model.id, false, model.id === selectedModelId);
+    const details = [
+      ...(Array.isArray(model.capabilities) ? model.capabilities : []),
+      model.metadata?.integration_status,
+      model.metadata?.notes,
+    ].filter(Boolean);
+    option.title = details.join(" · ");
+    option.disabled = model.metadata?.selectable === false;
+    select.appendChild(option);
+  }
+  if (selectedModelId && !models.some((model) => model.id === selectedModelId)) {
+    select.appendChild(new Option(selectedModelId, selectedModelId, true, true));
+  }
+  select.disabled = !providerId;
+}
+
+function providerOptionsForSelect(select, selectedProviderId, options = {}) {
+  select.replaceChildren();
+  const providers = state.reasoningProviders.filter((provider) => (
+    reasoningProviderEnabled(provider) || provider.id === selectedProviderId || provider.id === "local_structured"
+  )).filter((provider) => {
+    if (!options.role) return true;
+    if (options.role === "conversation") return provider.id !== "oida_moss";
+    if (provider.id === "local_structured") return false;
+    const declaredAudio = provider.id === "oida_moss"
+      || provider.id === "local_audio"
+      || Array.isArray(provider.capabilities) && provider.capabilities.includes("audio")
+      || Boolean(state.reasoningSettings.provider_options?.[provider.id]?.audio_capable);
+    if (!declaredAudio) return false;
+    return options.role !== "targeted_relisten" || provider.locality === "local";
+  });
+  if (!providers.length) select.appendChild(new Option("No enabled provider", "", true, true));
+  for (const provider of providers) {
+    const label = `${provider.label} · ${localityLabel(provider)}`;
+    const option = new Option(label, provider.id, false, provider.id === selectedProviderId);
+    option.disabled = provider.id !== "local_structured" && !reasoningProviderEnabled(provider);
+    select.appendChild(option);
+  }
+  if (options.localOnly) {
+    for (const option of select.options) {
+      const provider = reasoningProviderById(option.value);
+      option.disabled = option.disabled || Boolean(provider && provider.locality !== "local");
+    }
+  }
+}
+
+function renderReasoningRoles() {
+  ui.reasoningRoles.replaceChildren();
+  for (const [role, label, description] of REASONING_ROLES) {
+    const assignment = state.reasoningSettings.role_assignments[role] || { provider_id: null, model_id: null };
+    const row = document.createElement("div");
+    row.className = "reasoning-role";
+    const copy = document.createElement("div");
+    copy.className = "reasoning-role-copy";
+    copy.innerHTML = `<strong>${escapeHtml(label)}</strong><span>${escapeHtml(description)}</span>`;
+    const controls = document.createElement("div");
+    controls.className = "reasoning-role-controls";
+    const providerSelect = document.createElement("select");
+    providerSelect.className = "quiet-select";
+    providerSelect.setAttribute("aria-label", `${label} provider`);
+    providerOptionsForSelect(providerSelect, assignment.provider_id, { localOnly: role === "targeted_relisten", role });
+    const modelSelect = document.createElement("select");
+    modelSelect.className = "quiet-select";
+    modelSelect.setAttribute("aria-label", `${label} model`);
+    fillReasoningModelSelect(modelSelect, assignment.provider_id, assignment.model_id, role);
+    const modelInput = document.createElement("input");
+    modelInput.type = "text";
+    modelInput.className = "quiet-input reasoning-model-id";
+    modelInput.maxLength = 255;
+    modelInput.spellcheck = false;
+    modelInput.autocomplete = "off";
+    modelInput.placeholder = "Exact model ID (optional)";
+    modelInput.value = assignment.model_id || "";
+    modelInput.setAttribute("aria-label", `${label} exact model ID`);
+    providerSelect.addEventListener("change", async () => {
+      assignment.provider_id = providerSelect.value || null;
+      assignment.model_id = null;
+      modelInput.value = "";
+      state.reasoningSettings.role_assignments[role] = assignment;
+      if (role === "conversation") {
+        state.reasoningSettings.active_provider_id = assignment.provider_id;
+        state.reasoningSettings.active_model_id = null;
+      }
+      ui.reasoningSaveNote.textContent = "Unsaved role assignment.";
+      await fillReasoningModelSelect(modelSelect, assignment.provider_id, null, role);
+    });
+    modelSelect.addEventListener("change", () => {
+      assignment.model_id = modelSelect.value || null;
+      modelInput.value = assignment.model_id || "";
+      state.reasoningSettings.role_assignments[role] = assignment;
+      if (role === "conversation") state.reasoningSettings.active_model_id = assignment.model_id;
+      ui.reasoningSaveNote.textContent = "Unsaved role assignment.";
+    });
+    modelInput.addEventListener("change", () => {
+      assignment.model_id = modelInput.value.trim() || null;
+      state.reasoningSettings.role_assignments[role] = assignment;
+      if (assignment.model_id && ![...modelSelect.options].some((option) => option.value === assignment.model_id)) {
+        modelSelect.appendChild(new Option(assignment.model_id, assignment.model_id));
+      }
+      modelSelect.value = assignment.model_id || "";
+      if (role === "conversation") state.reasoningSettings.active_model_id = assignment.model_id;
+      ui.reasoningSaveNote.textContent = "Unsaved exact model ID.";
+    });
+    controls.append(providerSelect, modelSelect, modelInput);
+    row.append(copy, controls);
+    ui.reasoningRoles.appendChild(row);
+  }
+}
+
+function activeReasoningProfile() {
+  return state.reasoningSettings?.profiles?.find((profile) => profile.id === state.reasoningSettings.active_profile_id)
+    || state.reasoningSettings?.profiles?.[0]
+    || DEFAULT_REASONING_PROFILE;
+}
+
+function captureReasoningProfileEditor() {
+  if (!state.reasoningSettings) return;
+  const profile = activeReasoningProfile();
+  profile.name = ui.reasoningProfileName.value.trim() || profile.name || "Conversation profile";
+  profile.tone = ui.reasoningTone.value;
+  profile.depth = ui.reasoningDepth.value;
+  profile.initiative = ui.reasoningInitiative.value;
+  profile.language = ui.reasoningLanguage.value.trim() || "auto";
+  profile.custom_instructions = ui.reasoningInstructions.value.slice(0, 4000);
+  profile.focus = [...ui.reasoningFocus.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+  const option = [...ui.reasoningProfileSelect.options].find((item) => item.value === profile.id);
+  if (option) option.textContent = profile.name;
+}
+
+function loadReasoningProfileEditor() {
+  const profile = activeReasoningProfile();
+  ui.reasoningProfileName.value = profile.name || "Conversation profile";
+  ui.reasoningTone.value = profile.tone || "warm";
+  ui.reasoningDepth.value = profile.depth || "balanced";
+  ui.reasoningInitiative.value = profile.initiative || "suggest_followups";
+  ui.reasoningLanguage.value = profile.language || "auto";
+  ui.reasoningInstructions.value = profile.custom_instructions || "";
+  const focuses = new Set(profile.focus || []);
+  ui.reasoningFocus.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = focuses.has(input.value); });
+  ui.reasoningInstructionCount.textContent = `${ui.reasoningInstructions.value.length} / 4000`;
+  ui.reasoningProfileRemove.disabled = state.reasoningSettings.profiles.length <= 1;
+}
+
+function renderReasoningProfiles() {
+  ui.reasoningProfileSelect.replaceChildren();
+  for (const profile of state.reasoningSettings.profiles) {
+    ui.reasoningProfileSelect.appendChild(new Option(profile.name, profile.id, false, profile.id === state.reasoningSettings.active_profile_id));
+  }
+  loadReasoningProfileEditor();
+}
+
+function reasoningSettingsPayload() {
+  captureReasoningProfileEditor();
+  const settings = state.reasoningSettings;
+  const conversation = settings.role_assignments.conversation || {};
+  return {
+    version: settings.version,
+    active_provider_id: conversation.provider_id || settings.active_provider_id || "local_structured",
+    active_model_id: conversation.model_id || settings.active_model_id || null,
+    active_profile_id: settings.active_profile_id,
+    enabled_provider_ids: [...new Set(["local_structured", "oida_moss", ...(settings.enabled_provider_ids || [])])],
+    role_assignments: settings.role_assignments,
+    profiles: settings.profiles,
+    provider_options: settings.provider_options,
+    include_transcript: Boolean(ui.reasoningTranscript.checked),
+    include_memory_content: Boolean(ui.reasoningMemory.checked),
+    allow_targeted_relisten: Boolean(ui.reasoningRelisten.checked),
+    allow_external_audio: Boolean(ui.reasoningExternalAudio.checked),
+  };
+}
+
+async function saveReasoningSettings(options = {}) {
+  if (!state.reasoningSettings) return;
+  ui.reasoningSave.disabled = true;
+  if (!options.quiet) ui.reasoningSaveNote.textContent = "Saving…";
+  try {
+    const payload = reasoningSettingsPayload();
+    const result = await fetchJson("/reasoning/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    state.reasoningSettings = normalizeReasoningSettings(result?.settings || result || payload);
+    if (!options.quiet) {
+      renderReasoningSettings();
+      populateConversationControls();
+      ui.reasoningSaveNote.textContent = "Reasoning settings saved.";
+      setReasoningStatus("Reasoning settings saved. The original listening evidence remains authoritative.", "ready");
+    }
+    return state.reasoningSettings;
+  } catch (error) {
+    ui.reasoningSaveNote.textContent = `Save failed: ${error.message}`;
+    setReasoningStatus(`Reasoning settings: ${error.message}`, "error");
+    throw error;
+  } finally {
+    ui.reasoningSave.disabled = false;
+  }
+}
+
+ui.reasoningRefresh?.addEventListener("click", () => {
+  state.reasoningModels.clear();
+  state.reasoningModelRequests.clear();
+  refreshReasoning(true);
+});
+ui.reasoningSave?.addEventListener("click", () => saveReasoningSettings());
+ui.reasoningProfileSelect?.addEventListener("change", () => {
+  captureReasoningProfileEditor();
+  state.reasoningSettings.active_profile_id = ui.reasoningProfileSelect.value;
+  loadReasoningProfileEditor();
+  ui.reasoningSaveNote.textContent = "Unsaved active profile.";
+});
+ui.reasoningProfileAdd?.addEventListener("click", () => {
+  captureReasoningProfileEditor();
+  const suffix = typeof crypto?.randomUUID === "function" ? crypto.randomUUID().slice(0, 8) : Date.now().toString(36);
+  const profile = { ...DEFAULT_REASONING_PROFILE, id: `profile_${suffix}`, name: "New profile", focus: [] };
+  state.reasoningSettings.profiles.push(profile);
+  state.reasoningSettings.active_profile_id = profile.id;
+  renderReasoningProfiles();
+  ui.reasoningProfileName.focus();
+  ui.reasoningProfileName.select();
+  ui.reasoningSaveNote.textContent = "Unsaved new profile.";
+});
+ui.reasoningProfileRemove?.addEventListener("click", () => {
+  if (state.reasoningSettings.profiles.length <= 1) return;
+  state.reasoningSettings.profiles = state.reasoningSettings.profiles.filter((profile) => profile.id !== state.reasoningSettings.active_profile_id);
+  state.reasoningSettings.active_profile_id = state.reasoningSettings.profiles[0].id;
+  renderReasoningProfiles();
+  ui.reasoningSaveNote.textContent = "Unsaved profile removal.";
+});
+ui.reasoningInstructions?.addEventListener("input", () => {
+  ui.reasoningInstructionCount.textContent = `${ui.reasoningInstructions.value.length} / 4000`;
+  ui.reasoningSaveNote.textContent = "Unsaved profile changes.";
+});
+for (const input of [ui.reasoningProfileName, ui.reasoningTone, ui.reasoningDepth, ui.reasoningInitiative, ui.reasoningLanguage]) {
+  input?.addEventListener("input", () => { ui.reasoningSaveNote.textContent = "Unsaved profile changes."; });
+}
+ui.reasoningFocus?.addEventListener("change", () => { ui.reasoningSaveNote.textContent = "Unsaved profile changes."; });
+for (const input of [ui.reasoningTranscript, ui.reasoningMemory, ui.reasoningRelisten, ui.reasoningExternalAudio]) {
+  input?.addEventListener("change", () => { ui.reasoningSaveNote.textContent = "Unsaved data-sharing changes."; });
+}
+
+/* ───────────── event-anchored conversation (reasoning is optional) ─────── */
+
+function conversationSessionEvents() {
+  const session = [...state.sessions, ...state.archivedSessions].find((item) => item.id === state.currentSessionId);
+  return session?.events || [];
+}
+
+function selectedComparisonEventIds() {
+  return [...ui.conversationCompareList.querySelectorAll('input[type="checkbox"]:checked')]
+    .slice(0, 3)
+    .map((input) => input.value);
+}
+
+function renderConversationComparisons() {
+  ui.conversationCompareList.replaceChildren();
+  const events = conversationSessionEvents().filter((event) => event.id !== state.conversationEvent?.id);
+  if (!events.length) {
+    const note = document.createElement("span");
+    note.className = "settings-note";
+    note.textContent = "No other results in this session.";
+    ui.conversationCompareList.appendChild(note);
+    return;
+  }
+  for (const event of events) {
+    const label = document.createElement("label");
+    label.className = "conversation-compare-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = event.id;
+    const text = document.createElement("span");
+    text.textContent = event.aggregate?.title || event.id || "Listening result";
+    input.addEventListener("change", () => {
+      const selected = [...ui.conversationCompareList.querySelectorAll('input[type="checkbox"]:checked')];
+      if (input.checked && selected.length > 3) input.checked = false;
+      const count = selectedComparisonEventIds().length;
+      ui.conversationCompareList.querySelectorAll('input[type="checkbox"]:not(:checked)').forEach((candidate) => {
+        candidate.disabled = count >= 3;
+      });
+    });
+    label.append(input, text);
+    ui.conversationCompareList.appendChild(label);
+  }
+}
+
+function conversationProvider() {
+  return reasoningProviderById(ui.conversationProvider.value) || normalizeReasoningProvider({
+    id: ui.conversationProvider.value || "local_structured",
+    label: ui.conversationProvider.selectedOptions?.[0]?.textContent || "Oída local structured",
+    locality: "local",
+  });
+}
+
+function updateConversationPrivacySummary() {
+  const provider = conversationProvider();
+  const locality = localityLabel(provider);
+  ui.conversationLocality.textContent = locality;
+  ui.conversationLocality.className = `reasoning-badge ${provider.locality || "unknown"}`;
+  const shared = [];
+  if (ui.conversationTranscript.checked) shared.push("transcript");
+  if (ui.conversationMemory.checked) shared.push("memory");
+  const base = provider.locality === "local" ? "stays local" : "filtered evidence";
+  ui.conversationContextSummary.textContent = shared.length ? `${base} + ${shared.join(" + ")}` : `${base} only`;
+}
+
+async function populateConversationControls(options = {}) {
+  if (!ui.conversationProvider || !state.reasoningSettings || !state.reasoningProviders.length) return;
+  const assignment = state.reasoningSettings.role_assignments?.conversation || {};
+  const priorProvider = options.resetProvider ? "" : ui.conversationProvider.value;
+  let providerId = priorProvider || assignment.provider_id || state.reasoningSettings.active_provider_id || "local_structured";
+  if (state.reasoningSettings.incognito) providerId = "local_structured";
+  providerOptionsForSelect(ui.conversationProvider, providerId, { localOnly: state.reasoningSettings.incognito });
+  if (![...ui.conversationProvider.options].some((option) => option.value === providerId && !option.disabled)) {
+    providerId = [...ui.conversationProvider.options].find((option) => !option.disabled)?.value || "local_structured";
+    ui.conversationProvider.value = providerId;
+  }
+  const priorModel = options.resetProvider ? null : ui.conversationModel.value;
+  await fillReasoningModelSelect(
+    ui.conversationModel,
+    providerId,
+    priorModel || (providerId === assignment.provider_id ? assignment.model_id : null) || state.reasoningSettings.active_model_id,
+  );
+  const selectedProfile = options.resetProvider ? state.reasoningSettings.active_profile_id : (ui.conversationProfile.value || state.reasoningSettings.active_profile_id);
+  ui.conversationProfile.replaceChildren();
+  for (const profile of state.reasoningSettings.profiles || []) {
+    ui.conversationProfile.appendChild(new Option(profile.name, profile.id, false, profile.id === selectedProfile));
+  }
+  if (options.resetPermissions) {
+    ui.conversationTranscript.checked = Boolean(state.reasoningSettings.include_transcript);
+    ui.conversationMemory.checked = Boolean(state.reasoningSettings.include_memory_content);
+    ui.conversationRelisten.checked = state.reasoningSettings.allow_targeted_relisten !== false;
+  }
+  const privacyLocked = Boolean(state.reasoningSettings.incognito);
+  ui.conversationTranscript.disabled = privacyLocked;
+  ui.conversationMemory.disabled = privacyLocked;
+  if (privacyLocked) {
+    ui.conversationTranscript.checked = false;
+    ui.conversationMemory.checked = false;
+  }
+  updateConversationPrivacySummary();
+}
+
+async function openConversation(event = state.lastEvent) {
+  if (!event || !ui.conversationPanel) {
+    setListenStatus("Select a listening result before starting a conversation.", "error");
+    return;
+  }
+  const changedAnchor = state.conversationEvent?.id !== event.id;
+  if (changedAnchor) {
+    if (state.conversationEvent?.id) {
+      state.conversationByEvent.set(state.conversationEvent.id, {
+        conversationId: state.conversationId,
+        turns: state.conversationTurns,
+      });
+    }
+    state.conversationAbort?.abort();
+    state.conversationEvent = event;
+    const existing = state.conversationByEvent.get(event.id);
+    state.conversationId = existing?.conversationId || null;
+    state.conversationTurns = existing?.turns || [];
+    state.conversationDraftAnswer = "";
+  }
+  if (akousmataUi.modal) akousmataUi.modal.hidden = true;
+  ui.conversationTitle.textContent = "Ask about this listening";
+  ui.conversationAnchor.textContent = event.aggregate?.title || event.id || "Listening result";
+  ui.conversationPanel.hidden = false;
+  renderConversationComparisons();
+  renderConversationTurns();
+  if (!state.reasoningLoaded) await refreshReasoning();
+  if (!state.reasoningSettings) {
+    state.reasoningSettings = normalizeReasoningSettings({});
+    state.reasoningProviders = [normalizeReasoningProvider({
+      id: "local_structured", label: "Oída local structured", locality: "local", enabled: true,
+    })];
+  }
+  await populateConversationControls({ resetProvider: changedAnchor, resetPermissions: changedAnchor });
+  ui.conversationQuestion.focus();
+}
+
+function closeConversation() {
+  if (!ui.conversationPanel || ui.conversationPanel.hidden) return;
+  state.conversationAbort?.abort();
+  state.conversationAbort = null;
+  if (state.conversationEvent?.id) {
+    state.conversationByEvent.set(state.conversationEvent.id, {
+      conversationId: state.conversationId,
+      turns: state.conversationTurns,
+    });
+  }
+  state.conversationBusy = false;
+  ui.conversationSend.disabled = false;
+  ui.conversationPanel.hidden = true;
+  ui.conversationStatus.textContent = "";
+}
+
+function evidenceRefsHtml(refs) {
+  if (!Array.isArray(refs) || !refs.length) return "";
+  return `<div class="conversation-evidence-refs">${refs.slice(0, 12).map((ref) => `<span>${escapeHtml(typeof ref === "string" ? ref : ref?.id || ref?.label || "evidence")}</span>`).join("")}</div>`;
+}
+
+function readableConversationValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(readableConversationValue).filter(Boolean).join(" · ");
+  if (typeof value === "object") {
+    return value.text || value.statement || value.observation || value.note || value.summary || JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function normalizeConversationTurn(response, question) {
+  const envelope = response?.response || response?.result || response || {};
+  const turn = envelope.turn || envelope;
+  const conversationId = envelope.conversation_id || turn.conversation_id || null;
+  let answerBlocks = turn.answer_blocks || envelope.answer_blocks || [];
+  if (!Array.isArray(answerBlocks)) answerBlocks = [];
+  if (!answerBlocks.length && (turn.answer || envelope.answer)) {
+    answerBlocks = [{ kind: "answer", text: turn.answer || envelope.answer, evidence_refs: [] }];
+  }
+  answerBlocks = answerBlocks.map((block) => typeof block === "string"
+    ? { kind: "answer", text: block, evidence_refs: [] }
+    : { kind: block?.kind || "answer", text: readableConversationValue(block?.text || block?.answer), evidence_refs: block?.evidence_refs || [] });
+  const hypotheses = (turn.hypotheses || envelope.hypotheses || []).map((item) => typeof item === "string"
+    ? { statement: item, confidence: null, evidence_refs: [] }
+    : { statement: readableConversationValue(item?.statement || item?.text), confidence: item?.confidence, evidence_refs: item?.evidence_refs || [] });
+  const uncertainties = (turn.uncertainties || turn.uncertainty_notes || envelope.uncertainties || []).map(readableConversationValue).filter(Boolean);
+  const suggestedQuestions = (turn.suggested_questions || envelope.suggested_questions || []).map(readableConversationValue).filter(Boolean);
+  return {
+    question: turn.question || question,
+    answerBlocks,
+    hypotheses,
+    uncertainties,
+    suggestedQuestions,
+    evidence: turn.evidence || envelope.evidence || [],
+    reasoner: turn.reasoner || envelope.reasoner || turn.remote_model || envelope.remote_model || null,
+    fallback: turn.fallback || envelope.fallback || null,
+    relisten: turn.relisten || envelope.relisten || turn.targeted_relisten || envelope.targeted_relisten || null,
+    conversationId,
+    pending: false,
+  };
+}
+
+function reasonerMetaHtml(turn) {
+  const reasoner = turn.reasoner;
+  const pieces = [];
+  if (reasoner) {
+    const provider = reasoner.provider_id || reasoner.provider || reasoner.label;
+    const model = reasoner.model_id || reasoner.model;
+    if (provider) pieces.push(provider);
+    if (model) pieces.push(model);
+  }
+  if (turn.pending && turn.providerLabel) pieces.push(turn.providerLabel);
+  return pieces.length ? `<span class="conversation-reasoner">${escapeHtml(pieces.join(" · "))}</span>` : "";
+}
+
+function fallbackHtml(fallback) {
+  if (!fallback) return "";
+  const used = typeof fallback === "boolean" ? fallback : fallback.used !== false;
+  if (!used) return "";
+  const note = typeof fallback === "string"
+    ? fallback
+    : fallback.note || fallback.reason || fallback.message || "The selected provider could not return a valid response; Oída used its local structured answer.";
+  return `<div class="conversation-fallback"><strong>Local fallback</strong><span>${escapeHtml(note)}</span></div>`;
+}
+
+function relistenHtml(relisten, pendingStatus = "") {
+  if (!relisten && !pendingStatus) return "";
+  const status = pendingStatus || relisten?.status || "completed";
+  const observation = readableConversationValue(relisten?.observation || relisten?.result || relisten?.summary);
+  const limitations = readableConversationValue(relisten?.limitations);
+  const model = relisten?.model || relisten?.model_id || relisten?.engine;
+  return `<details class="conversation-relisten"${status === "completed" ? "" : " open"}>
+    <summary><span>Targeted local re-listen</span><small>${escapeHtml(status)}</small></summary>
+    <div>${model ? `<span class="conversation-relisten-model">${escapeHtml(model)}</span>` : ""}${observation ? `<p>${escapeHtml(observation)}</p>` : `<p>${escapeHtml(pendingStatus || "A focused local pass was requested.")}</p>`}${limitations ? `<small>${escapeHtml(limitations)}</small>` : ""}</div>
+  </details>`;
+}
+
+function renderConversationTurns() {
+  if (!ui.conversationTurns) return;
+  if (!state.conversationTurns.length) {
+    ui.conversationTurns.innerHTML = `<div class="conversation-empty"><strong>Stay with what was heard.</strong><p>Ask for detail, interpretation, comparison, or a closer local re-listen. Oída keeps the original listening result unchanged.</p></div>`;
+    return;
+  }
+  ui.conversationTurns.innerHTML = state.conversationTurns.map((turn, turnIndex) => {
+    const blocks = turn.pending && !turn.answerBlocks?.length
+      ? (turn.draft ? [{ kind: "answer", text: turn.draft, evidence_refs: [] }] : [])
+      : (turn.answerBlocks || []);
+    const answerHtml = blocks.map((block) => `<section class="conversation-answer-block ${escapeHtml(block.kind || "answer")}">${block.kind && block.kind !== "answer" ? `<span class="conversation-block-kind">${escapeHtml(block.kind.replaceAll("_", " "))}</span>` : ""}<p>${escapeHtml(block.text || "")}</p>${evidenceRefsHtml(block.evidence_refs)}</section>`).join("");
+    const hypotheses = (turn.hypotheses || []).length
+      ? `<details class="conversation-support"><summary>Hypotheses <span>${turn.hypotheses.length}</span></summary><ul>${turn.hypotheses.map((item) => `<li>${item.confidence ? `<small>${escapeHtml(item.confidence)}</small>` : ""}<span>${escapeHtml(item.statement)}</span>${evidenceRefsHtml(item.evidence_refs)}</li>`).join("")}</ul></details>`
+      : "";
+    const uncertainties = (turn.uncertainties || []).length
+      ? `<div class="conversation-uncertainty"><strong>Uncertainty</strong>${turn.uncertainties.map((note) => `<p>${escapeHtml(note)}</p>`).join("")}</div>`
+      : "";
+    const evidence = (turn.evidence || []).length
+      ? `<details class="conversation-support"><summary>Evidence <span>${turn.evidence.length}</span></summary><ul>${turn.evidence.slice(0, 16).map((item) => `<li><span>${escapeHtml(typeof item === "string" ? item : [item.label, item.value].filter(Boolean).join(": ") || item.kind || "evidence")}</span></li>`).join("")}</ul></details>`
+      : "";
+    const suggestions = (turn.suggestedQuestions || []).length
+      ? `<div class="conversation-suggestions">${turn.suggestedQuestions.slice(0, 5).map((question, suggestionIndex) => `<button type="button" data-turn-index="${turnIndex}" data-suggestion-index="${suggestionIndex}">${escapeHtml(question)}</button>`).join("")}</div>`
+      : "";
+    const pending = turn.pending && !turn.draft ? `<div class="conversation-thinking"><span></span><span></span><span></span><em>${escapeHtml(turn.relistenStatus || "Grounding the answer in this listening…")}</em></div>` : "";
+    return `<article class="conversation-turn${turn.pending ? " pending" : ""}">
+      <div class="conversation-question"><span>You</span><p>${escapeHtml(turn.question || "")}</p></div>
+      <div class="conversation-response">
+        <div class="conversation-response-meta"><span>Oída</span>${reasonerMetaHtml(turn)}</div>
+        ${pending}${answerHtml}${relistenHtml(turn.relisten, turn.relistenStatus)}${fallbackHtml(turn.fallback)}${hypotheses}${uncertainties}${evidence}${suggestions}
+      </div>
+    </article>`;
+  }).join("");
+  ui.conversationTurns.querySelectorAll("button[data-suggestion-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const turn = state.conversationTurns[Number(button.dataset.turnIndex)];
+      const question = turn?.suggestedQuestions?.[Number(button.dataset.suggestionIndex)];
+      if (!question) return;
+      ui.conversationQuestion.value = question;
+      ui.conversationQuestion.focus();
+    });
+  });
+  ui.conversationTurns.scrollTop = ui.conversationTurns.scrollHeight;
+}
+
+function conversationRequestPayload(question) {
+  const providerId = ui.conversationProvider.value || "local_structured";
+  const provider = reasoningProviderById(providerId);
+  return {
+    question,
+    event_id: state.conversationEvent.id,
+    conversation_id: state.conversationId,
+    provider_id: providerId,
+    model_id: ui.conversationModel.value || null,
+    profile_id: ui.conversationProfile.value || state.reasoningSettings?.active_profile_id || null,
+    comparison_event_ids: selectedComparisonEventIds(),
+    allow_targeted_relisten: Boolean(ui.conversationRelisten.checked),
+    include_transcript: Boolean(ui.conversationTranscript.checked),
+    include_memory_content: Boolean(ui.conversationMemory.checked),
+    // Compatibility aliases keep older daemons privacy-correct while the
+    // v0.2 request fields above remain authoritative.
+    include_memory: Boolean(ui.conversationMemory.checked),
+    allow_remote_model: Boolean(provider && provider.locality !== "local"),
+    provider: providerId,
+  };
+}
+
+async function responseErrorDetail(response) {
+  try {
+    const body = await response.json();
+    return typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail || body);
+  } catch (_) {
+    return `${response.status} ${response.statusText}`.trim();
+  }
+}
+
+async function streamConversationAsk(payload, pendingTurn, signal) {
+  const response = await fetch("/conversation/ask/stream", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "text/event-stream" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok) {
+    const error = new Error(await responseErrorDetail(response));
+    error.streamUnavailable = [404, 405, 501].includes(response.status);
+    throw error;
+  }
+  if ((response.headers.get("content-type") || "").includes("application/json")) return response.json();
+  if (!response.body) {
+    const error = new Error("Streaming is not available in this browser.");
+    error.streamUnavailable = true;
+    throw error;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed = null;
+  const dispatch = (block) => {
+    if (!block.trim()) return;
+    let eventName = "message";
+    const dataLines = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    if (!dataLines.length) return;
+    const raw = dataLines.join("\n");
+    let data;
+    try { data = JSON.parse(raw); } catch (_) { data = { text: raw }; }
+    const type = data.type || eventName;
+    if (type === "started") {
+      pendingTurn.conversationId = data.conversation_id || data.conversationId || pendingTurn.conversationId;
+      const label = data.provider_id || data.provider || pendingTurn.providerLabel;
+      if (state.conversationEvent?.id === pendingTurn.eventId) {
+        ui.conversationStatus.textContent = label ? `${label} is grounding the answer…` : "Grounding the answer…";
+      }
+    } else if (type === "delta") {
+      pendingTurn.draft += readableConversationValue(data.delta ?? data.text ?? data.content);
+      if (state.conversationEvent?.id === pendingTurn.eventId) renderConversationTurns();
+    } else if (type === "relisten_started") {
+      pendingTurn.relistenStatus = "listening again locally…";
+      if (state.conversationEvent?.id === pendingTurn.eventId) renderConversationTurns();
+    } else if (type === "relisten_completed") {
+      pendingTurn.relistenStatus = "local re-listen completed";
+      pendingTurn.relisten = data.relisten || data.result || data;
+      if (state.conversationEvent?.id === pendingTurn.eventId) renderConversationTurns();
+    } else if (type === "completed") {
+      completed = data.response || data.result || data.payload || data;
+    } else if (type === "error") {
+      throw new Error(data.detail || data.message || data.error || "Reasoning request failed.");
+    }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || "";
+    for (const block of blocks) dispatch(block);
+    if (done) break;
+  }
+  if (buffer.trim()) dispatch(buffer);
+  return completed || {
+    conversation_id: pendingTurn.conversationId,
+    turn: { question: pendingTurn.question, answer: pendingTurn.draft },
+  };
+}
+
+function setConversationBusy(busy) {
+  state.conversationBusy = busy;
+  ui.conversationSend.disabled = busy;
+  ui.conversationProvider.disabled = busy;
+  ui.conversationModel.disabled = busy;
+  ui.conversationProfile.disabled = busy;
+  ui.conversationQuestion.disabled = busy;
+}
+
+async function submitConversation(question) {
+  const trimmed = String(question || "").trim();
+  if (!trimmed || !state.conversationEvent || state.conversationBusy) return;
+  const payload = conversationRequestPayload(trimmed);
+  const anchorEventId = state.conversationEvent.id;
+  const turnCollection = state.conversationTurns;
+  const priorConversationId = state.conversationId;
+  const provider = conversationProvider();
+  const pendingTurn = {
+    question: trimmed,
+    answerBlocks: [],
+    hypotheses: [],
+    uncertainties: [],
+    suggestedQuestions: [],
+    evidence: [],
+    pending: true,
+    draft: "",
+    providerLabel: provider.label,
+    relistenStatus: "",
+    eventId: anchorEventId,
+    conversationId: priorConversationId,
+  };
+  turnCollection.push(pendingTurn);
+  renderConversationTurns();
+  ui.conversationQuestion.value = "";
+  ui.conversationStatus.textContent = provider.locality === "local"
+    ? "Reasoning locally from the selected evidence…"
+    : "Sending the covenant-filtered evidence packet…";
+  const controller = new AbortController();
+  state.conversationAbort = controller;
+  setConversationBusy(true);
+  try {
+    let response;
+    try {
+      response = await streamConversationAsk(payload, pendingTurn, controller.signal);
+    } catch (error) {
+      if (!error.streamUnavailable) throw error;
+      ui.conversationStatus.textContent = "Streaming unavailable · waiting for the complete answer…";
+      response = await post("/conversation/ask", payload, { signal: controller.signal });
+    }
+    const completed = normalizeConversationTurn(response, trimmed);
+    const responseConversationId = completed.conversationId || pendingTurn.conversationId || priorConversationId;
+    const index = turnCollection.indexOf(pendingTurn);
+    if (index >= 0) turnCollection[index] = completed;
+    if (state.conversationEvent?.id === anchorEventId) {
+      state.conversationId = responseConversationId;
+      state.conversationTurns = turnCollection;
+    }
+    state.conversationByEvent.set(anchorEventId, {
+      conversationId: responseConversationId,
+      turns: turnCollection,
+    });
+    if (state.conversationEvent?.id === anchorEventId) renderConversationTurns();
+    const fallbackUsed = Boolean(completed.fallback && (typeof completed.fallback === "boolean" || completed.fallback.used !== false));
+    if (state.conversationEvent?.id === anchorEventId) {
+      ui.conversationStatus.textContent = fallbackUsed
+        ? "The selected provider failed validation; a disclosed local fallback was used."
+        : "Answer grounded in this listening.";
+    }
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const cleanedTurns = turnCollection.filter((turn) => turn !== pendingTurn);
+      state.conversationByEvent.set(anchorEventId, {
+        conversationId: priorConversationId,
+        turns: cleanedTurns,
+      });
+      if (state.conversationEvent?.id === anchorEventId) {
+        state.conversationTurns = cleanedTurns;
+        renderConversationTurns();
+      }
+      return;
+    }
+    pendingTurn.pending = false;
+    pendingTurn.answerBlocks = [{ kind: "error", text: `The reasoning request failed: ${error.message}`, evidence_refs: [] }];
+    pendingTurn.draft = "";
+    state.conversationByEvent.set(anchorEventId, {
+      conversationId: priorConversationId,
+      turns: turnCollection,
+    });
+    if (state.conversationEvent?.id === anchorEventId) {
+      renderConversationTurns();
+      ui.conversationQuestion.value = trimmed;
+      ui.conversationStatus.textContent = "No other cloud provider was tried. You can retry or choose local structured reasoning.";
+    }
+    logActivity(`Conversation: ${error.message}`, "error");
+  } finally {
+    if (state.conversationAbort === controller) {
+      state.conversationAbort = null;
+      setConversationBusy(false);
+      ui.conversationQuestion.focus();
+    }
+  }
+}
+
+ui.conversationClose?.addEventListener("click", closeConversation);
+ui.conversationForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitConversation(ui.conversationQuestion.value);
+});
+ui.conversationQuestion?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault();
+    ui.conversationForm.requestSubmit();
+  }
+});
+ui.conversationPanel?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeConversation();
+});
+ui.conversationProvider?.addEventListener("change", async () => {
+  await fillReasoningModelSelect(ui.conversationModel, ui.conversationProvider.value, null);
+  updateConversationPrivacySummary();
+});
+for (const input of [ui.conversationTranscript, ui.conversationMemory, ui.conversationRelisten]) {
+  input?.addEventListener("change", updateConversationPrivacySummary);
+}
 
 /* ────────────────────────────── boot ────────────────────────────── */
 

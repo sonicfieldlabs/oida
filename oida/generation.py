@@ -83,9 +83,11 @@ class GenerationStore:
         records = []
         for path in self.records_dir.glob("*.json"):
             try:
-                records.append(json.loads(path.read_text(encoding="utf-8")))
-            except json.JSONDecodeError:
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
                 continue
+            if isinstance(record, dict):
+                records.append(record)
         records.sort(key=lambda record: str(record.get("created_at") or record.get("updated_at") or ""), reverse=True)
         return records[:limit] if limit else records
 
@@ -94,9 +96,12 @@ class GenerationStore:
         if not path.exists():
             raise FileNotFoundError(f"unknown generation record: {generation_id}")
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"invalid generation record JSON: {generation_id}") from exc
+        if not isinstance(value, dict):
+            raise ValueError(f"invalid generation record JSON: {generation_id}")
+        return value
 
     def attach_relisten(
         self,

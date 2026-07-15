@@ -13,7 +13,7 @@
   </script>
   <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/styles.css?v=23" />
+  <link rel="stylesheet" href="/static/styles.css?v=24" />
   <link rel="manifest" href="/static/manifest.webmanifest" />
 </head>
 <body>
@@ -154,6 +154,53 @@
           <div class="modal-content memory-detail"><div id="akousmataDetail"></div></div>
         </div>
       </section>
+      <section class="center-modal conversation-panel" id="conversationPanel" role="region" aria-labelledby="conversationTitle" hidden>
+        <div class="center-modal-surface conversation-surface">
+          <div class="modal-head conversation-head">
+            <div class="conversation-heading">
+              <span class="conversation-kicker">Conversation</span>
+              <h3 id="conversationTitle">Ask about this listening</h3>
+              <p id="conversationAnchor">Choose a listening result first.</p>
+            </div>
+            <button class="modal-close" id="conversationClose" type="button" aria-label="Close conversation">×</button>
+          </div>
+          <div class="conversation-toolbar" aria-label="Conversation model">
+            <label class="cfg"><span class="cfg-label">Provider</span><select id="conversationProvider" class="quiet-select"></select></label>
+            <label class="cfg"><span class="cfg-label">Model</span><select id="conversationModel" class="quiet-select"></select></label>
+            <label class="cfg"><span class="cfg-label">Profile</span><select id="conversationProfile" class="quiet-select"></select></label>
+            <span class="reasoning-badge" id="conversationLocality">local</span>
+          </div>
+          <details class="conversation-context">
+            <summary>Context and privacy <span id="conversationContextSummary">filtered evidence only</span></summary>
+            <div class="conversation-context-body">
+              <div class="conversation-compare">
+                <span class="cfg-label">Compare with up to 3 other results</span>
+                <div class="conversation-compare-list" id="conversationCompareList"><span class="settings-note">No other results in this session.</span></div>
+              </div>
+              <div class="conversation-permissions">
+                <label class="reasoning-check"><input type="checkbox" id="conversationTranscript"><span>Share transcript content</span></label>
+                <label class="reasoning-check"><input type="checkbox" id="conversationMemory"><span>Share memory content</span></label>
+                <label class="reasoning-check"><input type="checkbox" id="conversationRelisten" checked><span>Allow one local targeted re-listen</span></label>
+              </div>
+            </div>
+          </details>
+          <div class="conversation-turns" id="conversationTurns" aria-live="polite">
+            <div class="conversation-empty">
+              <strong>Stay with what was heard.</strong>
+              <p>Ask for detail, interpretation, comparison, or a closer local re-listen. Oída keeps the original listening result unchanged.</p>
+            </div>
+          </div>
+          <form class="conversation-composer" id="conversationForm">
+            <div class="conversation-status" id="conversationStatus" role="status"></div>
+            <div class="conversation-compose-row">
+              <textarea id="conversationQuestion" rows="2" maxlength="4000" placeholder="Ask something specific about this listening…" aria-label="Question about this listening"></textarea>
+              <button class="listen-send conversation-send" id="conversationSend" type="submit" title="Ask" aria-label="Ask about this listening">
+                <span aria-hidden="true">↑</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
     </section>
 
     <!-- ───────────── RIGHT RAIL: claim breakdown sections ───────────── -->
@@ -277,6 +324,74 @@
           </div>
         </div>
       </section>
+      <section class="settings-section reasoning-settings" id="reasoningSettingsSection">
+        <div class="settings-section-head">
+          <div><h4>Reasoning</h4><span class="settings-note">Local until you explicitly enable and select another provider</span></div>
+          <button class="pill-button small" id="reasoningRefresh" type="button">Refresh</button>
+        </div>
+        <div class="reasoning-banner" id="reasoningStatus" role="status">Loading reasoning providers…</div>
+        <div class="reasoning-banner reasoning-resources" id="reasoningResources" role="status" hidden></div>
+
+        <div class="reasoning-subhead">
+          <h5>Providers</h5>
+          <span>Host logins stay with their CLI. Credentials can only be changed from this computer.</span>
+        </div>
+        <div class="reasoning-provider-list" id="reasoningProviders"></div>
+
+        <div class="reasoning-subhead">
+          <h5>Model roles</h5>
+          <span>Choose which ear or reasoner handles each part of Oída.</span>
+        </div>
+        <div class="reasoning-role-grid" id="reasoningRoles"></div>
+
+        <div class="reasoning-subhead profile-subhead">
+          <div><h5>Conversation profile</h5><span>Style can guide the dialogue; it cannot override evidence or privacy.</span></div>
+          <div class="reasoning-profile-actions">
+            <select id="reasoningProfileSelect" class="quiet-select" aria-label="Conversation profile"></select>
+            <button class="pill-button small" id="reasoningProfileAdd" type="button">New</button>
+            <button class="pill-button small" id="reasoningProfileRemove" type="button">Remove</button>
+          </div>
+        </div>
+        <div class="reasoning-profile-editor">
+          <label class="cfg profile-name"><span class="cfg-label">Name</span><input id="reasoningProfileName" type="text" maxlength="80" /></label>
+          <label class="cfg"><span class="cfg-label">Tone</span>
+            <select id="reasoningTone" class="quiet-select"><option value="plain">Plain</option><option value="warm">Warm</option><option value="research">Research</option><option value="poetic">Poetic</option></select>
+          </label>
+          <label class="cfg"><span class="cfg-label">Depth</span>
+            <select id="reasoningDepth" class="quiet-select"><option value="brief">Brief</option><option value="balanced">Balanced</option><option value="deep">Deep</option></select>
+          </label>
+          <label class="cfg"><span class="cfg-label">Initiative</span>
+            <select id="reasoningInitiative" class="quiet-select"><option value="answer_only">Answer only</option><option value="suggest_followups">Suggest follow-ups</option><option value="dialogue">Dialogue</option></select>
+          </label>
+          <label class="cfg"><span class="cfg-label">Language</span><input id="reasoningLanguage" type="text" maxlength="35" placeholder="auto or BCP-47" /></label>
+          <fieldset class="reasoning-focus" id="reasoningFocus">
+            <legend>Focus</legend>
+            <label><input type="checkbox" value="signal">signal</label>
+            <label><input type="checkbox" value="music">music</label>
+            <label><input type="checkbox" value="production">production</label>
+            <label><input type="checkbox" value="voice">voice</label>
+            <label><input type="checkbox" value="ecology">ecology</label>
+            <label><input type="checkbox" value="accessibility">accessibility</label>
+            <label><input type="checkbox" value="memory">memory</label>
+          </fieldset>
+          <label class="cfg reasoning-instructions"><span class="cfg-label">Custom instructions <small id="reasoningInstructionCount">0 / 4000</small></span><textarea id="reasoningInstructions" rows="4" maxlength="4000" placeholder="Optional guidance for how Oída should speak or what detail to foreground."></textarea></label>
+        </div>
+
+        <div class="reasoning-subhead">
+          <h5>Data sharing</h5>
+          <span>Conversation uses filtered evidence. Audio leaves the computer only through the separate opt-in below.</span>
+        </div>
+        <div class="reasoning-policy-grid">
+          <label class="reasoning-check"><input type="checkbox" id="reasoningTranscript"><span><strong>Transcript content</strong><small>Separate opt-in for conversation requests.</small></span></label>
+          <label class="reasoning-check"><input type="checkbox" id="reasoningMemory"><span><strong>Memory content</strong><small>Separate opt-in for related remembered listenings.</small></span></label>
+          <label class="reasoning-check"><input type="checkbox" id="reasoningRelisten" checked><span><strong>Targeted re-listen</strong><small>At most one local pass per question.</small></span></label>
+          <label class="reasoning-check external-audio-check"><input type="checkbox" id="reasoningExternalAudio"><span><strong>External audio models</strong><small>Explicitly permit assigned cloud audio providers to receive audio. Incognito and listening covenants can still block this.</small></span></label>
+        </div>
+        <div class="reasoning-save-row">
+          <span class="settings-note" id="reasoningSaveNote">Changes apply to future questions.</span>
+          <button class="pill-button" id="reasoningSave" type="button">Save reasoning settings</button>
+        </div>
+      </section>
       <section class="settings-section">
         <div class="settings-section-head"><h4>Path</h4><span class="settings-note" id="audioDirNote"></span></div>
         <div class="path-row">
@@ -315,6 +430,6 @@
   </dialog>
 
 </main>
-  <script src="/static/app.js?v=26"></script>
+  <script src="/static/app.js?v=27"></script>
 </body>
 </html>

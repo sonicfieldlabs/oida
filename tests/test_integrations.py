@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from oida.integrations import _stage_marketplace, assets_root, remote_status
+from oida.integrations import TARGETS, _install_opencode, _stage_marketplace, assets_root, remote_status
 from oida.lifecycle import ensure_gateway, stop_gateway
 from oida.mcp_server import MCP, manifest_resource, oida_harness
 from oida.server import create_app
@@ -55,11 +55,17 @@ class IntegrationAssetTests(unittest.TestCase):
             root / "codex" / "plugins" / "oida" / "skills" / "oida-listening" / "SKILL.md",
             root / "claude" / "plugins" / "oida" / "skills" / "oida-listening" / "SKILL.md",
             root / "hermes" / "skills" / "oida-listening" / "SKILL.md",
+            root / "openclaw" / "plugins" / "oida" / "skills" / "oida-listening" / "SKILL.md",
+            root / "opencode" / "skills" / "oida-listening" / "SKILL.md",
         ]
         contents = [path.read_text(encoding="utf-8") for path in paths]
         self.assertTrue(all(content == contents[0] for content in contents[1:]))
         self.assertIn("oida_harness", contents[0])
         self.assertIn("Never fabricate", contents[0])
+        self.assertIn("oida_prepare_turn", contents[0])
+
+    def test_all_local_host_integrations_are_exposed(self) -> None:
+        self.assertEqual(TARGETS, ("hermes", "codex", "claude", "openclaw", "opencode", "remote"))
 
     def test_codex_and_claude_mcp_commands_ensure_daemon(self) -> None:
         root = assets_root()
@@ -88,6 +94,36 @@ class IntegrationAssetTests(unittest.TestCase):
         self.assertEqual(server["args"][-3:], ["gateway", "--stdio", "--ensure-daemon"])
         self.assertEqual(server["env"]["OIDA_MOSS_PREWARM"], "0")
 
+    def test_openclaw_marketplace_is_staged_with_pinned_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"OIDA_DATA_DIR": tmp}, clear=False):
+            marketplace = _stage_marketplace("openclaw")
+            config = json.loads((marketplace / "plugins" / "oida" / ".mcp.json").read_text(encoding="utf-8"))
+        server = config["oida"]
+        self.assertEqual(Path(server["command"]), Path(os.sys.executable))
+        self.assertEqual(server["args"][-3:], ["gateway", "--stdio", "--ensure-daemon"])
+
+    def test_opencode_installer_preserves_config_and_adds_local_mcp_and_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"OPENCODE_CONFIG_DIR": tmp},
+            clear=False,
+        ):
+            config_path = Path(tmp) / "opencode.json"
+            config_path.write_text(json.dumps({"theme": "system", "mcp": {"existing": {"type": "remote"}}}), encoding="utf-8")
+            with patch("oida.integrations.shutil.which", return_value="/usr/local/bin/opencode"), patch(
+                "oida.integrations._run", return_value={"ok": True, "status": 0, "output": "oida connected", "command": []}
+            ):
+                result = _install_opencode()
+            installed = json.loads(config_path.read_text(encoding="utf-8"))
+            skill = Path(tmp) / "skills" / "oida-listening" / "SKILL.md"
+            skill_exists = skill.exists()
+
+        self.assertTrue(result["installed"])
+        self.assertEqual(installed["theme"], "system")
+        self.assertIn("existing", installed["mcp"])
+        self.assertEqual(installed["mcp"]["oida"]["command"][0], os.sys.executable)
+        self.assertTrue(skill_exists)
+
     def test_mcp_surface_is_compact_and_complete(self) -> None:
         tools = {tool.name for tool in asyncio.run(MCP.list_tools())}
         resources = {resource.uri for resource in asyncio.run(MCP.list_resources())}
@@ -100,6 +136,8 @@ class IntegrationAssetTests(unittest.TestCase):
                 "oida_listen",
                 "oida_harness",
                 "oida_ask",
+                "oida_prepare_turn",
+                "oida_commit_turn",
                 "oida_memory_search",
                 "oida_memory_get",
                 "oida_remember",

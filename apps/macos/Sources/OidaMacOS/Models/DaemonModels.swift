@@ -492,24 +492,80 @@ struct ConversationTurn: Codable, Identifiable {
     let createdAt: String?
     let question: String?
     let answer: String?
+    let answerBlocks: [ConversationAnswerBlock]?
     let knownFacts: [String]?
-    let hypotheses: [String]?
+    let hypotheses: [ConversationHypothesis]?
     let evidence: [ConversationEvidence]?
+    let uncertainties: [String]?
     let uncertaintyNotes: [String]?
+    let suggestedQuestions: [String]?
     let memoryContext: [ConversationMemoryContext]?
     let remoteModel: ConversationRemoteModel?
+    let reasoner: ConversationReasoner?
 
     enum CodingKeys: String, CodingKey {
         case id
         case createdAt = "created_at"
         case question
         case answer
+        case answerBlocks = "answer_blocks"
         case knownFacts = "known_facts"
         case hypotheses
         case evidence
+        case uncertainties
         case uncertaintyNotes = "uncertainty_notes"
+        case suggestedQuestions = "suggested_questions"
         case memoryContext = "memory_context"
         case remoteModel = "remote_model"
+        case reasoner
+    }
+}
+
+struct ConversationAnswerBlock: Codable, Identifiable {
+    let kind: String?
+    let text: String
+    let evidenceRefs: [String]?
+
+    var id: String { "\(kind ?? "answer")-\(text)-\((evidenceRefs ?? []).joined(separator: ","))" }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case text
+        case evidenceRefs = "evidence_refs"
+    }
+}
+
+struct ConversationHypothesis: Codable, Identifiable {
+    let statement: String
+    let confidence: String?
+    let evidenceRefs: [String]?
+
+    var id: String { "\(statement)-\(confidence ?? "")" }
+
+    enum CodingKeys: String, CodingKey {
+        case statement
+        case confidence
+        case evidenceRefs = "evidence_refs"
+    }
+
+    init(from decoder: Decoder) throws {
+        if let statement = try? decoder.singleValueContainer().decode(String.self) {
+            self.statement = statement
+            confidence = nil
+            evidenceRefs = nil
+            return
+        }
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        statement = try values.decode(String.self, forKey: .statement)
+        confidence = try values.decodeIfPresent(String.self, forKey: .confidence)
+        evidenceRefs = try values.decodeIfPresent([String].self, forKey: .evidenceRefs)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(statement, forKey: .statement)
+        try values.encodeIfPresent(confidence, forKey: .confidence)
+        try values.encodeIfPresent(evidenceRefs, forKey: .evidenceRefs)
     }
 }
 
@@ -542,6 +598,20 @@ struct ConversationRemoteModel: Codable {
     let requested: Bool?
     let provider: String?
     let note: String?
+}
+
+struct ConversationReasoner: Codable {
+    let providerId: String?
+    let modelId: String?
+    let locality: String?
+    let repaired: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case providerId = "provider_id"
+        case modelId = "model_id"
+        case locality
+        case repaired
+    }
 }
 
 struct GenerationRecord: Codable, Identifiable {
@@ -1020,7 +1090,7 @@ struct RouteRerunPayload: Codable {
 
 struct ConversationAskPayload: Codable {
     let question: String
-    let event: ListeningEventSummary?
+    let eventId: String?
     let conversationId: String?
     let includeMemory: Bool
     let allowRemoteModel: Bool
@@ -1028,7 +1098,7 @@ struct ConversationAskPayload: Codable {
 
     enum CodingKeys: String, CodingKey {
         case question
-        case event
+        case eventId = "event_id"
         case conversationId = "conversation_id"
         case includeMemory = "include_memory"
         case allowRemoteModel = "allow_remote_model"

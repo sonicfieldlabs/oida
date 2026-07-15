@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib import request
+
+from oida.reasoning.providers.base import UrllibJsonTransport
+
+
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
 def build_direct_benchmark_payload(
@@ -29,7 +32,12 @@ def build_direct_benchmark_payload(
 
 
 def post_payload(url: str, payload: dict[str, object], timeout: int = 120) -> dict[str, object]:
-    data = json.dumps(payload).encode("utf-8")
-    req = request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-    with request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    response = UrllibJsonTransport(max_response_bytes=MAX_RESPONSE_BYTES).request(
+        "POST",
+        url,
+        payload=payload,
+        timeout=timeout,
+    )
+    if not isinstance(response.data, dict):
+        raise ValueError("benchmark server returned a non-object JSON response")
+    return response.data

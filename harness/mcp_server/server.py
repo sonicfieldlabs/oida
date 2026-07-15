@@ -29,7 +29,11 @@ _SCHEMAS: dict[str, dict[str, Any]] = {
     "qa": {
         "type": "object",
         "required": ["path", "question"],
-        "properties": {"path": {"type": "string"}, "question": {"type": "string"}, "thinking_budget": {"type": "integer"}},
+        "properties": {
+            "path": {"type": "string"},
+            "question": {"type": "string"},
+            "thinking_budget": {"type": "integer", "minimum": 0},
+        },
     },
     "live_start": {
         "type": "object",

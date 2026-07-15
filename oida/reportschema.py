@@ -92,7 +92,7 @@ class EngineInfo(JsonModel):
     model: str
     profile: str
     params: EngineParams
-    thinking_budget: int | None = None
+    thinking_budget: int | None = Field(default=None, ge=0)
     chunks: list[ChunkInfo] = Field(default_factory=list)
     wall_ms: int | None = None
     unavailable_reason: str | None = None
@@ -146,7 +146,7 @@ class QaItem(JsonModel):
     question: str
     answer: str
     reasoning_trace: str | None = None
-    thinking_budget: int | None = None
+    thinking_budget: int | None = Field(default=None, ge=0)
 
 
 class PerceptionReport(JsonModel):

@@ -11,22 +11,42 @@ jobs:
     name: Python, Web, and macOS checks
     runs-on: macos-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: oida
     steps:
-      - name: Checkout
+      - name: Checkout Oída
         uses: actions/checkout@v4
+        with:
+          path: oida
+
+      - name: Checkout Earworm
+        uses: actions/checkout@v4
+        with:
+          repository: sonicfieldlabs/earworm
+          path: earworm
+
+      - name: Checkout AKOÚŌ contract
+        uses: actions/checkout@v4
+        with:
+          repository: sonicfieldlabs/akouo
+          path: akouo
+
+      - name: Checkout Akousmata
+        uses: actions/checkout@v4
+        with:
+          repository: sonicfieldlabs/akousmata
+          path: akousmata
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      # NOTE: the `akousma` dependency is an editable uv path source pointing at
-      # ../earworm/packages/py-akousma. On a bare checkout this sync fails unless
-      # the earworm repo is checked out as a sibling directory first.
       - name: Install Python dependencies
         run: uv sync --extra dev
 
       # pytest collects the unittest.TestCase suite too; one runner is enough.
       - name: Run Python tests
-        run: uv run pytest -q
+        run: uv run pytest -q -W error::starlette.exceptions.StarletteDeprecationWarning
 
       - name: Compile Python modules
         run: uv run python -m compileall -q oida harness bench_adapter scripts tests
@@ -34,8 +54,25 @@ jobs:
       - name: Check dashboard JavaScript
         run: node --check oida/static/app.js
 
+      - name: Build Python distributions and canonical dependency wheels
+        run: |
+          uv build
+          mkdir -p "$RUNNER_TEMP/oida-wheels"
+          uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../akouo
+          uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../earworm/packages/py-akousma
+          uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../akousmata
+
+      - name: Smoke isolated Python wheel
+        working-directory: ${{ runner.temp }}
+        env:
+          UV_FIND_LINKS: ${{ runner.temp }}/oida-wheels
+        run: >-
+          uv run --isolated --no-project
+          --with "$GITHUB_WORKSPACE"/oida/dist/sonicfield_oida-*.whl
+          python -c 'import importlib.resources as r; import oida, oida.reasoning.audio_router, oida.server; assert r.files("oida").joinpath("integration_assets", "codex", "README.md").is_file(); print(oida.__version__)'
+
       - name: Build macOS shell
-        working-directory: apps/macos
+        working-directory: oida/apps/macos
         run: |
           swift build
           swift build -Xswiftc -strict-concurrency=complete

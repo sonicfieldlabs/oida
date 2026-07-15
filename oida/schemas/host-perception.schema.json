@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oida.local/schemas/host-perception.schema.json",
   "title": "Oída host perception input",
-  "description": "Structured audio perception supplied by Hermes, Codex, Claude, or another audio-capable host.",
+  "description": "Structured audio perception supplied by Hermes, Codex, Claude, OpenClaw, OpenCode, or another audio-capable host.",
   "type": "object",
   "additionalProperties": false,
   "required": ["host", "source", "observations"],
@@ -12,12 +12,12 @@
       "type": "object",
       "required": ["id", "model"],
       "properties": {
-        "id": {"enum": ["hermes", "codex", "claude", "generic"]},
+        "id": {"enum": ["hermes", "codex", "claude", "openclaw", "opencode", "generic"]},
         "model": {"type": "string", "minLength": 1},
         "provider": {"type": ["string", "null"]},
         "session_id": {"type": ["string", "null"]},
         "audio_input_capable": {"type": "boolean"},
-        "thinking_budget": {"type": ["integer", "null"]},
+        "thinking_budget": {"type": ["integer", "null"], "minimum": 0},
         "wall_ms": {"type": ["integer", "null"]}
       },
       "additionalProperties": false
@@ -66,6 +66,7 @@
               "confidence": {"enum": ["high", "medium", "low", "undetermined"]},
               "basis": {"type": "string"},
               "source": {"enum": ["audio", "dsp", "metadata", "model", "transcript", "context", "memory", "human"]},
+              "speech_content": {"type": "boolean"},
               "time_range": {
                 "type": ["object", "null"],
                 "properties": {"start_s": {"type": "number"}, "end_s": {"type": "number"}},

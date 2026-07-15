@@ -127,6 +127,7 @@ def _map_host_observations(report: dict[str, Any], claims: dict[str, list[dict[s
         basis = str(item.get("basis") or "host audio perception")
         confidence = str(item.get("confidence") or "medium")
         time_range = item.get("time_range") if isinstance(item.get("time_range"), dict) else None
+        speech_content = bool(item.get("speech_content")) or source == "transcript"
         if category == "measured" and source not in {"dsp", "metadata", "human"}:
             _add(
                 claims,
@@ -136,6 +137,7 @@ def _map_host_observations(report: dict[str, Any], claims: dict[str, list[dict[s
                 f"{basis}; demoted because model perception is not measurement",
                 source=source,
                 time_range=time_range,
+                speech_content=speech_content,
             )
             _add(
                 claims,
@@ -145,6 +147,7 @@ def _map_host_observations(report: dict[str, Any], claims: dict[str, list[dict[s
                 "No DSP, metadata, or declared human measurement source was supplied.",
                 source="context",
                 time_range=time_range,
+                speech_content=speech_content,
             )
             continue
         if category not in CLAIM_CATEGORIES:
@@ -157,6 +160,7 @@ def _map_host_observations(report: dict[str, Any], claims: dict[str, list[dict[s
             basis,
             source=source,
             time_range=time_range,
+            speech_content=speech_content,
         )
 
 
@@ -231,7 +235,7 @@ def _map_signal_interpretation(report: dict[str, Any], claims: dict[str, list[di
 
 
 def _map_transcript(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
-    add = partial(_add, source="model")
+    add = partial(_add, source="transcript", speech_content=True)
     transcript = report.get("transcript") if isinstance(report.get("transcript"), dict) else {}
     if not transcript.get("present"):
         return
@@ -278,8 +282,13 @@ def _map_events(report: dict[str, Any], claims: dict[str, list[dict[str, str]]],
 
 
 def _map_caption(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
-    add = partial(_add, source="model")
     caption = report.get("caption") if isinstance(report.get("caption"), dict) else {}
+    # A free-form audio caption can reproduce spoken words even when a model
+    # supplies no separate transcript/speech block. There is no trusted
+    # non-speech classifier at this boundary, so caption prose is always
+    # speech-capable and requires the transcript-sharing opt-in downstream.
+    speech_content = True
+    add = partial(_add, source="model", speech_content=speech_content)
     dense = caption.get("dense") or caption.get("brief")
     if isinstance(dense, str) and dense.strip():
         forbidden_reason = _forbidden_output_reason(dense, report)
@@ -481,6 +490,7 @@ def _add(
     *,
     source: str | None = None,
     time_range: dict[str, float] | None = None,
+    speech_content: bool = False,
 ) -> None:
     if category not in CLAIM_CATEGORIES:
         raise ValueError(f"invalid claim category: {category}")
@@ -492,4 +502,6 @@ def _add(
         claim["source"] = source
     if time_range:
         claim["time_range"] = time_range
+    if speech_content:
+        claim["speech_content"] = True
     claims[category].append(claim)

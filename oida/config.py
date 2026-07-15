@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ class OidaConfig:
     instruct_model: str
     thinking_model: str
     sglang_base_url: str
+    sglang_thinking_processor: str | None
     require_model: bool
     resident_mode: str
     prewarm: bool
@@ -137,6 +139,16 @@ def _model_value(configured: str | None, local_default: Path, hub_id: str, *, al
     return hub_id if allow_hub else str(local_default)
 
 
+def _positive_float(value: str | None, *, name: str) -> float:
+    try:
+        parsed = float(value or "")
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number greater than zero") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise ValueError(f"{name} must be a finite number greater than zero")
+    return parsed
+
+
 def load_config(profile: str | None = None, host: str | None = None, port: int | None = None) -> OidaConfig:
     moss_repo = _optional_path(_env("OIDA_MOSS_AUDIO_REPO", "HMM_MOSS_AUDIO_REPO", "AEAR_MOSS_AUDIO_REPO")) or (
         DEFAULT_MOSS_REPO if DEFAULT_MOSS_REPO.exists() else None
@@ -159,6 +171,10 @@ def load_config(profile: str | None = None, host: str | None = None, port: int |
     )
     resolved_profile = profile or _env("OIDA_ENGINE_PROFILE", "HMM_ENGINE_PROFILE", "AEAR_ENGINE_PROFILE", default="mac-mps")
     default_chunk = "45" if resolved_profile == "mac-mps" else "600"
+    chunk_seconds = _positive_float(
+        _env("OIDA_MOSS_CHUNK_SECONDS", "HMM_MOSS_CHUNK_SECONDS", "AEAR_MOSS_CHUNK_SECONDS", default=default_chunk),
+        name="OIDA_MOSS_CHUNK_SECONDS",
+    )
     return OidaConfig(
         profile=resolved_profile,
         host=host or _env("OIDA_HOST", "HMM_HOST", "AEAR_HOST", default="127.0.0.1"),
@@ -169,12 +185,13 @@ def load_config(profile: str | None = None, host: str | None = None, port: int |
         instruct_model=instruct,
         thinking_model=thinking,
         sglang_base_url=_env("OIDA_SGLANG_BASE_URL", "HMM_SGLANG_BASE_URL", "AEAR_SGLANG_BASE_URL", default="http://127.0.0.1:30000"),
+        sglang_thinking_processor=_env("OIDA_SGLANG_THINKING_PROCESSOR"),
         require_model=_env("OIDA_REQUIRE_MODEL", "HMM_REQUIRE_MODEL", "AEAR_REQUIRE_MODEL", default="0").strip().lower() in {"1", "true", "yes", "on"},
         resident_mode=_env("OIDA_MOSS_RESIDENT", "HMM_MOSS_RESIDENT", "AEAR_MOSS_RESIDENT", default="single"),
         # first-set name wins, like every other setting; an AND-chain would let
         # a leftover legacy HMM_/AEAR_MOSS_PREWARM=0 override OIDA_MOSS_PREWARM=1
         prewarm=_env("OIDA_MOSS_PREWARM", "HMM_MOSS_PREWARM", "AEAR_MOSS_PREWARM", default="1").strip().lower() in {"1", "true", "yes", "on"},
-        moss_chunk_seconds=float(_env("OIDA_MOSS_CHUNK_SECONDS", "HMM_MOSS_CHUNK_SECONDS", "AEAR_MOSS_CHUNK_SECONDS", default=default_chunk)),
+        moss_chunk_seconds=chunk_seconds,
         allow_hf_hub=allow_hf_hub,
         hf_hub_offline=hf_hub_offline,
         auth_token=_env("OIDA_AUTH_TOKEN", "HMM_AUTH_TOKEN", "AEAR_AUTH_TOKEN"),

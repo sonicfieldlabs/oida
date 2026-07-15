@@ -704,6 +704,19 @@ wheels = [
 ]
 
 [[package]]
+name = "httpcore2"
+version = "2.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "h11" },
+    { name = "truststore" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d5/fe/6a3f9f1a8bb8733326140737446aaf72fddb8b54b8f202302f5c84960613/httpcore2-2.7.0.tar.gz", hash = "sha256:6dc0fedf329a52a990930a5579edfebaea81118ea700ea0dd7de2b5e5be49efc", size = 65593, upload-time = "2026-07-14T20:40:01.111Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/6c/62e2e279e63fc4f7a5ee841ef13175a8bbc613f258e9dcc186e9de803a42/httpcore2-2.7.0-py3-none-any.whl", hash = "sha256:1452f589fe23f55b44546cd884294c41a29330af902bc0b71a761fd52d18f92b", size = 81506, upload-time = "2026-07-14T20:39:58.053Z" },
+]
+
+[[package]]
 name = "httptools"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -761,6 +774,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0f/4c/751061ffa58615a32c31b2d82e8482be8dd4a89154f003147acee90f2be9/httpx_sse-0.4.3.tar.gz", hash = "sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d", size = 15943, upload-time = "2025-10-10T21:48:22.271Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/fd/6668e5aec43ab844de6fc74927e155a3b37bf40d7c3790e49fc0406b6578/httpx_sse-0.4.3-py3-none-any.whl", hash = "sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc", size = 8960, upload-time = "2025-10-10T21:48:21.158Z" },
+]
+
+[[package]]
+name = "httpx2"
+version = "2.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpcore2" },
+    { name = "idna" },
+    { name = "truststore" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a3/4a/129b2e21b90ac2985d3928d96792bccc39bc6dfe796c5eee2d8ec06d4105/httpx2-2.7.0.tar.gz", hash = "sha256:8b30709aed5c8465b0dd3b95c09ce301c8f79e7e7a2d00ab0af551e0d0375b07", size = 94487, upload-time = "2026-07-14T20:40:02.318Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/b8/c341bba6411bdfda786020343c47a75ef472f6085caf82391b142b1a3ad9/httpx2-2.7.0-py3-none-any.whl", hash = "sha256:ed2a2719c696789e09493bd8e2bec3d8bd925cc6e26b68389ec25ade132f7bf4", size = 90234, upload-time = "2026-07-14T20:39:59.531Z" },
 ]
 
 [[package]]
@@ -1142,7 +1171,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.10.2.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'win32'" },
+    { name = "nvidia-cublas-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/51/e123d997aa098c61d029f76663dedbfb9bc8dcf8c60cbd6adbe42f76d049/nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:949452be657fa16687d0930933f032835951ef0892b37d2d53824d1a84dc97a8", size = 706758467, upload-time = "2025-06-06T21:54:08.597Z" },
@@ -1153,7 +1182,7 @@ name = "nvidia-cufft-cu12"
 version = "11.3.3.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'win32'" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/13/ee4e00f30e676b66ae65b4f08cb5bcbb8392c03f54f2d5413ea99a5d1c80/nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:4d2dd21ec0b88cf61b62e6b43564355e5222e4a3fb394cac0db101f2dd0d4f74", size = 193118695, upload-time = "2025-03-07T01:45:27.821Z" },
@@ -1180,9 +1209,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.3.90"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'win32'" },
-    { name = "nvidia-cusparse-cu12", marker = "sys_platform != 'win32'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'win32'" },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cusparse-cu12" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/85/48/9a13d2975803e8cf2777d5ed57b87a0b6ca2cc795f9a4f59796a910bfb80/nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:4376c11ad263152bd50ea295c05370360776f8c3427b30991df774f9fb26c450", size = 267506905, upload-time = "2025-03-07T01:47:16.273Z" },
@@ -1193,7 +1222,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.8.93"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'win32'" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c2/f5/e1854cb2f2bcd4280c44736c93550cc300ff4b8c95ebe370d0aa7d2b473d/nvidia_cusparse_cu12-12.5.8.93-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:1ec05d76bbbd8b61b06a80e1eaf8cf4959c3d4ce8e711b65ebd0443bb0ebb13b", size = 288216466, upload-time = "2025-03-07T01:48:13.779Z" },
@@ -1238,66 +1267,6 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/eb/86626c1bbc2edb86323022371c39aa48df6fd8b0a1647bc274577f72e90b/nvidia_nvtx_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:5b17e2001cc0d751a5bc2c6ec6d26ad95913324a4adb86788c944f8ce9ba441f", size = 89954, upload-time = "2025-03-07T01:42:44.131Z" },
 ]
-
-[[package]]
-name = "oida"
-version = "0.5.0"
-source = { editable = "." }
-dependencies = [
-    { name = "akouo-contract" },
-    { name = "akousma" },
-    { name = "akousmata" },
-    { name = "fastapi" },
-    { name = "jsonschema" },
-    { name = "mcp" },
-    { name = "numpy" },
-    { name = "pydantic" },
-    { name = "scipy" },
-    { name = "soundfile" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-]
-moss = [
-    { name = "accelerate" },
-    { name = "torch" },
-    { name = "torchaudio" },
-    { name = "torchcodec" },
-    { name = "transformers" },
-]
-songid = [
-    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
-    { name = "shazamio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate", marker = "extra == 'moss'" },
-    { name = "akouo-contract", editable = "../akouo" },
-    { name = "akousma", editable = "../earworm/packages/py-akousma" },
-    { name = "akousmata", editable = "../akousmata" },
-    { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'songid'", specifier = ">=0.2.2" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
-    { name = "jsonschema", specifier = ">=4.22" },
-    { name = "mcp", specifier = ">=1.27,<2" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "pydantic", specifier = ">=2.8" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
-    { name = "scipy", specifier = ">=1.12" },
-    { name = "shazamio", marker = "extra == 'songid'", specifier = ">=0.4" },
-    { name = "soundfile", specifier = ">=0.12" },
-    { name = "torch", marker = "extra == 'moss'", specifier = "==2.9.1" },
-    { name = "torchaudio", marker = "extra == 'moss'", specifier = "==2.9.1" },
-    { name = "torchcodec", marker = "extra == 'moss'", specifier = "==0.8.1" },
-    { name = "transformers", marker = "extra == 'moss'", specifier = "==4.57.1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-]
-provides-extras = ["moss", "dev", "songid"]
 
 [[package]]
 name = "packaging"
@@ -2041,6 +2010,68 @@ wheels = [
 ]
 
 [[package]]
+name = "sonicfield-oida"
+version = "0.6.0"
+source = { editable = "." }
+dependencies = [
+    { name = "akouo-contract" },
+    { name = "akousma" },
+    { name = "akousmata" },
+    { name = "fastapi" },
+    { name = "jsonschema" },
+    { name = "mcp" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "referencing" },
+    { name = "scipy" },
+    { name = "soundfile" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "httpx2" },
+    { name = "pytest" },
+]
+moss = [
+    { name = "accelerate" },
+    { name = "torch" },
+    { name = "torchaudio" },
+    { name = "torchcodec" },
+    { name = "transformers" },
+]
+songid = [
+    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
+    { name = "shazamio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", marker = "extra == 'moss'" },
+    { name = "akouo-contract", editable = "../akouo" },
+    { name = "akousma", editable = "../earworm/packages/py-akousma" },
+    { name = "akousmata", editable = "../akousmata" },
+    { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'songid'", specifier = ">=0.2.2" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.7" },
+    { name = "jsonschema", specifier = ">=4.22" },
+    { name = "mcp", specifier = ">=1.27,<2" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pydantic", specifier = ">=2.8" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
+    { name = "referencing", specifier = ">=0.35" },
+    { name = "scipy", specifier = ">=1.12" },
+    { name = "shazamio", marker = "extra == 'songid'", specifier = ">=0.4" },
+    { name = "soundfile", specifier = ">=0.12" },
+    { name = "torch", marker = "extra == 'moss'", specifier = "==2.9.1" },
+    { name = "torchaudio", marker = "extra == 'moss'", specifier = "==2.9.1" },
+    { name = "torchcodec", marker = "extra == 'moss'", specifier = "==0.8.1" },
+    { name = "transformers", marker = "extra == 'moss'", specifier = "==4.57.1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+provides-extras = ["moss", "dev", "songid"]
+
+[[package]]
 name = "soundfile"
 version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2263,6 +2294,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/37/92/e97fcc6b2c27cdb87ce5ee063d77f8f26f19f06916aa680464c8104ef0f6/triton-3.5.1-cp313-cp313t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:0b4d2c70127fca6a23e247f9348b8adde979d2e7a20391bfbabaac6aebc7e6a8", size = 170579924, upload-time = "2025-11-11T17:41:12.455Z" },
     { url = "https://files.pythonhosted.org/packages/a4/e6/c595c35e5c50c4bc56a7bac96493dad321e9e29b953b526bbbe20f9911d0/triton-3.5.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d0637b1efb1db599a8e9dc960d53ab6e4637db7d4ab6630a0974705d77b14b60", size = 170480488, upload-time = "2025-11-11T17:41:18.222Z" },
     { url = "https://files.pythonhosted.org/packages/16/b5/b0d3d8b901b6a04ca38df5e24c27e53afb15b93624d7fd7d658c7cd9352a/triton-3.5.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:bac7f7d959ad0f48c0e97d6643a1cc0fd5786fe61cb1f83b537c6b2d54776478", size = 170582192, upload-time = "2025-11-11T17:41:23.963Z" },
+]
+
+[[package]]
+name = "truststore"
+version = "0.10.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/a3/1585216310e344e8102c22482f6060c7a6ea0322b63e026372e6dcefcfd6/truststore-0.10.4.tar.gz", hash = "sha256:9d91bd436463ad5e4ee4aba766628dd6cd7010cf3e2461756b3303710eebc301", size = 26169, upload-time = "2025-08-12T18:49:02.73Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/97/56608b2249fe206a67cd573bc93cd9896e1efb9e98bce9c163bcdc704b88/truststore-0.10.4-py3-none-any.whl", hash = "sha256:adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981", size = 18660, upload-time = "2025-08-12T18:49:01.46Z" },
 ]
 
 [[package]]

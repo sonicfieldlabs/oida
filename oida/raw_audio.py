@@ -144,13 +144,17 @@ def cleanup_upload_audio_files(
         effective_max_files = int(policy["max_files"])
 
     if effective_age is not None:
-        age = max(0.0, float(effective_age))
+        age = float(effective_age)
+        if not math.isfinite(age) or age < 0:
+            raise ValueError("max_age_hours must be a finite number greater than or equal to zero")
         for path, item in by_path.items():
             if float(item["age_hours"]) >= age:
                 selected[path] = item
 
     if effective_max_files is not None:
-        keep_count = max(0, int(effective_max_files))
+        keep_count = int(effective_max_files)
+        if keep_count < 0:
+            raise ValueError("max_files must be greater than or equal to zero")
         for item in files[keep_count:]:
             path = Path(str(item["path"])).resolve()
             selected[path] = item
