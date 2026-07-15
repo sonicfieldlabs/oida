@@ -19,30 +19,30 @@ jobs:
         working-directory: oida
     steps:
       - name: Checkout Oída
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           path: oida
 
       - name: Checkout Earworm
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: sonicfieldlabs/earworm
           path: earworm
 
       - name: Checkout AKOÚŌ contract
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: sonicfieldlabs/akouo
           path: akouo
 
       - name: Checkout Akousmata
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: sonicfieldlabs/akousmata
           path: akousmata
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
 
       - name: Install Python dependencies
         run: uv sync --extra dev
