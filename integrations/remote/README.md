@@ -1,32 +1,22 @@
-# Remote Oída
+# Remote OÍDA
 
-Remote Oída is the existing responsive dashboard and Akousmata navigator served
-by the local Oída gateway. It is not a native mobile app and it uses no cloud
-backend. A phone supplies microphone, speaker, screen, touch, and browser audio
-capture while all durable state and optional MOSS inference remain on the
-server.
+OÍDA serves a phone-oriented capture surface at `/remote` from the same
+gateway as the dashboard and the embedded Akousmata navigator.
 
-Recommended deployment: private-network Serve proxies the loopback gateway on a
-dedicated HTTPS port. A dedicated port avoids breaking dashboard paths and does
-not replace other routes already served by the machine.
+The page supports:
 
-    oida integrate remote --serve --https-port 8443
+- future capture after a trigger;
+- past capture from an on-device ring buffer;
+- optional consent-scoped location;
+- the active listening preset and covenant;
+- storage of the uploaded sound and its listening record as an akousma.
 
-The integration records the machine's private-network DNS name as an allowed Host.
-Open the reported HTTPS URL on the phone. The same origin serves /library/ and
-/mcp. private-network access control remains the outer authorization boundary; Oída
-stays bound to loopback.
+Mobile microphone APIs require a secure browser context. OÍDA deliberately
+does not configure, publish, or persist a machine-level remote-access service.
+An operator who exposes this page must provide an authenticated HTTPS boundary,
+keep the daemon's host/origin checks enabled, and require `OIDA_AUTH_TOKEN`
+for any non-loopback bind.
 
-## The remote ear (`/remote`)
-
-v0.3 adds a phone-first capture page at `/remote` (also reported as
-`remote_ear_url`). Wherever, whenever: the phone records — **past** keeps only
-the last N seconds in an on-device ring buffer that overwrites itself, so a
-trigger captures what was already heard; **future** records the N seconds
-after the trigger — encodes WAV on the device, attaches its GPS fix when the
-listener grants it, and posts to `POST /remote/listen`. The server runs the
-full listening pipeline, keeps the WAV under its audio directory, writes the
-akousma (the sound plus its listening file, with spec v1.2 `location` and
-`capture`) into the shared store, and returns the listening event for the
-remote UI. Geolocated remote listens appear on the akousmata navigator's
-listening map at `/library/`.
+The remote page is a transport surface, not a second listening implementation.
+It posts to the same daemon pipeline and writes the same AKOÚŌ, Earworm, and
+Akousmata contracts as every other OÍDA client.

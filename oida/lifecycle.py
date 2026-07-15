@@ -182,7 +182,7 @@ def doctor() -> dict[str, Any]:
         "packages": packages,
         "executables": {
             name: shutil.which(name)
-            for name in ("ffmpeg", "private-network", "hermes", "codex", "claude", "openclaw", "opencode")
+            for name in ("ffmpeg", "hermes", "codex", "claude", "openclaw", "opencode")
         },
         "gateway": gateway_status(),
         "models": model_paths,

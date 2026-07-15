@@ -75,7 +75,7 @@ function encodeWav(samples, sampleRate) {
 
 async function openMic() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error(window.isSecureContext ? "no microphone API in this browser" : "microphone needs HTTPS (serve over private-network HTTPS)");
+    throw new Error(window.isSecureContext ? "no microphone API in this browser" : "microphone capture requires an operator-managed HTTPS origin");
   }
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },

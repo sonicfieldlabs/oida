@@ -12,43 +12,13 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from oida.integrations import TARGETS, _install_opencode, _stage_marketplace, assets_root, remote_status
+from oida.integrations import TARGETS, _install_opencode, _stage_marketplace, assets_root
 from oida.lifecycle import ensure_gateway, stop_gateway
 from oida.mcp_server import MCP, manifest_resource, oida_harness
 from oida.server import create_app
 
 
 class IntegrationAssetTests(unittest.TestCase):
-    def test_phone_remote_status_requires_and_detects_private_https_serve(self) -> None:
-        dns_name = "private-host.example"
-        private-network_status = {
-            "BackendState": "Running",
-            "Self": {"DNSName": f"{dns_name}."},
-        }
-        serve_status = {
-            "Web": {
-                f"{dns_name}:8443": {
-                    "Handlers": {"/": {"Proxy": "http://127.0.0.1:8765"}}
-                }
-            }
-        }
-
-        def fake_run(command: list[str], **_kwargs: object) -> dict[str, object]:
-            payload = serve_status if command[1:3] == ["serve", "status"] else private-network_status
-            return {"ok": True, "status": 0, "output": json.dumps(payload), "command": command}
-
-        with patch("oida.integrations.shutil.which", return_value="/usr/local/bin/private-network"), patch(
-            "oida.integrations._run", side_effect=fake_run
-        ):
-            ready = remote_status(settings={"remote": {"enabled": True, "https_port": 8443}})
-        self.assertTrue(ready["microphone_ready"])
-        self.assertEqual(ready["remote_ear_url"], f"https://{dns_name}:8443/remote")
-
-        with patch("oida.integrations.shutil.which", return_value=None):
-            unavailable = remote_status(settings={})
-        self.assertFalse(unavailable["available"])
-        self.assertIn("private-network", unavailable["detail"])
-
     def test_host_skills_are_in_sync(self) -> None:
         root = assets_root()
         paths = [
@@ -65,7 +35,7 @@ class IntegrationAssetTests(unittest.TestCase):
         self.assertIn("oida_prepare_turn", contents[0])
 
     def test_all_local_host_integrations_are_exposed(self) -> None:
-        self.assertEqual(TARGETS, ("hermes", "codex", "claude", "openclaw", "opencode", "remote"))
+        self.assertEqual(TARGETS, ("hermes", "codex", "claude", "openclaw", "opencode"))
 
     def test_codex_and_claude_mcp_commands_ensure_daemon(self) -> None:
         root = assets_root()

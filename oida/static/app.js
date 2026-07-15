@@ -41,7 +41,6 @@ const state = {
   nativeEventId: null,
   historyRequestSerial: 0,
   activeSpectrogram: null,
-  mobileRemote: null,
   reasoningSettings: null,
   reasoningProviders: [],
   reasoningModels: new Map(),
@@ -107,11 +106,6 @@ const ui = {
   themeLight: el("themeLight"),
   themeDark: el("themeDark"),
   resetInterface: el("resetInterface"),
-  mobileRemoteUrl: el("mobileRemoteUrl"),
-  mobileRemoteNote: el("mobileRemoteNote"),
-  mobileRemoteEnable: el("mobileRemoteEnable"),
-  mobileRemoteCopy: el("mobileRemoteCopy"),
-  mobileRemoteOpen: el("mobileRemoteOpen"),
   reasoningStatus: el("reasoningStatus"),
   reasoningResources: el("reasoningResources"),
   reasoningRefresh: el("reasoningRefresh"),
@@ -403,65 +397,6 @@ async function refreshHealth() {
   }
 }
 
-function renderMobileRemote(remote) {
-  state.mobileRemote = remote || null;
-  const url = remote?.remote_ear_url || "";
-  if (ui.mobileRemoteUrl) ui.mobileRemoteUrl.value = url;
-  if (ui.mobileRemoteCopy) ui.mobileRemoteCopy.disabled = !url;
-  if (ui.mobileRemoteOpen) ui.mobileRemoteOpen.disabled = !url;
-  if (ui.mobileRemoteEnable) {
-    ui.mobileRemoteEnable.textContent = remote?.microphone_ready ? "Refresh" : "Enable";
-    ui.mobileRemoteEnable.disabled = false;
-  }
-  if (ui.mobileRemoteNote) {
-    const prefix = remote?.microphone_ready ? "Ready for the phone microphone." : "Not enabled.";
-    const instruction = remote?.microphone_ready
-      ? "Open the URL on a phone connected to the same private-network network, then allow microphone access."
-      : "";
-    ui.mobileRemoteNote.textContent = `${prefix} ${remote?.detail || "private-network HTTPS is required for mobile microphone access."} ${instruction}`.trim();
-    ui.mobileRemoteNote.classList.toggle("ready", Boolean(remote?.microphone_ready));
-  }
-}
-
-async function refreshMobileRemote() {
-  try {
-    renderMobileRemote(await fetchJson("/remote/status"));
-  } catch (error) {
-    renderMobileRemote({ detail: `Phone remote unavailable: ${error.message}` });
-  }
-}
-
-ui.mobileRemoteEnable?.addEventListener("click", async () => {
-  ui.mobileRemoteEnable.disabled = true;
-  ui.mobileRemoteEnable.textContent = "Enabling…";
-  if (ui.mobileRemoteNote) ui.mobileRemoteNote.textContent = "Creating the private HTTPS microphone URL…";
-  try {
-    const remote = await post("/remote/configure");
-    renderMobileRemote(remote);
-    setListenStatus(remote.microphone_ready ? "Phone microphone remote ready." : (remote.detail || "Phone remote needs attention."), remote.microphone_ready ? "" : "error");
-  } catch (error) {
-    renderMobileRemote({ detail: `Phone remote: ${error.message}` });
-    setListenStatus(`Phone remote: ${error.message}`, "error");
-  }
-});
-
-ui.mobileRemoteCopy?.addEventListener("click", async () => {
-  const url = ui.mobileRemoteUrl?.value || "";
-  if (!url) return;
-  try {
-    await copyText(url);
-    ui.mobileRemoteCopy.textContent = "Copied";
-    setTimeout(() => { if (ui.mobileRemoteCopy) ui.mobileRemoteCopy.textContent = "Copy URL"; }, 1200);
-  } catch (error) {
-    setListenStatus(`Copy remote URL: ${error.message}`, "error");
-  }
-});
-
-ui.mobileRemoteOpen?.addEventListener("click", () => {
-  const url = ui.mobileRemoteUrl?.value || "";
-  if (url) window.open(url, "_blank", "noopener");
-});
-
 const ENGINE_LABELS = {
   ready: "moss ready",
   warming: "warming…",
@@ -562,7 +497,6 @@ window.oidaOpenPanel = (name) => {
   document.querySelectorAll("dialog[open]").forEach((other) => { if (other !== target) other.close(); });
   if (!target.open) target.showModal();
   if (name === "settings") {
-    refreshMobileRemote();
     refreshReasoning();
   }
 };
@@ -4728,7 +4662,6 @@ for (const input of [ui.conversationTranscript, ui.conversationMemory, ui.conver
 refreshHealth().finally(() => {
   refreshHistory();
 });
-refreshMobileRemote();
 loadManifest();
 refreshMemory();
 refreshCovenant();

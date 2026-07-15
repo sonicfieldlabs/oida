@@ -56,7 +56,6 @@ from oida.engine import build_engine
 from oida.engine_base import EngineUnavailable
 from oida.generation import GenerationStore
 from oida.gateway import GATEWAY_CONTRACT, gateway_manifest, harness_host_perception
-from oida.integrations import install as install_integration, remote_status
 from oida.listening import listening_event_dict
 from oida.live import LiveManager
 from oida.memory import AkousmataStore, earworm_context_for_event
@@ -1384,29 +1383,10 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         # after an upgrade (assets are ?v= versioned, the document is not)
         return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
 
-    @app.get("/remote/status")
-    def remote_access_status() -> dict[str, object]:
-        return remote_status()
-
-    @app.post("/remote/configure")
-    def remote_access_configure(request: Request) -> dict[str, object]:
-        # Configuring a machine-level private-network proxy is a desktop-only action.
-        # A phone on the private-network can use the remote, but cannot reconfigure it.
-        if _hostname_only(request.headers.get("host", "")) not in _LOOPBACK_HOSTNAMES:
-            raise HTTPException(status_code=403, detail="phone remote configuration is available only from this Mac")
-        configuration = install_integration("remote", serve=True, https_port=8443)
-        status = remote_status()
-        private-network_host = status.get("private-network_host")
-        if private-network_host:
-            # The app loaded its trusted-host settings before this endpoint ran;
-            # update the live guard too so first-time setup works immediately.
-            allowed_hostnames.add(str(private-network_host).strip().lower().rstrip("."))
-        return {**status, "configuration": configuration}
-
     @app.get("/remote")
     def remote_ear_page() -> FileResponse:
-        # The remote ear: a phone-first capture surface served by the same
-        # daemon (reached over the operator's private network, e.g. private-network).
+        # Phone-first capture surface. Oída serves the page but does not
+        # configure or publish a machine-level remote-access service.
         return FileResponse(static_dir / "remote.html", headers={"Cache-Control": "no-cache"})
 
     # ── the sovereignty layer: covenants (spec v1.3) ─────────────────────

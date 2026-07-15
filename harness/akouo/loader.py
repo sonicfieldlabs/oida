@@ -10,17 +10,12 @@ from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
 
-DEFAULT_AKOUO_CANDIDATES = [
-    Path((os.getenv("OIDA_AKOUO_ROOT") or os.getenv("HMM_AKOUO_ROOT") or os.getenv("AEAR_AKOUO_ROOT"))) if (os.getenv("OIDA_AKOUO_ROOT") or os.getenv("HMM_AKOUO_ROOT") or os.getenv("AEAR_AKOUO_ROOT")) else None,
-    Path.home() / "Documents" / "SFL" / "akouo",
-    Path.home() / "Documents" / "sfl" / "akouo",
-]
-
-
 def default_akouo_root() -> Path:
-    for candidate in DEFAULT_AKOUO_CANDIDATES:
-        if candidate and candidate.expanduser().exists():
-            return candidate.expanduser().resolve()
+    configured = os.getenv("OIDA_AKOUO_ROOT") or os.getenv("HMM_AKOUO_ROOT") or os.getenv("AEAR_AKOUO_ROOT")
+    if configured:
+        candidate = Path(configured).expanduser().resolve()
+        if candidate.exists():
+            return candidate
     try:
         from akouo_contract import root as installed_root
 
@@ -29,7 +24,10 @@ def default_akouo_root() -> Path:
             return packaged
     except (ImportError, OSError):
         pass
-    return Path.home() / "Documents" / "SFL" / "akouo"
+    sibling = Path(__file__).resolve().parents[2].parent / "akouo"
+    if sibling.exists():
+        return sibling.resolve()
+    raise FileNotFoundError("AKOÚŌ contract not found; install akouo-contract or set OIDA_AKOUO_ROOT")
 
 
 class AkouoLoader:

@@ -1,4 +1,4 @@
-"""Bridge into the Sonic Field knowledge base (~/workspace/sonicfield).
+"""Bridge into a configured Sonic Field knowledge base.
 
 Read-only. Lets a listening result reach outward: after oida produces an
 analysis, `explore()` searches the wiki (lexicon), topics, journal, paths,

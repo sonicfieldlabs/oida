@@ -345,7 +345,7 @@ def _source_type(value: str) -> SourceType:
 def _unlink_if_upload(path: object) -> None:
     # Only delete files that are genuinely inside the configured uploads/ directory. The
     # previous `"uploads" in parts` substring test would also match an unrelated
-    # external path such as $HOME/keep.wav.
+    # external path such as /private/uploads/keep.wav.
     if not isinstance(path, str) or not path:
         return
     uploads_root = uploads_dir().resolve()

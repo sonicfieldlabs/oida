@@ -26,12 +26,12 @@ func oidaAudioDirectory() -> URL {
 func findOidaRepositoryRoot() -> URL? {
     let fileManager = FileManager.default
     let candidates = [
+        ProcessInfo.processInfo.environment["OIDA_REPOSITORY_ROOT"].map {
+            URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true)
+        },
         Bundle.main.executableURL,
         Bundle.main.bundleURL,
-        URL(fileURLWithPath: fileManager.currentDirectoryPath),
-        // Known checkout location so a packaged app (run from /Applications)
-        // can still supervise the daemon.
-        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("workspace/oida", isDirectory: true)
+        URL(fileURLWithPath: fileManager.currentDirectoryPath)
     ].compactMap { $0 }
 
     for candidate in candidates {

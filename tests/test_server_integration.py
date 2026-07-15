@@ -44,30 +44,6 @@ def _write_tone(path: Path) -> Path:
 
 
 class ServerSecurityTests(unittest.TestCase):
-    def test_phone_remote_status_and_local_configuration_surface(self) -> None:
-        ready = {
-            "available": True,
-            "configured": True,
-            "enabled": True,
-            "served": True,
-            "secure": True,
-            "microphone_ready": True,
-            "private-network_host": "private-host.example",
-            "remote_ear_url": "https://private-host.example:8443/remote",
-        }
-        with patch("oida.server.remote_status", return_value=ready), patch(
-            "oida.server.install_integration", return_value={"configured": True}
-        ) as install_remote:
-            client = _client()
-            status = client.get("/remote/status")
-            configured = client.post("/remote/configure")
-
-        self.assertEqual(status.status_code, 200)
-        self.assertTrue(status.json()["microphone_ready"])
-        self.assertEqual(configured.status_code, 200)
-        self.assertEqual(configured.json()["remote_ear_url"], ready["remote_ear_url"])
-        install_remote.assert_called_once_with("remote", serve=True, https_port=8443)
-
     def test_embedded_memory_can_be_renamed_and_forgotten_without_deleting_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             "os.environ",

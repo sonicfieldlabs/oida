@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 import math
 import sys
 from dataclasses import dataclass
@@ -97,34 +96,18 @@ def default_sonicfield_root() -> Path | None:
     configured = _env("OIDA_SONICFIELD_ROOT", "HMM_SONICFIELD_ROOT", "AEAR_SONICFIELD_ROOT")
     if configured:
         return Path(configured).expanduser().resolve()
-    for candidate in (
-        Path.home() / "Documents" / "SFL" / "sonicfield",
-        Path.home() / "Documents" / "sonicfield",
-    ):
-        if candidate.exists():
-            return candidate
+    sibling = REPO_ROOT.parent / "sonicfield"
+    if sibling.exists():
+        return sibling.resolve()
     return None
 
 
-def integration_settings_path() -> Path:
-    return data_dir() / "integrations.json"
-
-
 def _trusted_hosts() -> tuple[str, ...]:
-    values: list[str] = []
     configured = _env("OIDA_TRUSTED_HOSTS", "HMM_TRUSTED_HOSTS", "AEAR_TRUSTED_HOSTS")
-    if configured:
-        values.extend(part.strip().lower().rstrip(".") for part in configured.split(",") if part.strip())
-    path = integration_settings_path()
-    if path.exists():
-        try:
-            settings = json.loads(path.read_text(encoding="utf-8"))
-            remote = settings.get("remote") if isinstance(settings, dict) and isinstance(settings.get("remote"), dict) else {}
-            hosts = remote.get("trusted_hosts") if isinstance(remote.get("trusted_hosts"), list) else []
-            values.extend(str(host).strip().lower().rstrip(".") for host in hosts if str(host).strip())
-        except (OSError, json.JSONDecodeError):
-            pass
-    return tuple(dict.fromkeys(values))
+    if not configured:
+        return ()
+    values = (part.strip().lower().rstrip(".") for part in configured.split(","))
+    return tuple(dict.fromkeys(part for part in values if part))
 
 
 def _truthy_env(name: str, default: str = "0") -> bool:

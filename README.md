@@ -34,11 +34,13 @@ name **oída**.
   dashboard, REST API, streamable HTTP MCP at `/mcp`, and the complete
   Akousmata navigator at `/library/`.
 - **Local host integrations** installed by `oida integrate`: Hermes, Codex,
-  Claude, OpenClaw, and OpenCode integrations, plus a mobile-responsive private
-  private-network surface. Their generated MCP configs are pinned to the active Oída
+  Claude, OpenClaw, and OpenCode. Their generated MCP configs are pinned to the active Oída
   runtime, so they do not depend on shell `PATH` or require a second app. Host
   adapters start the gateway without prewarming MOSS; the host-perception path
   stays lightweight until Oída-owned listening actually needs the local model.
+- **Remote capture surface** at `/remote`: the daemon serves a responsive
+  past/future microphone UI, while network publication and HTTPS termination
+  remain outside this repository and under the operator's control.
 - FastAPI daemon (default `127.0.0.1:8765`) with task endpoints
   (`/transcribe`, `/events`, `/caption`, `/speech`, `/music`, `/qa`, `/think`,
   `/report`), the listening-event pipeline (`/listen-event`,
@@ -75,14 +77,14 @@ name **oída**.
   archive/restore/delete plus per-result rename/delete and batch remember;
   history persists across restarts, and deleting history removes derived
   references only, never raw audio.
-- **germ handoff** (shared akousmata store): after a listen, three actions —
+- **GERM handoff** (shared Akousmata store): after a listen, three actions —
   *Sound*, *Prompt*, *Lineage* — persist the listen as an **akousma** in the
-  shared store (`~/workspace/akousmata`, via earworm's `py-akousma`) and
+  configured store (`AKOUSMATA_PATH`, via Earworm's `py-akousma`) and
   deep-link germ's `/import` route (`OIDA_GERM_URL`, default `http://127.0.0.1:5178`).
   Opt-in song identification (`OIDA_SONGID=1`, ShazamIO) enriches the record's
   `extensions.songid`.
-- **Sonic Field bridge**: "Explore in the wiki" searches the wiki, topics,
-  journal, 93k-item library, paths, research, notes, and labs for related
+- **Sonic Field bridge**: "Explore in the wiki" searches the configured wiki,
+  topics, journal, library, paths, research, notes, and labs for related
   concepts, with taxonomy alias normalization and Finder reveal.
 - Event-grounded **conversation** (`/conversation/ask`): Oída composes the
   system prompt and covenant-filtered evidence packet, validates a cited
@@ -130,6 +132,18 @@ name **oída**.
   the HTTP compatibility surface).
 - A dependency-light test suite that runs without model weights.
 
+## Stack compatibility
+
+| Component | Version / contract | Role in OÍDA |
+| --- | --- | --- |
+| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.7.0` / `akouo/v0.7` | 15 listening modes, router, reference layer, 18 commands, presets, evidence permissions, and covenants. |
+| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.4.0` / spec v1.3 | Session provenance, lineage, kinship, location/capture, and covenant-aware memory records. |
+| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.4.0` | Embedded library at `/library/` and the shared durable sonic-memory store. |
+| OÍDA gateway | `sonicfield-oida 0.6.0` / `oida/gateway/v0.2` | Unified REST, MCP, agent, dashboard, local perception, and host-perception surface. |
+| [GERM](https://github.com/sonicfieldlabs/germ) | 0.2.0 integration | Optional sound, prompt, and lineage handoff after listening. |
+| [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.0 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
+| [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.0 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
+
 ## Quick Start
 
 Prerequisites: Python 3.12+, `uv`, and `ffmpeg` for non-WAV uploads or browser
@@ -160,16 +174,14 @@ uv run oida integrate codex
 uv run oida integrate claude
 uv run oida integrate openclaw
 uv run oida integrate opencode
-uv run oida integrate remote --serve     # private responsive UI via private-network
 uv run oida doctor
 ```
 
-No native iOS or cloud service is required: open the reported private-network URL on
-the phone to use it as the microphone, speaker, screen, and remote control.
 The `/remote` page is the dedicated remote ear: past/future capture with an
-on-phone ring buffer, optional GPS, and the akousma (sound + listening file)
-filed into the shared store by the server — see
-`integrations/remote/README.md`.
+on-device ring buffer, optional consent-scoped location, and the akousma
+(sound plus listening record) filed into the shared store by the server. OÍDA
+does not configure remote-network access; see
+`integrations/remote/README.md` for the runtime boundary.
 
 Every listen surface can run under a **listening covenant** — the sovereignty
 layer (v0.4, AKOÚŌ v0.7). A covenant is a plain-text declaration (English or
@@ -331,10 +343,8 @@ variables as the fallback; they are never written into reasoning settings.
 - `docs/native-macos-shell.md` — shell layout, supervision, hotkeys, listener.
 - `docs/macos-signing-notarization.md` — Developer ID signing and packaging.
 - `docs/akouo-skills.md` / `docs/akousmata-memory.md` — skills and memory.
-- `docs/architecture/current-state.md` — architecture map and phase log
-  (`PLAN.md` keeps the historical OIDA phases).
-- `docs/release-readiness.md` — what `scripts/run_local_checks.sh release`
-  validates.
+- `docs/architecture.md` — runtime surfaces, package boundaries, data flow,
+  and local-state ownership.
 - `docs/gateway-contract.md` — lifecycle, host-perception envelope, and local
   integration boundaries.
 - `docs/reasoning-providers.md` — prompt ownership, provider setup, model roles,

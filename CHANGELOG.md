@@ -103,10 +103,8 @@
   covenant vocabulary and file format. Still empty by default.
 - **Settings, consolidated**: appearance (light/dark, persisted, native shell
   follows), interface reset, capture-permission and open-in-browser actions,
-  the **phone remote** (status + one-click `POST /remote/configure` through
-  private-network Serve HTTPS, with the URL to copy or open), Engine, and Path — one
-  modal. A collapsible activity console under the result box records phases,
-  requests, and errors.
+  Engine, Reasoning, and Path — one modal. A collapsible activity console
+  under the result box records phases, requests, and errors.
 - **Native shell, chromed**: titlebar accessories (sidebar toggles, source
   popovers with buffer/direction/mic level, floating listener, settings) via a
   window-chrome bridge; a real listening lifecycle (capturing → processing →
@@ -167,8 +165,8 @@
   `POST /remote/listen`; the server runs the full listening pipeline, keeps
   the WAV, **writes the akousma (the sound + its listening file) into the
   shared store** with `location` and `capture`, and answers with the
-  listening event rendered in the remote UI. Reached over the operator's
-  private network (private-network), same loopback-guard rules as the dashboard.
+  listening event rendered in the remote UI. Network publication remains
+  operator-managed and uses the same host/origin guards as the dashboard.
 - **Future / past listening (spec v1.2 `capture`)**: every listen surface can
   now declare its temporal direction. *Past* slices the ring buffer that was
   already listening when the trigger fired; *future* records the window after
@@ -207,8 +205,9 @@
   explicit, while MOSS keeps its 16 kHz mono restrictions.
 - **Gateway lifecycle and local adapters**: `start`, `stop`, `status`, `doctor`,
   `agent`, `gateway`, and `integrate` commands manage a singleton daemon and
-  install bundled Hermes, Codex, Claude, and private-network-remote integrations.
-  MCP processes ensure or reuse the gateway and pin the active Python runtime.
+  install bundled Hermes, Codex, and Claude integrations. The remote capture
+  page is served by the daemon without configuring network access. MCP
+  processes ensure or reuse the gateway and pin the active Python runtime.
 - **Earworm on every pass, durable memory only by consent**: session-scoped
   Earworm context is emitted for all gateway listens and host harness passes;
   Akousmata writes still require an explicit remember action.
@@ -368,7 +367,7 @@
   `/oida/status`; server identity, journal headers, and UI titles now read
   `oída`. Data directory prefers `~/Library/Application Support/oida`, falling
   back to a pre-rename `hmm` directory so existing listening memory is not
-  orphaned. The Sonic Field bridge now resolves `~/workspace/sonicfield`.
+  orphaned. The Sonic Field bridge now resolves a configured or sibling checkout.
 
 - Made `mac-mps` the default engine everywhere (daemon, macOS shell, env
   examples); the daemon prewarms MOSS-Audio-4B-Instruct in the background and

@@ -36,9 +36,9 @@ tool, or a declared human measurement.
 
 Hermes, Codex, and Claude integrations always invoke the stdio gateway command,
 so they can start Oída when needed without loading a second MOSS model. A
-running daemon is reused. The local remote surface uses the same process and is
-intended for an operator-configured private network such as private-network; it is
-not a cloud application.
+running daemon is reused. The remote capture page uses the same process, but
+OÍDA does not publish it or configure network access. Any non-loopback
+deployment must provide its own authenticated HTTPS boundary.
 
 ## Host input example
 
