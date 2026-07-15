@@ -15,15 +15,35 @@ recordings, provider services, or generated material.
 
 The embedded `mac-mps` and external `cuda-server` paths integrate with
 [MOSS-Audio](https://github.com/OpenMOSS/MOSS-Audio), developed by the
-OpenMOSS team. The official
-[MOSS-Audio-4B-Instruct model card](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-4B-Instruct)
-identifies Apache-2.0 terms for that release.
+OpenMOSS team. Oída's current embedded path is developed and tested first with
+the four released MOSS-Audio checkpoints:
+
+- [MOSS-Audio 4B Instruct](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-4B-Instruct)
+- [MOSS-Audio 4B Thinking](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-4B-Thinking)
+- [MOSS-Audio 8B Instruct](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-8B-Instruct)
+- [MOSS-Audio 8B Thinking](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-8B-Thinking)
+
+The official repository and these model cards identify Apache-2.0 terms for
+the released code and checkpoints. The Instruct variants are used for direct
+listening and transcription routes. Thinking variants support deeper,
+music-focused, and targeted re-listening routes. Oída consumes their final
+response as bounded evidence; it does not expose private reasoning traces.
+
+The 4B pair is the recommended local starting point. Oída's public-alpha
+planning guidance is 16 GB minimum and 24 GB suggested for 4B, or 24 GB
+minimum and 48 GB suggested for 8B. Actual memory and speed vary with device,
+audio duration, precision, and resident-model policy.
 
 Oída does not redistribute MOSS-Audio code or weights and does not download
 them silently. Install the exact upstream release yourself, read its model
 card and license at the time of use, and record the chosen model identifier in
 research or publication metadata. Upstream terms remain authoritative if they
 change or differ between checkpoints.
+
+See [MOSS-Audio setup](model-setup.md) for the exact manual downloads and the
+[Listening Stack installer](https://github.com/sonicfieldlabs/listening-stack)
+for the guided route. The installer keeps weights outside Git and records
+local paths without placing credentials in repository files.
 
 ## Other Local, Hosted, and Host Models
 

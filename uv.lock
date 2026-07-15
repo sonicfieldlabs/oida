@@ -198,6 +198,7 @@ source = { editable = "../akousmata" }
 dependencies = [
     { name = "akousma" },
     { name = "fastapi" },
+    { name = "python-multipart" },
     { name = "uvicorn" },
 ]
 
@@ -209,6 +210,7 @@ requires-dist = [
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.7" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.21" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "uvicorn", specifier = ">=0.29" },
 ]
 provides-extras = ["dev"]

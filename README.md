@@ -2,12 +2,18 @@
 
 > **Public alpha · Open research release · Local-first · Open-source · Under active development**
 
-Oída is a local listening instrument for sound files, microphones, and system
-audio. It combines deterministic signal analysis with optional audio models,
-keeps observation separate from interpretation, and can remember a listening
-only when asked. A sound can enter Oída, become an inspectable listening event,
-pass into GERM as material or lineage, enter Akousmata as memory, and be heard
-again without erasing the earlier account.
+Oída is a local listening instrument and agentic gateway for sound files,
+microphones, and system audio. It combines deterministic signal analysis with
+optional audio models, keeps observation separate from interpretation, and can
+remember a listening only when asked. A sound can enter Oída, become an
+inspectable listening event, pass into GERM as material or lineage, enter
+Akousmata as memory, and be heard again without erasing the earlier account.
+
+Oída's owned model path is developed and tested first with the open-source
+MOSS-Audio Instruct and Thinking checkpoints. Those local models are the
+recommended starting point for model-backed exploration. The gateway contract
+remains model-agnostic, the deterministic path needs no model, and hosted
+providers are never enabled by default.
 
 ![Oída dashboard showing a model-free signal listening](docs/assets/oida-dashboard.png)
 
@@ -42,7 +48,8 @@ still performs deterministic DSP; it does not invent a semantic caption.
 | Path | Operating system | Hardware and software |
 | --- | --- | --- |
 | Model-free service | macOS or Linux | Python 3.12+, `uv`; CPU only; `ffmpeg` for non-WAV input and browser recording |
-| Embedded MOSS-Audio | Apple Silicon macOS | Local MOSS-Audio code and weights, PyTorch/MPS, and sufficient unified memory for the selected checkpoint |
+| Embedded MOSS-Audio 4B | Apple Silicon macOS | Local MOSS-Audio code and weights, PyTorch/MPS; 16 GB minimum and 24 GB unified memory suggested |
+| Embedded MOSS-Audio 8B | Apple Silicon macOS | Local MOSS-Audio code and weights; 24 GB minimum and 48 GB unified memory suggested |
 | CUDA service | Operator-managed Linux/NVIDIA host | A separately running compatible MOSS-Audio SGLang endpoint |
 | Native shell and system audio | macOS 13+ | Swift 5.9/Xcode command-line tools; Screen Recording permission for system output |
 
@@ -56,6 +63,7 @@ instead of promising one universal RAM minimum.
 | --- | --- |
 | How does it work? | [Architecture](docs/architecture.md) and [gateway contract](docs/gateway-contract.md) |
 | How does it connect? | [The Listening Stack](https://sonicfield.org/stack) and [GERM handoff](#stack-compatibility) |
+| How do I install the tested models? | [MOSS-Audio setup](docs/model-setup.md) |
 | Which models and licenses apply? | [Models and licensing](docs/models-and-licensing.md) |
 | What is unfinished? | [Known limitations](#known-limitations) and [roadmap](ROADMAP.md) |
 | How can I help? | [Contribution guide](CONTRIBUTING.md) |
@@ -208,6 +216,18 @@ and cultivation.
 
 ## Quick Start
 
+For a guided Oída or complete Listening Stack installation, including host
+checks, model choices, storage guidance, downloads, and optional agent
+integrations, use the separate installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sonicfieldlabs/listening-stack/main/install.sh | bash
+```
+
+Choose **Oída only** or **Oída + GERM** in the terminal assistant. Oída remains
+in this repository; the installer only coordinates its source, dependencies,
+models, and local configuration.
+
 Prerequisites: Python 3.12+, `uv`, and `ffmpeg` for non-WAV uploads or browser
 recordings. From this source workspace, one sync installs Oída together with
 the canonical AKOÚŌ, Earworm/akousma, and Akousmata packages:
@@ -333,7 +353,8 @@ analyzed, as a temporary WAV under the audio dir, and is cleaned by the
 ## Engine Profiles
 
 The `mac-mps` adapter expects the official MOSS-Audio repository and local
-weights. `scripts/run_oida_mps.sh` sets the environment and starts the daemon:
+weights. Follow [MOSS-Audio setup](docs/model-setup.md) for exact checkpoint
+downloads. `scripts/run_oida_mps.sh` sets the environment and starts the daemon:
 
 ```bash
 export OIDA_MOSS_AUDIO_REPO="$PWD/MOSS-Audio"
@@ -441,6 +462,8 @@ promising production stability.
   integration boundaries.
 - `docs/reasoning-providers.md` — prompt ownership, provider setup, model roles,
   evidence boundaries, and host prepare/commit flow.
+- `docs/model-setup.md` — exact MOSS-Audio downloads, hardware planning,
+  configuration, and verification.
 - `docs/models-and-licensing.md` — model attribution, installation boundaries,
   and third-party terms.
 - `ROADMAP.md` — current public-alpha priorities and non-goals.
