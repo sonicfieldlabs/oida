@@ -601,6 +601,25 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         return None
 
     def moss_model_descriptors() -> list[ModelDescriptor]:
+        runtime = engine.runtime_status()
+        loaded_names = {
+            Path(str(value)).name
+            for value in runtime.get("loaded_models", [])
+            if str(value).strip()
+        }
+
+        def configured_metadata(model_ref: str) -> dict[str, object]:
+            path = Path(model_ref).expanduser()
+            installed = path.is_dir() and (path / "config.json").exists()
+            name = path.name
+            return {
+                "configured": True,
+                "installed": installed,
+                "available": installed or config.profile == "cuda-server",
+                "loaded": name in loaded_names,
+                **({"path": str(path)} if installed else {}),
+            }
+
         aliases = [
             ModelDescriptor(
                 id="instruct",
@@ -608,7 +627,10 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 name=f"MOSS-Audio Instruct · {Path(config.instruct_model).name}",
                 capabilities=["audio", "perception", "fast_perception"],
                 locality="local",
-                metadata={"role": "fast_perception", "configured": True},
+                metadata={
+                    "role": "fast_perception",
+                    **configured_metadata(config.instruct_model),
+                },
             ),
             ModelDescriptor(
                 id="thinking",
@@ -616,7 +638,10 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 name=f"MOSS-Audio Thinking · {Path(config.thinking_model).name}",
                 capabilities=["audio", "perception", "deep_perception", "targeted_relisten"],
                 locality="local",
-                metadata={"role": "deep_perception", "configured": True},
+                metadata={
+                    "role": "deep_perception",
+                    **configured_metadata(config.thinking_model),
+                },
             ),
         ]
         checkpoints = [
@@ -640,6 +665,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                     "kind_hint": item.get("kind_hint"),
                     "description": item.get("description"),
                     "installed": True,
+                    "available": True,
+                    "loaded": str(item.get("name") or "") in loaded_names,
                     "path": str(item.get("path") or ""),
                 },
             )

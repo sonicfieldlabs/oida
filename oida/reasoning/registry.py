@@ -104,7 +104,7 @@ class ProviderRegistry:
             models = self._configured_model(entry)
         else:
             try:
-                models = entry.adapter.list_models()
+                models = [self._mark_discovered(model) for model in entry.adapter.list_models()]
             except Exception:
                 models = []
         configured = self._configured_model(entry)
@@ -128,6 +128,22 @@ class ProviderRegistry:
                 }
             )
         return models
+
+    @staticmethod
+    def _mark_discovered(model: ModelDescriptor) -> ModelDescriptor:
+        """Mark models actually enumerated by a runtime or provider.
+
+        Catalog descriptors begin unavailable.  A local endpoint enumerating a
+        model is evidence that it is installed on that host; a cloud provider
+        enumerating one only establishes API availability.
+        """
+
+        metadata = dict(model.metadata)
+        metadata.setdefault("discovered", True)
+        metadata.setdefault("available", True)
+        if model.locality == ProviderLocality.LOCAL:
+            metadata.setdefault("installed", True)
+        return model.model_copy(update={"metadata": metadata})
 
     @staticmethod
     def _configured_model(entry: _RegisteredProvider) -> list[ModelDescriptor]:

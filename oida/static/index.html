@@ -13,7 +13,7 @@
   </script>
   <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/styles.css?v=24" />
+  <link rel="stylesheet" href="/static/styles.css?v=26" />
   <link rel="manifest" href="/static/manifest.webmanifest" />
 </head>
 <body>
@@ -338,9 +338,23 @@
         </div>
         <div class="reasoning-provider-list" id="reasoningProviders"></div>
 
+        <div class="reasoning-subhead reasoning-model-subhead">
+          <div><h5>Models</h5><span>Catalog support is separate from what is installed, hosted, or connected on this computer.</span></div>
+          <label class="reasoning-model-filter"><span class="sr-only">Filter models</span>
+            <select id="reasoningModelFilter" class="quiet-select" aria-label="Filter supported models">
+              <option value="all">All supported</option>
+              <option value="ready">Installed or ready</option>
+              <option value="local">Local models</option>
+              <option value="cloud">Cloud models</option>
+            </select>
+          </label>
+        </div>
+        <div class="reasoning-model-summary" id="reasoningModelSummary" role="status">Loading supported models…</div>
+        <div class="reasoning-model-library" id="reasoningModelLibrary" aria-label="Supported models"></div>
+
         <div class="reasoning-subhead">
           <h5>Model roles</h5>
-          <span>Choose which ear or reasoner handles each part of Oída.</span>
+          <span>Unavailable supported models may be assigned now; Oída keeps using its safe local fallback until setup is complete.</span>
         </div>
         <div class="reasoning-role-grid" id="reasoningRoles"></div>
 
@@ -430,6 +444,6 @@
   </dialog>
 
 </main>
-  <script src="/static/app.js?v=27"></script>
+  <script src="/static/app.js?v=28"></script>
 </body>
 </html>

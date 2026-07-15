@@ -86,8 +86,11 @@ class ModelSpec:
                 "notes": self.notes,
                 "dependencies": list(self.dependencies),
                 "selectable": self.selectable,
-                # Catalog entries describe support, not local installation.
-                "installed": None,
+                # Catalog entries describe support, not a detected runtime.
+                # Local entries are upgraded to installed/available when a
+                # checkpoint scan or a compatible local host reports them.
+                "installed": False if self.locality == ProviderLocality.LOCAL else None,
+                "available": False,
                 "tested_on_this_machine": False,
             },
         )

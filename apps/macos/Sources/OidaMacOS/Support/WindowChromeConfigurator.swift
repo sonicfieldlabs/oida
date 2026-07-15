@@ -16,7 +16,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
     let onChangeCaptureSeconds: (Double) -> Void
     let onChangeDirection: (String) -> Void
     let onChooseFile: () -> Void
-    let onToggleFloating: () -> Void
     let onOpenSettings: () -> Void
     let onToggleRight: () -> Void
 
@@ -33,7 +32,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             onChangeCaptureSeconds: onChangeCaptureSeconds,
             onChangeDirection: onChangeDirection,
             onChooseFile: onChooseFile,
-            onToggleFloating: onToggleFloating,
             onOpenSettings: onOpenSettings,
             onToggleRight: onToggleRight
         )
@@ -58,7 +56,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         coordinator.onChangeCaptureSeconds = onChangeCaptureSeconds
         coordinator.onChangeDirection = onChangeDirection
         coordinator.onChooseFile = onChooseFile
-        coordinator.onToggleFloating = onToggleFloating
         coordinator.onOpenSettings = onOpenSettings
         coordinator.onToggleRight = onToggleRight
         coordinator.refreshOpenSourcePopover()
@@ -85,7 +82,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         var onChangeCaptureSeconds: (Double) -> Void
         var onChangeDirection: (String) -> Void
         var onChooseFile: () -> Void
-        var onToggleFloating: () -> Void
         var onOpenSettings: () -> Void
         var onToggleRight: () -> Void
 
@@ -105,7 +101,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             onChangeCaptureSeconds: @escaping (Double) -> Void,
             onChangeDirection: @escaping (String) -> Void,
             onChooseFile: @escaping () -> Void,
-            onToggleFloating: @escaping () -> Void,
             onOpenSettings: @escaping () -> Void,
             onToggleRight: @escaping () -> Void
         ) {
@@ -120,7 +115,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             self.onChangeCaptureSeconds = onChangeCaptureSeconds
             self.onChangeDirection = onChangeDirection
             self.onChooseFile = onChooseFile
-            self.onToggleFloating = onToggleFloating
             self.onOpenSettings = onOpenSettings
             self.onToggleRight = onToggleRight
         }
@@ -201,13 +195,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
                 return
             }
             let buttons = [
-                makeSymbolButton(
-                    identifier: NSUserInterfaceItemIdentifier("org.sonicfield.oida.floating-listener"),
-                    symbol: "wave.3.right",
-                    label: "Floating listener",
-                    help: "Show or hide the floating listener",
-                    action: #selector(toggleFloatingListener)
-                ),
                 makeSymbolButton(
                     identifier: NSUserInterfaceItemIdentifier("org.sonicfield.oida.settings"),
                     symbol: "slider.horizontal.3",
@@ -391,7 +378,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         @objc private func selectSystemSource(_ sender: NSButton) { presentSourcePopover("system", from: sender) }
         @objc private func selectMicrophoneSource(_ sender: NSButton) { presentSourcePopover("mic", from: sender) }
         @objc private func selectFileSource(_ sender: NSButton) { presentSourcePopover("file", from: sender) }
-        @objc private func toggleFloatingListener() { onToggleFloating() }
         @objc private func openSettings() { onOpenSettings() }
         @objc private func toggleRightSidebar() { onToggleRight() }
     }

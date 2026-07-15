@@ -18,6 +18,7 @@ struct OidaMacOSApp: App {
                     await store.bootstrap()
                 }
         }
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandMenu("oída") {
                 Button(store.isListening ? "Listening…" : (store.isProcessing ? "Operating listening…" : "Listen Now")) {

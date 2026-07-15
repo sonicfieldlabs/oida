@@ -54,7 +54,6 @@ struct ContentView: View {
                 store.selectedSource = "file"
                 Task { await store.listenNow(source: "file") }
             },
-            onToggleFloating: { store.toggleFloatingListener() },
             onOpenSettings: { openDashboardPanel("settings") },
             onToggleRight: { toggleDashboardSidebar("right") }
         ))

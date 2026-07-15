@@ -36,7 +36,11 @@ class MossCatalogProvider:
                 name="MOSS-Audio Instruct",
                 capabilities=["audio", "perception", "fast_perception"],
                 locality="local",
-                metadata={"role": "fast_perception"},
+                metadata={
+                    "role": "fast_perception",
+                    "installed": available,
+                    "available": available,
+                },
             ),
             ModelDescriptor(
                 id="thinking",
@@ -44,7 +48,11 @@ class MossCatalogProvider:
                 name="MOSS-Audio Thinking",
                 capabilities=["audio", "perception", "deep_perception", "targeted_relisten"],
                 locality="local",
-                metadata={"role": "deep_perception"},
+                metadata={
+                    "role": "deep_perception",
+                    "installed": available,
+                    "available": available,
+                },
             ),
         ]
         self.detail = detail or (

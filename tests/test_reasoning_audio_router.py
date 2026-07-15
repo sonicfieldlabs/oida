@@ -560,6 +560,14 @@ def test_catalog_and_resource_guard_cover_requested_large_and_small_models() -> 
         for model_id in model_ids:
             assert find_model_spec(provider_id, model_id) is not None
 
+    supported_local = find_model_spec("local_audio", "mispeech/midashenglm-0.6b-fp32")
+    assert supported_local is not None
+    supported_descriptor = supported_local.descriptor()
+    assert supported_descriptor.metadata["catalog"] is True
+    assert supported_descriptor.metadata["installed"] is False
+    assert supported_descriptor.metadata["available"] is False
+    assert supported_descriptor.metadata["source_url"].startswith("https://huggingface.co/")
+
     settings = ReasoningSettings()
     providers = dict(settings.providers)
     providers["local_audio"] = providers["local_audio"].model_copy(update={"enabled": True})

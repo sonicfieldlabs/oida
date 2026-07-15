@@ -46,6 +46,7 @@ const state = {
   reasoningProviders: [],
   reasoningModels: new Map(),
   reasoningModelRequests: new Map(),
+  reasoningModelLibraryBusy: false,
   reasoningLoaded: false,
   reasoningBusy: false,
   conversationEvent: null,
@@ -115,6 +116,9 @@ const ui = {
   reasoningResources: el("reasoningResources"),
   reasoningRefresh: el("reasoningRefresh"),
   reasoningProviders: el("reasoningProviders"),
+  reasoningModelFilter: el("reasoningModelFilter"),
+  reasoningModelSummary: el("reasoningModelSummary"),
+  reasoningModelLibrary: el("reasoningModelLibrary"),
   reasoningRoles: el("reasoningRoles"),
   reasoningProfileSelect: el("reasoningProfileSelect"),
   reasoningProfileAdd: el("reasoningProfileAdd"),
@@ -3002,6 +3006,16 @@ const REASONING_ROLES = [
   ["targeted_relisten", "Targeted re-listen", "One focused local pass when the evidence needs detail."],
 ];
 
+const MODEL_LIBRARY_PROVIDER_IDS = [
+  "oida_moss",
+  "local_audio",
+  "google",
+  "alibaba",
+  "nvidia",
+  "openrouter",
+  "local_structured",
+];
+
 const DEFAULT_REASONING_PROFILE = {
   id: "grounded_companion",
   name: "Grounded companion",
@@ -3155,6 +3169,9 @@ async function refreshReasoning(force = false) {
       }));
     }
     state.reasoningLoaded = true;
+    // Mark the library busy before the first render so Settings never flashes a
+    // misleading "no catalog" state while model discovery is starting.
+    void refreshReasoningModelLibrary(force);
     renderReasoningSettings();
     populateConversationControls();
     const enabled = state.reasoningProviders.filter(reasoningProviderEnabled).length;
@@ -3175,6 +3192,7 @@ async function refreshReasoning(force = false) {
 
 function renderReasoningSettings() {
   renderReasoningProviders();
+  renderReasoningModelLibrary();
   renderReasoningRoles();
   renderReasoningProfiles();
   renderReasoningResources();
@@ -3221,11 +3239,372 @@ function renderReasoningResources() {
 
 function providerStatusText(provider) {
   if (provider.note || provider.detail) return provider.note || provider.detail;
-  if (!provider.installed) return "Not installed on this computer.";
+  if (provider.installed === false) return "Not installed on this computer.";
   if (provider.authenticated === false) return "Installed · sign in with the provider before use.";
   if (provider.reachable === false) return "Configured but not reachable.";
   if (provider.reachable === true) return "Ready for a reasoning request.";
   return "Available · probe to check readiness.";
+}
+
+function reasoningProviderIntegrationText(provider) {
+  if (provider.id === "local_audio") {
+    return "Oída calls this loopback endpoint for assigned audio roles. The model runtime stays user-managed and audio does not leave this computer.";
+  }
+  if (provider.id === "ollama" || provider.id === "openai_compatible") {
+    return "Oída sends the filtered evidence packet to the configured endpoint for assigned conversation roles. Declare audio capability only for an endpoint that actually accepts audio.";
+  }
+  if (provider.kind === "host_cli") {
+    return "Oída uses the existing CLI installation and its own authenticated session. The host receives a grounded prompt with tools disabled for the turn.";
+  }
+  if (provider.locality === "external") {
+    return "Oída sends filtered listening evidence through this API only when the provider is enabled. Sending audio additionally requires the separate External audio models opt-in.";
+  }
+  return "Enable this provider, select a model, and assign it to one or more roles below.";
+}
+
+function reasoningModelAvailability(model, provider = reasoningProviderById(model?.provider_id)) {
+  const metadata = model?.metadata || {};
+  const local = model?.locality === "local" || provider?.locality === "local";
+  const installed = metadata.installed === true;
+  const discovered = metadata.available === true || metadata.discovered === true;
+  const enabled = reasoningProviderEnabled(provider);
+  if (metadata.selectable === false) {
+    return {
+      key: "dependency",
+      label: "Setup dependency",
+      short: "dependency",
+      tone: "muted",
+      ready: installed || discovered,
+      detail: installed
+        ? "Installed setup dependency; it is not assignable to an Oída role."
+        : "Supported setup dependency; it is not a standalone Oída role model.",
+    };
+  }
+  if (local) {
+    if (installed && metadata.loaded === true) {
+      return {
+        key: "loaded",
+        label: "Loaded",
+        short: "loaded",
+        tone: "ready",
+        ready: true,
+        detail: "Installed and currently resident in the local Oída runtime.",
+      };
+    }
+    if (installed) {
+      return {
+        key: "installed",
+        label: "Installed",
+        short: "installed",
+        tone: "ready",
+        ready: true,
+        detail: "Weights were detected on this computer. The model loads only when its assigned role needs it.",
+      };
+    }
+    if (discovered && enabled && provider?.reachable !== false) {
+      return {
+        key: "hosted",
+        label: "Available on local host",
+        short: "local host ready",
+        tone: "ready",
+        ready: true,
+        detail: "The configured loopback model host reports this model as available.",
+      };
+    }
+    return {
+      key: "supported",
+      label: "Supported · not installed",
+      short: "supported, not installed",
+      tone: "warning",
+      ready: false,
+      detail: provider?.id === "local_audio"
+        ? "Oída supports this model, but it was not detected through the configured local audio host."
+        : "Oída supports this checkpoint, but its weights were not detected on this computer.",
+    };
+  }
+  if (enabled && provider?.reachable === true && provider?.authenticated !== false) {
+    return {
+      key: "api",
+      label: "Available via API",
+      short: "API ready",
+      tone: "ready",
+      ready: true,
+      detail: "The cloud provider is enabled and reachable. Audio is still sent only with the separate external-audio opt-in.",
+    };
+  }
+  if (enabled) {
+    return {
+      key: "provider_unavailable",
+      label: "Provider unavailable",
+      short: "provider unavailable",
+      tone: "warning",
+      ready: false,
+      detail: provider?.authenticated === false
+        ? "This model is supported, but the provider needs a credential or sign-in."
+        : "This model is supported, but the enabled provider is not currently reachable.",
+    };
+  }
+  return {
+    key: "cloud_supported",
+    label: "Supported · setup required",
+    short: "supported, setup required",
+    tone: "warning",
+    ready: false,
+    detail: "Oída supports this API model, but its provider is not enabled and configured yet.",
+  };
+}
+
+function reasoningModelSetupText(model, provider) {
+  if (provider?.id === "local_structured") {
+    return "Bundled with Oída. It uses the filtered evidence packet without loading a model or calling a network service.";
+  }
+  if (provider?.id === "oida_moss") {
+    return "Place the complete checkpoint directory in Oída’s weights/ folder and restart Oída. Automatic Hugging Face lookup remains off unless OIDA_ALLOW_HF_HUB=1 is explicitly set.";
+  }
+  if (model?.locality === "local" || provider?.locality === "local") {
+    return "Run the model behind an OpenAI-compatible audio endpoint on loopback, set that endpoint under Local audio model host, enable the provider, then assign the model to a compatible role.";
+  }
+  if (provider?.id === "openrouter") {
+    return "Connect OpenRouter with OAuth or save an API key, enable the provider, then assign the model. External audio remains blocked until its separate opt-in is enabled.";
+  }
+  return `Save an API key for ${provider?.label || model?.provider_id || "the provider"}, enable the provider, then assign the model. Oída sends filtered evidence by default; raw audio requires the separate external-audio opt-in.`;
+}
+
+function reasoningModelLibraryProviderIds() {
+  const assigned = Object.values(state.reasoningSettings?.role_assignments || {})
+    .map((assignment) => assignment?.provider_id)
+    .filter(Boolean);
+  const enabled = state.reasoningProviders.filter(reasoningProviderEnabled).map((provider) => provider.id);
+  return [...new Set([...MODEL_LIBRARY_PROVIDER_IDS, ...assigned, ...enabled])]
+    .filter((providerId) => Boolean(reasoningProviderById(providerId)));
+}
+
+function reasoningModelLibraryEntries() {
+  const entries = [];
+  const seen = new Set();
+  for (const providerId of reasoningModelLibraryProviderIds()) {
+    for (const model of state.reasoningModels.get(providerId) || []) {
+      const metadata = model.metadata || {};
+      if (metadata.integration_status === "configured_alias") continue;
+      if (!(metadata.catalog || metadata.discovered || metadata.available || metadata.installed || metadata.configured_default)) continue;
+      const key = `${providerId}:${model.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push({ ...model, provider_id: model.provider_id || providerId });
+    }
+  }
+  return entries;
+}
+
+async function refreshReasoningModelLibrary(force = false) {
+  if (!ui.reasoningModelLibrary || state.reasoningModelLibraryBusy) return;
+  state.reasoningModelLibraryBusy = true;
+  ui.reasoningModelSummary.textContent = "Checking installed, hosted, and supported models…";
+  try {
+    await Promise.all(reasoningModelLibraryProviderIds().map((providerId) => loadReasoningModels(providerId, force)));
+  } finally {
+    state.reasoningModelLibraryBusy = false;
+    renderReasoningModelLibrary();
+  }
+}
+
+function openReasoningProviderConfig(providerId) {
+  const card = [...ui.reasoningProviders.children].find((item) => item.dataset.providerId === providerId);
+  if (!card) return;
+  const details = card.querySelector(".reasoning-provider-config");
+  if (details) details.open = true;
+  card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  card.classList.add("attention");
+  setTimeout(() => card.classList.remove("attention"), 1200);
+}
+
+function assignReasoningModelToRole(model, role) {
+  state.reasoningSettings.role_assignments[role] = {
+    provider_id: model.provider_id,
+    model_id: model.id,
+  };
+  if (role === "conversation") {
+    state.reasoningSettings.active_provider_id = model.provider_id;
+    state.reasoningSettings.active_model_id = model.id;
+  }
+  renderReasoningRoles();
+  ui.reasoningSaveNote.textContent = `${model.label || model.name || model.id} assigned to ${REASONING_ROLES.find(([id]) => id === role)?.[1] || role}. Save to apply.`;
+  ui.reasoningRoles.querySelector(`[data-role="${role}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function reasoningModelRequirementLabels(model) {
+  const metadata = model.metadata || {};
+  const labels = [];
+  if (Number.isFinite(metadata.weight_gb)) labels.push(`${metadata.weight_gb} GB weights`);
+  if (Number.isFinite(metadata.min_ram_gb)) labels.push(`${metadata.min_ram_gb} GB minimum RAM`);
+  if (Number.isFinite(metadata.recommended_ram_gb)) labels.push(`${metadata.recommended_ram_gb} GB recommended`);
+  if (metadata.license) labels.push(metadata.license);
+  for (const platform of Array.isArray(metadata.platforms) ? metadata.platforms : []) labels.push(platform);
+  if (metadata.runtime) labels.push(String(metadata.runtime).replaceAll("_", " "));
+  return labels;
+}
+
+function safeExternalModelURL(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" ? url.href : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function renderReasoningModelLibrary() {
+  if (!ui.reasoningModelLibrary || !ui.reasoningModelSummary) return;
+  const allEntries = reasoningModelLibraryEntries();
+  if (!allEntries.length) {
+    ui.reasoningModelLibrary.replaceChildren();
+    if (!state.reasoningModelLibraryBusy) ui.reasoningModelSummary.textContent = "No model catalog was returned by the daemon.";
+    return;
+  }
+  const installedCount = allEntries.filter((model) => model.metadata?.installed === true).length;
+  const readyCount = allEntries.filter((model) => reasoningModelAvailability(model).ready).length;
+  const cloudCount = allEntries.filter((model) => model.locality === "external").length;
+  ui.reasoningModelSummary.textContent = `${installedCount} installed locally · ${readyCount} installed or ready · ${allEntries.length} supported · ${cloudCount} cloud/API`;
+
+  const filter = ui.reasoningModelFilter?.value || "all";
+  const entries = allEntries.filter((model) => {
+    const provider = reasoningProviderById(model.provider_id);
+    const local = model.locality === "local" || provider?.locality === "local";
+    if (filter === "ready") return reasoningModelAvailability(model, provider).ready;
+    if (filter === "local") return local;
+    if (filter === "cloud") return !local;
+    return true;
+  });
+  ui.reasoningModelLibrary.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "settings-note reasoning-model-empty";
+    empty.textContent = "No models match this filter.";
+    ui.reasoningModelLibrary.appendChild(empty);
+    return;
+  }
+
+  const groups = new Map();
+  for (const model of entries) {
+    if (!groups.has(model.provider_id)) groups.set(model.provider_id, []);
+    groups.get(model.provider_id).push(model);
+  }
+  for (const providerId of reasoningModelLibraryProviderIds()) {
+    const models = groups.get(providerId);
+    if (!models?.length) continue;
+    const provider = reasoningProviderById(providerId);
+    models.sort((left, right) => {
+      const readyDelta = Number(reasoningModelAvailability(right, provider).ready) - Number(reasoningModelAvailability(left, provider).ready);
+      return readyDelta || String(left.label || left.name || left.id).localeCompare(String(right.label || right.name || right.id));
+    });
+    const group = document.createElement("details");
+    group.className = "reasoning-model-group";
+    group.open = providerId === "oida_moss" || models.some((model) => model.metadata?.installed === true);
+    const groupSummary = document.createElement("summary");
+    const groupTitle = document.createElement("strong");
+    groupTitle.textContent = provider?.label || providerId.replaceAll("_", " ");
+    const groupCount = document.createElement("span");
+    const detected = models.filter((model) => reasoningModelAvailability(model, provider).ready).length;
+    groupCount.textContent = `${detected} ready · ${models.length} supported`;
+    groupSummary.append(groupTitle, groupCount);
+    const list = document.createElement("div");
+    list.className = "reasoning-model-list";
+
+    for (const model of models) {
+      const metadata = model.metadata || {};
+      const availability = reasoningModelAvailability(model, provider);
+      const card = document.createElement("details");
+      card.className = `reasoning-model-card ${availability.tone}`;
+      card.open = metadata.installed === true;
+      const summary = document.createElement("summary");
+      const identity = document.createElement("span");
+      identity.className = "reasoning-model-identity";
+      const name = document.createElement("strong");
+      name.textContent = model.label || model.name || model.id;
+      const id = document.createElement("small");
+      id.textContent = model.id;
+      identity.append(name, id);
+      const status = document.createElement("span");
+      status.className = `reasoning-model-status ${availability.tone}`;
+      status.textContent = availability.label;
+      summary.append(identity, status);
+
+      const body = document.createElement("div");
+      body.className = "reasoning-model-body";
+      const availabilityNote = document.createElement("p");
+      availabilityNote.className = "reasoning-model-availability";
+      availabilityNote.textContent = availability.detail;
+      body.appendChild(availabilityNote);
+      if (metadata.notes) {
+        const notes = document.createElement("p");
+        notes.textContent = metadata.notes;
+        body.appendChild(notes);
+      }
+      const setup = document.createElement("p");
+      setup.className = "reasoning-model-setup";
+      setup.textContent = reasoningModelSetupText(model, provider);
+      body.appendChild(setup);
+
+      const requirements = reasoningModelRequirementLabels(model);
+      if (requirements.length) {
+        const requirementList = document.createElement("div");
+        requirementList.className = "reasoning-model-requirements";
+        for (const label of requirements) {
+          const item = document.createElement("span");
+          item.textContent = label;
+          requirementList.appendChild(item);
+        }
+        body.appendChild(requirementList);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "reasoning-model-actions";
+      const sourceURL = safeExternalModelURL(metadata.source_url);
+      if (sourceURL) {
+        const source = document.createElement("a");
+        source.className = "pill-button small";
+        source.href = sourceURL;
+        source.target = "_blank";
+        source.rel = "noopener";
+        source.textContent = model.locality === "external"
+          ? "API documentation"
+          : (sourceURL.includes("huggingface.co") ? "Get on Hugging Face" : "Setup guide");
+        actions.appendChild(source);
+      }
+      if (!["oida_moss", "local_structured"].includes(providerId)) {
+        const configure = document.createElement("button");
+        configure.type = "button";
+        configure.className = "pill-button small";
+        configure.textContent = "Configure provider";
+        configure.addEventListener("click", () => openReasoningProviderConfig(providerId));
+        actions.appendChild(configure);
+      }
+      const supportedRoles = REASONING_ROLES.filter(([role]) => (
+        Array.isArray(model.capabilities) && model.capabilities.includes(role)
+      ));
+      if (providerId === "local_structured" && !supportedRoles.some(([role]) => role === "conversation")) {
+        supportedRoles.push(REASONING_ROLES.find(([role]) => role === "conversation"));
+      }
+      if (metadata.selectable !== false && supportedRoles.length) {
+        const assign = document.createElement("select");
+        assign.className = "quiet-select reasoning-model-assign";
+        assign.setAttribute("aria-label", `Assign ${model.label || model.name || model.id} to a role`);
+        assign.appendChild(new Option("Assign to role…", "", true, true));
+        for (const [role, roleLabel] of supportedRoles.filter(Boolean)) assign.appendChild(new Option(roleLabel, role));
+        assign.addEventListener("change", () => {
+          if (!assign.value) return;
+          assignReasoningModelToRole(model, assign.value);
+          assign.value = "";
+        });
+        actions.appendChild(assign);
+      }
+      if (actions.children.length) body.appendChild(actions);
+      card.append(summary, body);
+      list.appendChild(card);
+    }
+    group.append(groupSummary, list);
+    ui.reasoningModelLibrary.appendChild(group);
+  }
 }
 
 function renderReasoningProviders() {
@@ -3251,7 +3630,7 @@ function renderReasoningProviders() {
     probe.type = "button";
     probe.className = "pill-button small";
     probe.textContent = "Probe";
-    probe.disabled = !provider.installed;
+    probe.disabled = provider.kind === "host_cli" && provider.installed === false;
     probe.addEventListener("click", () => probeReasoningProvider(provider, probe));
     const enable = document.createElement("button");
     enable.type = "button";
@@ -3260,7 +3639,7 @@ function renderReasoningProviders() {
     const alwaysOn = ["local_structured", "oida_moss"].includes(provider.id);
     enable.textContent = alwaysOn ? "Always on" : (enabled ? "Disable" : "Enable");
     enable.setAttribute("aria-pressed", enabled ? "true" : "false");
-    enable.disabled = alwaysOn || !provider.installed || state.reasoningSettings.incognito;
+    enable.disabled = alwaysOn || (provider.kind === "host_cli" && provider.installed === false) || state.reasoningSettings.incognito;
     enable.addEventListener("click", () => toggleReasoningProvider(provider, enable));
     actions.append(probe, enable);
     head.append(identity, actions);
@@ -3270,7 +3649,12 @@ function renderReasoningProviders() {
     const signals = document.createElement("div");
     signals.className = "reasoning-provider-signals";
     const signalValues = [
-      [provider.installed ? "installed" : "not installed", provider.installed],
+      [
+        provider.kind === "host_cli"
+          ? (provider.installed ? "CLI installed" : "CLI not installed")
+          : (enabled ? "enabled" : "not enabled"),
+        provider.kind === "host_cli" ? provider.installed : enabled,
+      ],
       [provider.authenticated === true ? "authenticated" : (provider.authenticated === false ? "sign-in needed" : "host auth"), provider.authenticated !== false],
       [provider.reachable === true ? "reachable" : (provider.reachable === false ? "unreachable" : "not probed"), provider.reachable !== false],
     ];
@@ -3293,6 +3677,10 @@ function renderReasoningProviders() {
       summary.textContent = "Connection";
       const body = document.createElement("div");
       body.className = "reasoning-provider-config-body";
+      const integration = document.createElement("p");
+      integration.className = "settings-note reasoning-provider-integration";
+      integration.textContent = reasoningProviderIntegrationText(provider);
+      body.appendChild(integration);
       if (configurableEndpoint) {
         const endpoint = document.createElement("label");
         endpoint.className = "cfg provider-endpoint";
@@ -3521,6 +3909,44 @@ async function loadReasoningModels(providerId, force = false) {
   }
 }
 
+function reasoningModelOptionLabel(model, providerId) {
+  const provider = reasoningProviderById(providerId);
+  const availability = reasoningModelAvailability(model, provider);
+  const ram = model.metadata?.recommended_ram_gb;
+  const parts = [model.label, availability.short];
+  if (Number.isFinite(ram) && (model.locality === "local" || provider?.locality === "local")) parts.push(`~${ram} GB RAM`);
+  return parts.filter(Boolean).join(" · ");
+}
+
+function updateReasoningRoleStatus(element, providerId, modelId, models = []) {
+  if (!element) return;
+  const provider = reasoningProviderById(providerId);
+  if (!provider) {
+    element.textContent = "Choose a provider. Oída keeps the existing local fallback until this role is configured.";
+    element.className = "reasoning-role-status warning";
+    return;
+  }
+  const defaultModel = state.reasoningSettings.provider_options?.[providerId]?.default_model || null;
+  const effectiveModelId = modelId || defaultModel;
+  if (!effectiveModelId) {
+    const enabled = reasoningProviderEnabled(provider);
+    element.textContent = enabled
+      ? "Provider default selected; Oída will check the model when this role runs."
+      : "Provider default selected, but the provider is not enabled. Oída will use its local fallback.";
+    element.className = `reasoning-role-status ${enabled ? "" : "warning"}`.trim();
+    return;
+  }
+  const model = models.find((item) => item.id === effectiveModelId);
+  if (!model) {
+    element.textContent = `Exact model ID “${effectiveModelId}” was not reported by this provider. Oída will try it when available and otherwise use its local fallback.`;
+    element.className = "reasoning-role-status warning";
+    return;
+  }
+  const availability = reasoningModelAvailability(model, provider);
+  element.textContent = availability.detail;
+  element.className = `reasoning-role-status ${availability.ready ? "ready" : "warning"}`;
+}
+
 async function fillReasoningModelSelect(select, providerId, selectedModelId, role = null) {
   select.disabled = true;
   select.replaceChildren(new Option(providerId ? "Loading models…" : "Choose a provider", "", true, true));
@@ -3535,8 +3961,7 @@ async function fillReasoningModelSelect(select, providerId, selectedModelId, rol
   }
   select.replaceChildren(new Option("Provider default", "", false, !selectedModelId));
   for (const model of models) {
-    const ram = model.metadata?.recommended_ram_gb;
-    const label = Number.isFinite(ram) && model.locality === "local" ? `${model.label} · ~${ram} GB RAM` : model.label;
+    const label = reasoningModelOptionLabel(model, providerId);
     const option = new Option(label, model.id, false, model.id === selectedModelId);
     const details = [
       ...(Array.isArray(model.capabilities) ? model.capabilities : []),
@@ -3548,16 +3973,15 @@ async function fillReasoningModelSelect(select, providerId, selectedModelId, rol
     select.appendChild(option);
   }
   if (selectedModelId && !models.some((model) => model.id === selectedModelId)) {
-    select.appendChild(new Option(selectedModelId, selectedModelId, true, true));
+    select.appendChild(new Option(`${selectedModelId} · not detected`, selectedModelId, true, true));
   }
   select.disabled = !providerId;
+  return models;
 }
 
 function providerOptionsForSelect(select, selectedProviderId, options = {}) {
   select.replaceChildren();
-  const providers = state.reasoningProviders.filter((provider) => (
-    reasoningProviderEnabled(provider) || provider.id === selectedProviderId || provider.id === "local_structured"
-  )).filter((provider) => {
+  const providers = state.reasoningProviders.filter((provider) => {
     if (!options.role) return true;
     if (options.role === "conversation") return provider.id !== "oida_moss";
     if (provider.id === "local_structured") return false;
@@ -3568,11 +3992,12 @@ function providerOptionsForSelect(select, selectedProviderId, options = {}) {
     if (!declaredAudio) return false;
     return options.role !== "targeted_relisten" || provider.locality === "local";
   });
-  if (!providers.length) select.appendChild(new Option("No enabled provider", "", true, true));
+  if (!providers.length) select.appendChild(new Option("No compatible provider", "", true, true));
   for (const provider of providers) {
-    const label = `${provider.label} · ${localityLabel(provider)}`;
+    const enabled = reasoningProviderEnabled(provider);
+    const stateLabel = enabled ? (provider.reachable === false ? "unavailable" : "enabled") : "supported · not enabled";
+    const label = `${provider.label} · ${localityLabel(provider)} · ${stateLabel}`;
     const option = new Option(label, provider.id, false, provider.id === selectedProviderId);
-    option.disabled = provider.id !== "local_structured" && !reasoningProviderEnabled(provider);
     select.appendChild(option);
   }
   if (options.localOnly) {
@@ -3589,11 +4014,16 @@ function renderReasoningRoles() {
     const assignment = state.reasoningSettings.role_assignments[role] || { provider_id: null, model_id: null };
     const row = document.createElement("div");
     row.className = "reasoning-role";
+    row.dataset.role = role;
     const copy = document.createElement("div");
     copy.className = "reasoning-role-copy";
     copy.innerHTML = `<strong>${escapeHtml(label)}</strong><span>${escapeHtml(description)}</span>`;
     const controls = document.createElement("div");
     controls.className = "reasoning-role-controls";
+    const selection = document.createElement("div");
+    selection.className = "reasoning-role-selection";
+    const roleStatus = document.createElement("p");
+    roleStatus.className = "reasoning-role-status";
     const providerSelect = document.createElement("select");
     providerSelect.className = "quiet-select";
     providerSelect.setAttribute("aria-label", `${label} provider`);
@@ -3601,7 +4031,8 @@ function renderReasoningRoles() {
     const modelSelect = document.createElement("select");
     modelSelect.className = "quiet-select";
     modelSelect.setAttribute("aria-label", `${label} model`);
-    fillReasoningModelSelect(modelSelect, assignment.provider_id, assignment.model_id, role);
+    fillReasoningModelSelect(modelSelect, assignment.provider_id, assignment.model_id, role)
+      .then((models) => updateReasoningRoleStatus(roleStatus, assignment.provider_id, assignment.model_id, models));
     const modelInput = document.createElement("input");
     modelInput.type = "text";
     modelInput.className = "quiet-input reasoning-model-id";
@@ -3621,7 +4052,8 @@ function renderReasoningRoles() {
         state.reasoningSettings.active_model_id = null;
       }
       ui.reasoningSaveNote.textContent = "Unsaved role assignment.";
-      await fillReasoningModelSelect(modelSelect, assignment.provider_id, null, role);
+      const models = await fillReasoningModelSelect(modelSelect, assignment.provider_id, null, role);
+      updateReasoningRoleStatus(roleStatus, assignment.provider_id, null, models);
     });
     modelSelect.addEventListener("change", () => {
       assignment.model_id = modelSelect.value || null;
@@ -3629,6 +4061,7 @@ function renderReasoningRoles() {
       state.reasoningSettings.role_assignments[role] = assignment;
       if (role === "conversation") state.reasoningSettings.active_model_id = assignment.model_id;
       ui.reasoningSaveNote.textContent = "Unsaved role assignment.";
+      updateReasoningRoleStatus(roleStatus, assignment.provider_id, assignment.model_id, state.reasoningModels.get(assignment.provider_id) || []);
     });
     modelInput.addEventListener("change", () => {
       assignment.model_id = modelInput.value.trim() || null;
@@ -3639,9 +4072,11 @@ function renderReasoningRoles() {
       modelSelect.value = assignment.model_id || "";
       if (role === "conversation") state.reasoningSettings.active_model_id = assignment.model_id;
       ui.reasoningSaveNote.textContent = "Unsaved exact model ID.";
+      updateReasoningRoleStatus(roleStatus, assignment.provider_id, assignment.model_id, state.reasoningModels.get(assignment.provider_id) || []);
     });
     controls.append(providerSelect, modelSelect, modelInput);
-    row.append(copy, controls);
+    selection.append(controls, roleStatus);
+    row.append(copy, selection);
     ui.reasoningRoles.appendChild(row);
   }
 }
@@ -3741,6 +4176,7 @@ ui.reasoningRefresh?.addEventListener("click", () => {
   state.reasoningModelRequests.clear();
   refreshReasoning(true);
 });
+ui.reasoningModelFilter?.addEventListener("change", renderReasoningModelLibrary);
 ui.reasoningSave?.addEventListener("click", () => saveReasoningSettings());
 ui.reasoningProfileSelect?.addEventListener("change", () => {
   captureReasoningProfileEditor();

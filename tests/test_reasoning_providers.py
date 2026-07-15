@@ -9,6 +9,8 @@ from typing import Any
 from unittest.mock import patch
 
 from oida.reasoning.contracts import (
+    ModelDescriptor,
+    ProviderDescriptor,
     ProviderKind,
     ProviderRequest,
     ProviderSettings,
@@ -36,7 +38,7 @@ from oida.reasoning.providers.openai_compatible import (
 )
 from oida.reasoning.providers.openclaw import OpenClawProvider
 from oida.reasoning.providers.opencode import OpenCodeProvider
-from oida.reasoning.registry import build_provider_registry
+from oida.reasoning.registry import ProviderRegistry, build_provider_registry
 from oida.reasoning.secrets import SecretStore
 
 
@@ -619,6 +621,49 @@ class OpenCodeProviderTests(unittest.TestCase):
 
 
 class RegistryTests(unittest.TestCase):
+    def test_registry_distinguishes_catalog_support_from_a_discovered_local_model(self) -> None:
+        class LocalAudioFixture:
+            provider_id = "local_audio"
+
+            def probe(self):
+                return ProviderDescriptor(
+                    id=self.provider_id,
+                    name="Fixture local audio",
+                    kind="openai_compatible",
+                    locality="local",
+                    enabled=True,
+                    available=True,
+                )
+
+            def list_models(self):
+                return [
+                    ModelDescriptor(
+                        id="OpenMOSS-Team/MOSS-Transcribe-Diarize",
+                        provider_id=self.provider_id,
+                        name="Detected transcriber",
+                        capabilities=["audio", "transcription"],
+                        locality="local",
+                    )
+                ]
+
+            def complete(self, request):  # pragma: no cover - registry contract only
+                raise AssertionError(request)
+
+        registry = ProviderRegistry()
+        registry.register(LocalAudioFixture(), enabled=True)
+
+        models = {model.id: model for model in registry.list_models("local_audio")}
+        detected = models["OpenMOSS-Team/MOSS-Transcribe-Diarize"]
+        supported_only = models["mispeech/midashenglm-0.6b-fp32"]
+
+        self.assertTrue(detected.metadata["catalog"])
+        self.assertTrue(detected.metadata["discovered"])
+        self.assertTrue(detected.metadata["installed"])
+        self.assertTrue(detected.metadata["available"])
+        self.assertTrue(supported_only.metadata["catalog"])
+        self.assertFalse(supported_only.metadata["installed"])
+        self.assertFalse(supported_only.metadata["available"])
+
     def test_factory_overlays_settings_default_model_and_secret_getter(self) -> None:
         settings = ReasoningSettings()
         settings.providers["openrouter"] = ProviderSettings(
