@@ -359,3 +359,7 @@ variables as the fallback; they are never written into reasoning settings.
   installed as one stack rather than copied into divergent forks. Those
   dependencies must be published to the target package index before a
   public-index Oída release.
+- Version tags build, isolate-test, and retain all four Python distributions.
+  The PyPI upload job additionally requires the repository variable
+  `PYPI_PUBLISH_ENABLED=true` and matching Trusted Publisher records for
+  `akouo-contract`, `akousma`, `akousmata`, and `sonicfield-oida`.

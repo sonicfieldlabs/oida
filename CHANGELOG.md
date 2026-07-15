@@ -5,8 +5,9 @@
 - **Installable Python release chain**: the public distribution is now
   `sonicfield-oida` because the shorter PyPI name belongs to an unrelated
   project; imports and CLIs remain `oida`. A tag-gated Trusted Publishing
-  workflow builds, isolates, and publishes the canonical `akouo-contract`,
-  `akousma`, `akousmata`, and Oída distributions without repository tokens.
+  workflow builds and isolates the canonical `akouo-contract`, `akousma`,
+  `akousmata`, and Oída distributions without repository tokens. Publishing
+  is enabled only after all four PyPI Trusted Publishers are configured.
 
 - **Oída-owned reasoning layer**: event conversation now has a fixed prompt
   hierarchy, a whitelist-built evidence packet, and a strict response contract.

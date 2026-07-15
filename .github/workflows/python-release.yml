@@ -80,6 +80,7 @@ jobs:
   publish:
     name: Publish verified stack to PyPI
     needs: build
+    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
