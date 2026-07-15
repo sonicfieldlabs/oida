@@ -81,7 +81,12 @@ def main() -> int:
     result = CheckResult()
     app_path = resolve_app_path(args.app, repo_root)
 
-    check_daemon(args.server.rstrip("/"), repo_root, args.mutating, result)
+    try:
+        server = normalize_server_url(args.server)
+    except ValueError as exc:
+        result.fail(str(exc))
+    else:
+        check_daemon(server, repo_root, args.mutating, result)
     check_app_bundle(app_path, result)
     check_archive(args.archive, result)
 
@@ -101,6 +106,14 @@ def resolve_app_path(path: Path, repo_root: Path) -> Path:
     if path == repo_root / "apps/macos/dist/oida.app" and packaged.exists():
         return packaged
     return path
+
+
+def normalize_server_url(server: str) -> str:
+    normalized = server.rstrip("/")
+    parsed = urllib.parse.urlparse(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("daemon URL must use http:// or https:// and include a hostname")
+    return normalized
 
 
 def check_daemon(server: str, repo_root: Path, mutating: bool, result: CheckResult) -> None:
@@ -282,14 +295,15 @@ def check_archive(archive_path: Path, result: CheckResult) -> None:
 
 def get_json(server: str, path: str) -> dict[str, Any]:
     request = urllib.request.Request(f"{server}{path}", headers=request_headers(), method="GET")
-    with urllib.request.urlopen(request, timeout=15) as response:
+    # main() normalizes and validates the HTTP(S) server URL before any probe.
+    with urllib.request.urlopen(request, timeout=15) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         return json.loads(response.read())
 
 
 def expect_http_status(server: str, path: str, expected: int, headers: dict[str, str] | None = None) -> bool:
     request = urllib.request.Request(f"{server}{path}", headers=request_headers(headers), method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with urllib.request.urlopen(request, timeout=15) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             return response.status == expected
     except urllib.error.HTTPError as exc:
         return exc.code == expected
@@ -304,7 +318,7 @@ def post_json(server: str, path: str, payload: dict[str, Any]) -> dict[str, Any]
         headers=request_headers({"content-type": "application/json"}),
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
+    with urllib.request.urlopen(request, timeout=20) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         return json.loads(response.read())
 
 

@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 from harness.http_client import get_json, post_json
+from oida import __version__
 
 SERVER = os.getenv("OIDA_SERVER_URL") or os.getenv("HMM_SERVER_URL") or os.getenv("AEAR_SERVER_URL", "http://127.0.0.1:8765")
 
@@ -107,7 +108,7 @@ def handle(message: object) -> dict[str, Any] | None:
     is_notification = "id" not in message
     try:
         if method == "initialize":
-            result = {"protocolVersion": "2024-11-05", "serverInfo": {"name": "oida-local", "version": "0.1.0"}, "capabilities": {"tools": {}}}
+            result = {"protocolVersion": "2024-11-05", "serverInfo": {"name": "oida-local", "version": __version__}, "capabilities": {"tools": {}}}
         elif method == "tools/list":
             result = {"tools": TOOLS}
         elif method == "tools/call":

@@ -1,4 +1,5 @@
 .DS_Store
+.codex/
 .venv/
 .uv-cache/
 .uv-tools/

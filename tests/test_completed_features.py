@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from oida import __version__
 from oida.engine_stub import StubMossEngine
 from oida.live import LiveManager
 from oida.reporting import caption, transcribe
@@ -16,9 +17,16 @@ from harness.benchmark import summarize
 from harness.corpus import answer_timeline_question, timeline_entry, write_timeline
 from harness.dialog import append_turn, context_text, default_session_id, load_session, save_session
 from harness.mcp_server.server import TOOLS, handle
+from scripts.release_smoke import normalize_server_url
 
 
 class CompletedFeatureTests(unittest.TestCase):
+    def test_release_smoke_rejects_non_http_daemon_urls(self) -> None:
+        self.assertEqual(normalize_server_url("http://127.0.0.1:8765/"), "http://127.0.0.1:8765")
+        for value in ("file:///tmp/oida.sock", "ftp://example.test/oida", "localhost:8765"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                normalize_server_url(value)
+
     def test_dialog_session_retains_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             session = load_session(tmp, default_session_id("field.wav"), "field.wav")
@@ -122,6 +130,9 @@ class CompletedFeatureTests(unittest.TestCase):
         self.assertIn("aear_qa", names)
         self.assertIn("aear_live_start", names)
         self.assertIn("ear_report", names)
+
+        initialized = handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        self.assertEqual(initialized["result"]["serverInfo"]["version"], __version__)
 
     def test_mcp_server_ignores_notifications(self) -> None:
         response = handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
