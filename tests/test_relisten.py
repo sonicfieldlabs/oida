@@ -8,6 +8,7 @@ from pathlib import Path
 
 from oida.covenant import CovenantStore
 from oida.engine_base import EngineResult, MossEngine
+from oida.listening_identity import ListeningIdentitySnapshot
 from oida.recipes import THINKING_REASONING
 from oida.relisten import RELISTEN_CONTRACT, RelistenUnavailable, TargetedRelistener
 
@@ -81,6 +82,10 @@ class TargetedRelistenerTests(unittest.TestCase):
                 question="What happens near the middle?",
                 conversation_id="conv_1",
                 turn_id="turn_1",
+                listening_identity_snapshot=ListeningIdentitySnapshot(
+                    text="Listen for recurrence.",
+                    sha256="1" * 64,
+                ),
             )
 
         self.assertEqual(event, before)
@@ -88,6 +93,8 @@ class TargetedRelistenerTests(unittest.TestCase):
         self.assertEqual(sidecar["base_event_id"], "evt_anchor")
         self.assertEqual(sidecar["segment_hash"], "abc123")
         self.assertNotIn("reasoning_trace", sidecar)
+        self.assertEqual(sidecar["listening_identity"]["sha256"], "1" * 64)
+        self.assertEqual(sidecar["listening_identity"]["application"], "available_not_applied")
         self.assertEqual(len(engine.calls), 1)
 
     def test_missing_audio_and_covenant_withholding_are_explicit(self) -> None:

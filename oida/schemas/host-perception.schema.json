@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["host", "source", "observations"],
   "properties": {
-    "contract": {"const": "oida/host-perception/v0.1"},
+    "contract": {"const": "oida/host-perception/v0.2"},
     "host": {
       "type": "object",
       "required": ["id", "model"],
@@ -19,6 +19,17 @@
         "audio_input_capable": {"type": "boolean"},
         "thinking_budget": {"type": ["integer", "null"], "minimum": 0},
         "wall_ms": {"type": ["integer", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "listening_identity": {
+      "description": "Host declaration that the named LISTENING.md revision oriented this perception. This is provenance, never evidence.",
+      "type": "object",
+      "required": ["contract", "sha256", "applied"],
+      "properties": {
+        "contract": {"const": "oida/listening-identity/v0.1"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+        "applied": {"type": "boolean"}
       },
       "additionalProperties": false
     },

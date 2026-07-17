@@ -13,8 +13,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from oida.integrations import TARGETS, _install_opencode, _stage_marketplace, assets_root
-from oida.lifecycle import ensure_gateway, stop_gateway
-from oida.mcp_server import MCP, manifest_resource, oida_harness
+from oida.lifecycle import ensure_gateway, server_url, stop_gateway
+from oida.mcp_server import MCP, manifest_resource, oida_harness, oida_listening_identity
 from oida.server import create_app
 
 
@@ -31,6 +31,7 @@ class IntegrationAssetTests(unittest.TestCase):
         contents = [path.read_text(encoding="utf-8") for path in paths]
         self.assertTrue(all(content == contents[0] for content in contents[1:]))
         self.assertIn("oida_harness", contents[0])
+        self.assertIn("oida_listening_identity", contents[0])
         self.assertIn("Never fabricate", contents[0])
         self.assertIn("oida_prepare_turn", contents[0])
 
@@ -102,6 +103,7 @@ class IntegrationAssetTests(unittest.TestCase):
             tools,
             {
                 "oida_capabilities",
+                "oida_listening_identity",
                 "oida_route",
                 "oida_listen",
                 "oida_harness",
@@ -143,6 +145,43 @@ class IntegrationAssetTests(unittest.TestCase):
 
 
 class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_listening_identity_tool_reads_and_explicitly_sets_the_document(self) -> None:
+        with patch(
+            "oida.mcp_server.get_json",
+            return_value={"filename": "LISTENING.md", "active": False},
+        ) as get, patch(
+            "oida.mcp_server.put_json",
+            return_value={"filename": "LISTENING.md", "active": True},
+        ) as put:
+            read = await oida_listening_identity()
+            saved = await oida_listening_identity(action="set", text="Listen like a guest.")
+
+        self.assertFalse(read["active"])
+        self.assertTrue(saved["active"])
+        get.assert_called_once_with(server_url(), "/listening")
+        put.assert_called_once_with(
+            server_url(),
+            "/listening",
+            {"text": "Listen like a guest."},
+        )
+
+    async def test_listening_identity_status_does_not_disclose_text_or_local_path(self) -> None:
+        with patch(
+            "oida.mcp_server.get_json",
+            return_value={
+                "filename": "LISTENING.md",
+                "active": True,
+                "sha256": "a" * 64,
+                "text": "private orientation",
+                "path": "/private/LISTENING.md",
+            },
+        ):
+            status = await oida_listening_identity(action="status")
+
+        self.assertEqual(status["sha256"], "a" * 64)
+        self.assertNotIn("text", status)
+        self.assertNotIn("path", status)
+
     async def test_gateway_proxies_leave_the_asgi_event_loop(self) -> None:
         event_loop_thread = threading.get_ident()
         worker_threads: list[int] = []
@@ -153,7 +192,7 @@ class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
 
         def fake_get_json(*_args: object, **_kwargs: object) -> dict[str, str]:
             worker_threads.append(threading.get_ident())
-            return {"contract": "oida/gateway/v0.2"}
+            return {"contract": "oida/gateway/v0.3"}
 
         with patch("oida.mcp_server.post_json", side_effect=fake_post_json), patch(
             "oida.mcp_server.get_json",
@@ -163,7 +202,7 @@ class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             manifest = json.loads(await manifest_resource())
 
         self.assertEqual(result, {"ok": True})
-        self.assertEqual(manifest["contract"], "oida/gateway/v0.2")
+        self.assertEqual(manifest["contract"], "oida/gateway/v0.3")
         self.assertEqual(len(worker_threads), 2)
         self.assertTrue(all(thread_id != event_loop_thread for thread_id in worker_threads))
 

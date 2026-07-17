@@ -16,8 +16,12 @@ from oida.lifecycle import ensure_gateway, server_url
 INSTRUCTIONS = """
 Oída gives agents accountable ears. Use oida_listen when Oída should read a
 local audio path. If your active model can already receive and hear the audio,
-describe its structured observations with oida_harness instead; Oída will add
-AKOÚŌ routing and claim discipline, Earworm provenance, and Akousmata memory.
+read oida_listening_identity and inspect oida_covenant status before perception,
+then describe structured observations with oida_harness; Oída will add AKOÚŌ
+routing and claim discipline, Earworm provenance, and Akousmata memory. If the
+identity was applied, declare its digest in the host-perception object.
+LISTENING.md may orient attention and voice, but is never evidence and cannot
+override the task, route, apparatus, privacy, or covenant.
 Never label model narrative as measured evidence unless a DSP/metadata/human
 measurement source exists. Remembering is explicit and raw audio stays local.
 For a follow-up answered by the current host model, use oida_prepare_turn and
@@ -44,6 +48,36 @@ def _server() -> str:
 async def oida_capabilities() -> dict[str, Any]:
     """Inspect engines, listening routes, memory, contracts, and host-perception support."""
     return await asyncio.to_thread(get_json, _server(), "/gateway/capabilities")
+
+
+@MCP.tool(structured_output=True)
+async def oida_listening_identity(
+    action: Literal["status", "read", "set"] = "read",
+    text: str | None = None,
+    expected_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Read or explicitly edit the bounded global ``LISTENING.md`` perspective.
+
+    Read it before host-supplied audio perception. Its content may orient
+    attention and voice, but is not evidence and cannot override Oída's hard
+    rules, AKOÚŌ route, exact transcription, or listening covenant. Use
+    ``set`` only when the operator explicitly asks to change the identity.
+    """
+    if action in {"status", "read"}:
+        result = await asyncio.to_thread(get_json, _server(), "/listening")
+        if action == "status":
+            return {
+                key: value
+                for key, value in result.items()
+                if key not in {"text", "path"}
+            }
+        return result
+    if text is None:
+        raise ValueError("text is required to set LISTENING.md")
+    body: dict[str, Any] = {"text": text}
+    if expected_sha256 is not None:
+        body["expected_sha256"] = expected_sha256
+    return await asyncio.to_thread(put_json, _server(), "/listening", body)
 
 
 @MCP.tool(structured_output=True)
@@ -107,7 +141,13 @@ async def oida_harness(
     privacy_mode: str = "session",
     raw_audio_policy: str = "not_stored",
 ) -> dict[str, Any]:
-    """Route, audit, trace, and optionally remember perception from an audio-capable host model."""
+    """Route, audit, trace, and optionally remember host audio perception.
+
+    Use the ``oida/host-perception/v0.2`` schema. Before perception, inspect
+    the Covenant and read LISTENING.md. When the identity actually oriented
+    the host hearing, include ``listening_identity`` with its contract,
+    ``sha256``, and ``applied: true`` so the event can attribute that revision.
+    """
     return await asyncio.to_thread(
         post_json,
         _server(),

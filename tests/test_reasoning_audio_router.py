@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import patch
 
 from oida.engine_base import EngineResult, MossEngine
+from oida.listening_identity import ListeningIdentityStore
 from oida.reasoning.audio_router import RoutedAudioEngine
 from oida.reasoning.contracts import ModelRole, ReasoningSettings, RoleAssignment
 from oida.reasoning.model_catalog import find_model_spec
@@ -100,6 +101,7 @@ def _router(
     transport: Any,
     secrets: DictSecrets | None = None,
     binary_uploader: Any | None = None,
+    listening_identity_store: ListeningIdentityStore | None = None,
 ) -> tuple[RoutedAudioEngine, FakeEngine]:
     store = ReasoningSettingsStore(root / "reasoning.json")
     store.save(settings)
@@ -109,6 +111,7 @@ def _router(
             local,
             settings_store=store,
             secret_store=secrets or DictSecrets(),
+            listening_identity_store=listening_identity_store,
             transport=transport,  # type: ignore[arg-type]
             binary_uploader=binary_uploader,
         ),
@@ -138,6 +141,37 @@ def test_v01_settings_migrate_to_six_roles_and_new_provider_presets() -> None:
     assert settings.roles[ModelRole.MUSIC_ANALYSIS].model_id == "thinking"
     assert {"local_audio", "google", "alibaba", "nvidia"} <= set(settings.providers)
     assert settings.allow_external_audio is False
+
+
+def test_listening_identity_orients_interpretive_audio_but_not_transcription() -> None:
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        identity = ListeningIdentityStore(root / "data")
+        identity.save("Attend to thresholds, silences, and relations between sounds.")
+        router, local = _router(
+            root,
+            ReasoningSettings(),
+            transport=FakeTransport({}),
+            listening_identity_store=identity,
+        )
+
+        with router.request_policy():
+            # One listen snapshots its perspective even if the file changes
+            # between model passes.
+            identity.save("A newer perspective for the next listen.")
+            router.generate(str(_audio(root)), "Describe the sound.", INSTRUCT_CAPTION)
+            router.generate(str(_audio(root)), "Transcribe exactly.", TRANSCRIPTION_EXTRACTION)
+
+        router.generate(str(_audio(root)), "Describe it again.", INSTRUCT_CAPTION)
+
+        first_prompt = local.calls[0]["prompt"]
+        transcription_prompt = local.calls[1]["prompt"]
+        next_prompt = local.calls[2]["prompt"]
+        assert "LISTENING IDENTITY — LISTENING.md" in first_prompt
+        assert "thresholds, silences" in first_prompt
+        assert "newer perspective" not in first_prompt
+        assert transcription_prompt == "Transcribe exactly."
+        assert "newer perspective" in next_prompt
 
 
 def test_local_audio_host_receives_audio_without_external_opt_in_or_path_leak() -> None:

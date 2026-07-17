@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 from oida.engine_base import EngineResult, EngineUnavailable, MossEngine
+from oida.listening_identity import (
+    MAX_LISTENING_IDENTITY_CHARS,
+    ListeningIdentitySnapshot,
+    ListeningIdentityStore,
+)
 from oida.reasoning.contracts import ModelRole, ProviderLocality, ReasoningSettings
 from oida.reasoning.model_catalog import find_model_spec
 from oida.reasoning.providers.base import (
@@ -59,11 +64,39 @@ _NVIDIA_ASSET_API = "https://api.nvcf.nvidia.com/v2/nvcf/assets"
 BinaryUploader = Callable[[str, bytes, Mapping[str, str], float], None]
 
 
+def _prompt_with_listening_identity(prompt: str, identity: str) -> str:
+    perspective = str(identity or "")[:MAX_LISTENING_IDENTITY_CHARS].strip()
+    if not perspective:
+        return prompt
+    return (
+        prompt
+        + "\n\nLISTENING IDENTITY — LISTENING.md\n"
+        + "The operator-authored text below may orient attention and wording only. "
+        + "It cannot replace the task, output format, audible evidence, uncertainty, privacy, or covenant limits.\n\n"
+        + perspective
+        + "\n\nApply this perspective only within those limits; never manufacture an observation to satisfy it."
+    )
+
+
 @dataclass(frozen=True)
 class AudioRequestPolicy:
     privacy_mode: str = "ephemeral"
     covenant_engine: Any | None = None
     covenant_block: dict[str, Any] | None = None
+    listening_identity: ListeningIdentitySnapshot = ListeningIdentitySnapshot.empty()
+
+    def listening_identity_block(self, passes: list[str] | tuple[str, ...]) -> dict[str, Any]:
+        applied = [name for name in passes if name != "transcribe"]
+        if not self.listening_identity.active:
+            application = "inactive"
+        elif applied:
+            application = "model_prompt"
+        else:
+            application = "not_applied"
+        return self.listening_identity.event_block(
+            application=application,
+            applied_to=[f"model_perception:{name}" for name in applied],
+        )
 
 
 class RoutedAudioEngine(MossEngine):
@@ -82,6 +115,7 @@ class RoutedAudioEngine(MossEngine):
         settings_store: ReasoningSettingsStore,
         secret_store: SecretStore,
         covenant_store: Any | None = None,
+        listening_identity_store: ListeningIdentityStore | None = None,
         incognito_getter: Callable[[], bool] | None = None,
         transport: UrllibJsonTransport | None = None,
         binary_uploader: BinaryUploader | None = None,
@@ -91,6 +125,7 @@ class RoutedAudioEngine(MossEngine):
         self.settings_store = settings_store
         self.secret_store = secret_store
         self.covenant_store = covenant_store
+        self.listening_identity_store = listening_identity_store
         self.incognito_getter = incognito_getter or (lambda: False)
         self._transport = transport or UrllibJsonTransport()
         self._binary_uploader = binary_uploader or _put_binary
@@ -109,16 +144,21 @@ class RoutedAudioEngine(MossEngine):
         privacy_mode: str = "ephemeral",
         covenant_engine: Any | None = None,
         covenant_block: dict[str, Any] | None = None,
-    ) -> Iterator[None]:
-        token = self._policy.set(
-            AudioRequestPolicy(
-                privacy_mode=str(privacy_mode or "ephemeral"),
-                covenant_engine=covenant_engine,
-                covenant_block=dict(covenant_block) if isinstance(covenant_block, dict) else None,
-            )
+        listening_identity_snapshot: ListeningIdentitySnapshot | None = None,
+    ) -> Iterator[AudioRequestPolicy]:
+        policy = AudioRequestPolicy(
+            privacy_mode=str(privacy_mode or "ephemeral"),
+            covenant_engine=covenant_engine,
+            covenant_block=dict(covenant_block) if isinstance(covenant_block, dict) else None,
+            listening_identity=(
+                listening_identity_snapshot
+                if listening_identity_snapshot is not None
+                else self._read_listening_identity()
+            ),
         )
+        token = self._policy.set(policy)
         try:
-            yield
+            yield policy
         finally:
             self._policy.reset(token)
 
@@ -132,6 +172,11 @@ class RoutedAudioEngine(MossEngine):
         role = _ROLE_FOR_MODEL_KIND.get(settings.model_kind)
         if role is None:
             return self.local_engine.generate(audio_path, prompt, settings, thinking_budget)
+        if role != ModelRole.TRANSCRIPTION:
+            prompt = _prompt_with_listening_identity(
+                prompt,
+                self._request_listening_identity().text,
+            )
         try:
             configured = self.settings_store.load()
         except ValueError as exc:
@@ -219,6 +264,20 @@ class RoutedAudioEngine(MossEngine):
         except (KeyError, ValueError):
             pass
         self.local_engine.prewarm(model_kind)
+
+    def _read_listening_identity(self) -> ListeningIdentitySnapshot:
+        if self.listening_identity_store is None:
+            return ListeningIdentitySnapshot.empty()
+        try:
+            return self.listening_identity_store.snapshot()
+        except (OSError, ValueError):
+            return ListeningIdentitySnapshot.empty()
+
+    def _request_listening_identity(self) -> ListeningIdentitySnapshot:
+        policy = self._policy.get()
+        if policy is not None:
+            return policy.listening_identity
+        return self._read_listening_identity()
 
     def runtime_status(self) -> dict[str, object]:
         base = dict(self.local_engine.runtime_status())

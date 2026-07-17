@@ -240,6 +240,42 @@ class CovenantEndpointTests(unittest.TestCase):
                 {"rule": "do_not_retain", "subject": "memory", "count": 1}, withheld
             )
 
+    def test_route_rerun_is_a_new_covenant_governed_hearing(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, self._client_env(tmp), clear=False):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            path = _write_tone(Path(tmp) / "tone.wav")
+            original = client.post(
+                "/listen-event",
+                json={"path": str(path), "route_preset": "basic"},
+            ).json()["listening_event"]
+            client.put(
+                "/covenant",
+                json={
+                    "name": "no-speech",
+                    "text": "# no speech\n## rules\n- ignore: speech\n",
+                    "activate": True,
+                },
+            )
+            client.put(
+                "/listening",
+                json={"text": "Attend closely to every voice and quote it whenever possible."},
+            )
+
+            response = client.post(
+                "/listen-event/rerun",
+                json={"event": original, "route_preset": "voice"},
+            )
+
+            self.assertEqual(response.status_code, 200, response.text)
+            rerun = response.json()["listening_event"]
+            self.assertIn("covenant", rerun)
+            self.assertTrue(
+                any(rule.startswith("ignore:speech") for rule in rerun["covenant"]["rules_applied"])
+            )
+            self.assertFalse(response.json()["perception_report"]["transcript"]["present"])
+            self.assertEqual(rerun["listening_identity"]["application"], "not_applied")
+            self.assertEqual(rerun["listening_identity"]["applied_to"], [])
+
     def test_remote_listen_under_covenant_files_covenant_akousma(self):
         import io
         import wave as wave_module

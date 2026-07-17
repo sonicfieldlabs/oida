@@ -188,6 +188,8 @@ class OidaFoundationTests(unittest.TestCase):
         self.assertEqual(event["routes"][0]["structured"]["ui_card"], "diagnostics")
         self.assertIn("aggregate", event)
         self.assertEqual(event["raw_audio_policy"], "external_ref")
+        self.assertEqual(event["listening_identity"]["application"], "inactive")
+        self.assertFalse(event["listening_identity"]["content_included"])
 
     def test_native_system_audio_event_uses_temp_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

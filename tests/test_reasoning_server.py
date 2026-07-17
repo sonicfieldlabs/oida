@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from oida.engine_base import EngineUnavailable
 from oida.reasoning.contracts import ModelRole, ReasoningSettings, RoleAssignment
+from oida.reasoning.prompts import PromptCompiler
 from oida.reasoning.settings import ReasoningSettingsStore
 from oida.server import create_app
 
@@ -114,6 +115,76 @@ def test_reasoning_settings_provider_and_model_endpoints() -> None:
         }
 
 
+def test_listening_identity_endpoint_writes_the_harness_file_and_reaches_compiler() -> None:
+    with _Client() as client:
+        initial = client.get("/listening")
+        assert initial.status_code == 200
+        assert initial.json()["filename"] == "LISTENING.md"
+        assert initial.json()["active"] is False
+
+        perspective = "Listen for relations and answer as a patient field recordist."
+        saved = client.put("/listening", json={"text": perspective})
+        assert saved.status_code == 200
+        body = saved.json()
+        assert body["active"] is True
+        assert body["text"] == perspective
+        assert Path(body["path"]).name == "LISTENING.md"
+        assert Path(body["path"]).read_text(encoding="utf-8") == perspective
+        capabilities = client.get("/gateway/capabilities").json()
+        assert capabilities["listening_identity"]["sha256"] == body["sha256"]
+        assert "text" not in capabilities["listening_identity"]
+        assert "path" not in capabilities["listening_identity"]
+
+        sample = client.get("/sample-tone").json()
+        listened = client.post(
+            "/listen-event",
+            json={"path": sample["path"], "route_preset": "basic"},
+        )
+        assert listened.status_code == 200, listened.text
+        identity_block = listened.json()["listening_event"]["listening_identity"]
+        assert identity_block["sha256"] == body["sha256"]
+        assert identity_block["application"] == "model_prompt"
+        assert identity_block["applied_to"] == ["model_perception:caption"]
+        assert identity_block["content_included"] is False
+
+        compiled_prompts = []
+        original_compile = PromptCompiler.compile
+
+        def capture_compile(compiler, *args, **kwargs):
+            compiled = original_compile(compiler, *args, **kwargs)
+            compiled_prompts.append(compiled)
+            return compiled
+
+        with patch.object(PromptCompiler, "compile", new=capture_compile):
+            response = client.post(
+                "/conversation/ask",
+                json={
+                    "event": _event("evt_listening_identity"),
+                    "question": "What relation is audible?",
+                    "include_memory": False,
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert compiled_prompts
+        assert "LISTENING IDENTITY — LISTENING.md" in compiled_prompts[0].system_prompt
+        assert perspective in compiled_prompts[0].system_prompt
+        turn_identity = response.json()["turn"]["audit"]["listening_identity"]
+        assert turn_identity["sha256"] == body["sha256"]
+        assert turn_identity["application"] == "available_not_applied"
+        assert turn_identity["content_included"] is False
+
+        stale = client.put(
+            "/listening",
+            json={"text": "Stale replacement", "expected_sha256": initial.json()["sha256"]},
+        )
+        assert stale.status_code == 409
+        assert client.get("/listening").json()["text"] == perspective
+
+        oversized = client.put("/listening", json={"text": "x" * 4001})
+        assert oversized.status_code == 422
+
+
 def test_memory_remember_normalizes_malformed_optional_event_fields() -> None:
     with _Client() as client:
         response = client.post(
@@ -145,7 +216,8 @@ def test_report_endpoint_uses_configured_chunk_budget() -> None:
                 response = client.post("/report", json={"path": "/unused.wav", "profile": "audit"})
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
+    assert response.json()["ok"] is True
+    assert response.json()["listening_identity"]["application"] == "inactive"
     assert report_mock.call_args.kwargs == {"chunk_seconds": 12.0, "overlap_seconds": 5.0}
 
 

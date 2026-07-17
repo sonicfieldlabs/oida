@@ -51,6 +51,24 @@ class TestGermDeepLinks(unittest.TestCase):
                 capture={"direction": "sideways"},
             )
 
+    def test_listening_identity_extension_is_content_free(self):
+        rec = akousma_bridge.build_akousma_from_listen(
+            audio={"asset_id": "a1"},
+            listening_identity={
+                "contract": "oida/listening-identity/v0.1",
+                "active": True,
+                "sha256": "a" * 64,
+                "application": "model_prompt",
+                "applied_to": ["model_perception:caption"],
+                "text": "This must never enter shared memory.",
+            },
+        )
+
+        block = rec["extensions"]["oida.listening_identity"]
+        self.assertEqual(block["sha256"], "a" * 64)
+        self.assertFalse(block["content_included"])
+        self.assertNotIn("text", block)
+
 
 class TestCrossAppRoundTrip(unittest.TestCase):
     def setUp(self):

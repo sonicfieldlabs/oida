@@ -14,6 +14,7 @@ from harness.akouo.command import build_apparatus
 from harness.claim_mapper import map_report_to_claims
 from oida.covenant import CovenantEngine, parse_covenant
 from oida.gateway import GATEWAY_CONTRACT, HOST_PERCEPTION_CONTRACT, harness_host_perception, normalize_host_perception
+from oida.listening_identity import LISTENING_IDENTITY_CONTRACT, ListeningIdentityStore
 from oida.memory import AkousmataStore
 from oida.server import create_app
 
@@ -91,6 +92,29 @@ class GatewayContractTests(unittest.TestCase):
         self.assertIsNotNone(result["trace"])
         self.assertEqual(result["trace"]["earworm"]["session"]["app_id"], "oida.akousmata")
         self.assertEqual(result["earworm"]["version"], "0.2.2")
+
+    def test_host_harness_attributes_only_a_matching_declared_identity_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = ListeningIdentityStore(Path(tmp) / "identity")
+            identity.save("Listen as a guest. Keep origin open.")
+            snapshot = identity.snapshot()
+            payload = host_payload()
+            payload["listening_identity"] = {
+                "contract": LISTENING_IDENTITY_CONTRACT,
+                "sha256": snapshot.sha256,
+                "applied": True,
+            }
+
+            result = harness_host_perception(
+                payload,
+                listening_identity_snapshot=snapshot,
+            )
+
+        block = result["listening_event"]["listening_identity"]
+        self.assertEqual(block["application"], "host_declared")
+        self.assertEqual(block["applied_to"], ["host_perception"])
+        self.assertFalse(block["content_included"])
+        self.assertNotIn("Listen as a guest", json.dumps(result))
 
     def test_ignore_speech_removes_host_transcript_observation_and_caption(self) -> None:
         payload = host_payload()

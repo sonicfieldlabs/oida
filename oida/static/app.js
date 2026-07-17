@@ -52,6 +52,10 @@ const state = {
   reasoningModelLibraryBusy: false,
   reasoningLoaded: false,
   reasoningBusy: false,
+  listeningIdentity: null,
+  listeningIdentityLoaded: false,
+  listeningIdentityDirty: false,
+  listeningIdentityLoadedSha: null,
   conversationEvent: null,
   conversationId: null,
   conversationTurns: [],
@@ -112,6 +116,10 @@ const ui = {
   themeLight: el("themeLight"),
   themeDark: el("themeDark"),
   resetInterface: el("resetInterface"),
+  listeningIdentityText: el("listeningIdentityText"),
+  listeningIdentityNote: el("listeningIdentityNote"),
+  listeningIdentityCount: el("listeningIdentityCount"),
+  listeningIdentitySave: el("listeningIdentitySave"),
   reasoningStatus: el("reasoningStatus"),
   reasoningResources: el("reasoningResources"),
   reasoningRefresh: el("reasoningRefresh"),
@@ -527,6 +535,7 @@ function openSettingsPage(sectionId = null) {
   document.body.classList.add("settings-open");
   workspaceShell?.setAttribute("aria-hidden", "true");
   if (workspaceShell) workspaceShell.inert = true;
+  refreshListeningIdentity();
   refreshReasoning();
   const target = sectionId ? document.getElementById(sectionId) : null;
   if (target) {
@@ -820,6 +829,9 @@ function connectStream() {
         break;
       case "covenant_changed":
         refreshCovenant();
+        break;
+      case "listening_identity_changed":
+        refreshListeningIdentity();
         break;
       default:
         break;
@@ -2927,6 +2939,77 @@ async function openAkousma(akousmaId) {
   }
 }
 
+/* ───────────────────── listening identity / LISTENING.md ─────────────── */
+
+function updateListeningIdentityCount() {
+  if (!ui.listeningIdentityText || !ui.listeningIdentityCount) return;
+  const maximum = Number(state.listeningIdentity?.max_characters) || 4000;
+  ui.listeningIdentityCount.textContent = `${ui.listeningIdentityText.value.length} / ${maximum}`;
+}
+
+async function refreshListeningIdentity(force = false) {
+  if (!ui.listeningIdentityText) return;
+  try {
+    const data = await fetchJson("/listening");
+    state.listeningIdentity = data;
+    state.listeningIdentityLoaded = true;
+    const maximum = Number(data.max_characters) || 4000;
+    ui.listeningIdentityText.maxLength = maximum;
+    if (!state.listeningIdentityDirty || force) {
+      ui.listeningIdentityText.value = data.text || "";
+      state.listeningIdentityDirty = false;
+      state.listeningIdentityLoadedSha = data.sha256 || null;
+    }
+    updateListeningIdentityCount();
+    if (state.listeningIdentityDirty) {
+      ui.listeningIdentityNote.textContent = `Unsaved changes · ${data.path || data.filename || "LISTENING.md"}`;
+    } else if (data.truncated) {
+      ui.listeningIdentityNote.textContent = `File exceeds ${maximum} characters; only the bounded prefix is active · ${data.path}`;
+    } else {
+      ui.listeningIdentityNote.textContent = `${data.active ? "Active" : "Empty — neutral default"} · ${data.path || data.filename}`;
+    }
+  } catch (error) {
+    ui.listeningIdentityNote.textContent = String(error.message || error);
+    logActivity(`LISTENING.md: ${error.message || error}`, "error");
+  }
+}
+
+async function saveListeningIdentity() {
+  if (!ui.listeningIdentityText || !ui.listeningIdentitySave) return;
+  ui.listeningIdentitySave.disabled = true;
+  ui.listeningIdentityNote.textContent = "Saving LISTENING.md…";
+  try {
+    const data = await fetchJson("/listening", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text: ui.listeningIdentityText.value,
+        expected_sha256: state.listeningIdentityLoadedSha,
+      }),
+    });
+    state.listeningIdentity = data;
+    state.listeningIdentityLoaded = true;
+    state.listeningIdentityDirty = false;
+    state.listeningIdentityLoadedSha = data.sha256 || null;
+    updateListeningIdentityCount();
+    ui.listeningIdentityNote.textContent = `${data.active ? "Active" : "Empty — neutral default"} · ${data.path || data.filename}`;
+    logActivity("LISTENING.md saved");
+  } catch (error) {
+    ui.listeningIdentityNote.textContent = `Save failed: ${error.message}`;
+    logActivity(`LISTENING.md: ${error.message}`, "error");
+  } finally {
+    ui.listeningIdentitySave.disabled = false;
+  }
+}
+
+ui.listeningIdentityText?.addEventListener("input", () => {
+  state.listeningIdentityDirty = true;
+  updateListeningIdentityCount();
+  const path = state.listeningIdentity?.path || "LISTENING.md";
+  ui.listeningIdentityNote.textContent = `Unsaved changes · ${path}`;
+});
+ui.listeningIdentitySave?.addEventListener("click", saveListeningIdentity);
+
 /* ───────────────────────── rules (covenants underneath) ─────────────────
    The user-facing surface calls these Rules. The daemon keeps its covenant
    vocabulary and file format so existing documents remain compatible. */
@@ -4786,6 +4869,7 @@ refreshHealth().finally(() => {
 });
 loadManifest();
 refreshMemory();
+refreshListeningIdentity();
 refreshCovenant();
 refreshMicDevices(false); // load input devices by default, no permission prompt
 connectStream();

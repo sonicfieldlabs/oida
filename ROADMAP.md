@@ -1,6 +1,6 @@
 # Oída Roadmap
 
-Oída 0.6.5 is a public alpha and open research release. This roadmap describes
+Oída 0.7.0 is a public alpha and open research release. This roadmap describes
 the questions being worked on; it is not a promise of dates or production
 stability.
 
@@ -10,6 +10,8 @@ stability.
   MCP surfaces.
 - Optional local MOSS-Audio and declared host-perception paths.
 - AKOÚŌ claim categories, route presets, apparatus, and listening covenants.
+- Empty-by-default `LISTENING.md` identities with content-free revision
+  provenance across local, hosted, conversational, and remembered hearing.
 - Explicit memory, Akousmata navigation, and sound, prompt, or lineage handoff
   to GERM.
 - Event-grounded discussion that cannot rewrite the source listening event.

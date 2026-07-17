@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from oida.conversation import ConversationStore
 from oida.contracts import new_id, now_iso
+from oida.listening_identity import ListeningIdentitySnapshot, ListeningIdentityStore
 from oida.memory import AkousmataStore
 from oida.reasoning.contracts import (
     EvidenceItem,
@@ -65,6 +66,8 @@ class _TurnContext:
     packet: EvidencePacket
     compiled: CompiledPrompt
     route_instructions: str | None
+    listening_identity: str
+    listening_identity_snapshot: ListeningIdentitySnapshot
     memory_context: list[dict[str, Any]]
     include_transcript: bool
     include_memory_content: bool
@@ -96,6 +99,7 @@ class ReasoningOrchestrator:
         secret_store: SecretStore,
         conversations: ConversationStore,
         memory: AkousmataStore,
+        listening_identity_store: ListeningIdentityStore | None = None,
         relistener: TargetedRelistener | None = None,
         registry_factory: RegistryFactory | None = None,
         prepare_ttl_seconds: float = 600.0,
@@ -104,6 +108,7 @@ class ReasoningOrchestrator:
         self.secret_store = secret_store
         self.conversations = conversations
         self.memory = memory
+        self.listening_identity_store = listening_identity_store
         self.relistener = relistener
         self.packet_builder = EvidencePacketBuilder()
         self.prompt_compiler = PromptCompiler()
@@ -176,6 +181,7 @@ class ReasoningOrchestrator:
                     packet=context.packet,
                     profile=context.profile,
                     route_instructions=context.route_instructions,
+                    listening_identity=context.listening_identity,
                     conversation_history=self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
@@ -266,10 +272,13 @@ class ReasoningOrchestrator:
         )
         history = [] if incognito else self._history_for_packet(options.conversation_id, packet)
         route_instructions = trusted_route_instructions(event)
+        listening_identity_snapshot = self._listening_identity_snapshot()
+        listening_identity = listening_identity_snapshot.text.strip()
         compiled = self.prompt_compiler.compile(
             packet=packet,
             profile=profile,
             route_instructions=route_instructions,
+            listening_identity=listening_identity,
             conversation_history=history,
         )
         conversation_prepared = self.conversations.prepare(
@@ -289,6 +298,8 @@ class ReasoningOrchestrator:
             packet=packet,
             compiled=compiled,
             route_instructions=route_instructions,
+            listening_identity=listening_identity,
+            listening_identity_snapshot=listening_identity_snapshot,
             memory_context=memory_context,
             include_transcript=include_transcript,
             include_memory_content=include_memory_content,
@@ -296,6 +307,17 @@ class ReasoningOrchestrator:
             turn_id=new_id("turn"),
             forced_fallback_reason=forced_fallback,
         )
+
+    def _listening_identity_snapshot(self) -> ListeningIdentitySnapshot:
+        if self.listening_identity_store is None:
+            return ListeningIdentitySnapshot.empty()
+        try:
+            return self.listening_identity_store.snapshot()
+        except (OSError, ValueError):
+            # A malformed optional identity must not make listening or
+            # grounded conversation unavailable. The editor endpoint still
+            # exposes the file error so the operator can repair it.
+            return ListeningIdentitySnapshot.empty()
 
     def _execute(self, context: _TurnContext) -> tuple[ReasoningResponse, dict[str, Any]]:
         if context.forced_fallback_reason:
@@ -338,6 +360,7 @@ class ReasoningOrchestrator:
                     packet=context.packet,
                     profile=context.profile,
                     route_instructions=context.route_instructions,
+                    listening_identity=context.listening_identity,
                     conversation_history=self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
@@ -464,6 +487,7 @@ class ReasoningOrchestrator:
                 time_range=action.time_range,
                 allow_speech_content=context.packet.permissions.transcript_included,
                 parent_question=context.question,
+                listening_identity_snapshot=context.listening_identity_snapshot,
             )
             sidecar = {
                 **sidecar,
@@ -493,6 +517,19 @@ class ReasoningOrchestrator:
         response = response.model_copy(update={"requested_action": None})
         response_payload = response.model_dump(mode="json")
         fallback = execution.get("fallback")
+        identity_applied = (
+            context.listening_identity_snapshot.active
+            and (
+                bool(execution.get("host_managed"))
+                or execution.get("provider_id") != "local_structured"
+            )
+        )
+        identity_block = context.listening_identity_snapshot.event_block(
+            application="conversation_prompt" if identity_applied else (
+                "available_not_applied" if context.listening_identity_snapshot.active else "inactive"
+            ),
+            applied_to=["grounded_conversation"] if identity_applied else [],
+        )
         turn = {
             "id": context.turn_id,
             "created_at": now_iso(),
@@ -531,6 +568,7 @@ class ReasoningOrchestrator:
                 "evidence_contract": context.packet.contract,
                 "evidence_refs": [item.ref for item in context.packet.items],
                 "prompt_hash": context.compiled.prompt_hash,
+                "listening_identity": identity_block,
                 "profile_id": context.profile.id,
                 "comparison_event_ids": list(context.packet.comparison_event_ids),
                 "transcript_included": context.packet.permissions.transcript_included,
@@ -807,6 +845,22 @@ def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
         for item in list(public.get("limitations") or [])[:16]
         if (text := safe_external_text(item, limit=2000))
     ]
+    identity = value.get("listening_identity")
+    if isinstance(identity, dict):
+        public["listening_identity"] = {
+            key: identity.get(key)
+            for key in (
+                "contract",
+                "filename",
+                "active",
+                "sha256",
+                "truncated",
+                "application",
+                "applied_to",
+                "content_included",
+                "role",
+            )
+        }
     if not value.get("observation_shared_to_reasoner"):
         public["observation"] = None
         public["observation_withheld"] = True
