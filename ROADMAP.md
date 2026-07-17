@@ -1,6 +1,6 @@
 # Oída Roadmap
 
-Oída 0.6.0 is a public alpha and open research release. This roadmap describes
+Oída 0.6.5 is a public alpha and open research release. This roadmap describes
 the questions being worked on; it is not a promise of dates or production
 stability.
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from types import SimpleNamespace
 import os
+import sys
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -12,9 +13,9 @@ from bench_adapter.client import post_payload
 from harness.http_client import get_json
 from oida.chunker import plan_chunks
 from oida.conversation import ConversationStore
-from oida.config import load_config
+from oida.config import HF_INSTRUCT_ID, load_config
 from oida.engine_base import EngineUnavailable
-from oida.engine_mps import MpsMossEngine
+from oida.engine_mps import MpsMossEngine, _adapt_moss_generation, _adapt_whisper_encoder_layer
 from oida.engine_sglang import SGLangMossEngine
 from oida.generation import GenerationStore
 from oida.lifecycle import doctor
@@ -181,6 +182,135 @@ def test_embedded_runtime_refuses_to_claim_an_unsupported_thinking_budget() -> N
 
     with pytest.raises(EngineUnavailable, match="embedded Transformers runtime"):
         engine.generate("unused.wav", "Describe it.", _settings(), thinking_budget=64)
+
+
+def test_embedded_model_loader_requires_safetensors(tmp_path: Path) -> None:
+    model_calls: list[dict[str, object]] = []
+    processor_calls: list[dict[str, object]] = []
+
+    class FakeModel:
+        @classmethod
+        def from_pretrained(cls, _model_id: str, **kwargs: object) -> FakeModel:
+            model_calls.append(kwargs)
+            return cls()
+
+        def eval(self) -> None:
+            pass
+
+        def prepare_inputs_for_generation(self, _input_ids, **_kwargs):
+            return {}
+
+    class FakeProcessor:
+        def __init__(self, **kwargs: object) -> None:
+            processor_calls.append(kwargs)
+
+    src = ModuleType("src")
+    src.__path__ = []  # type: ignore[attr-defined]
+    audio_io = ModuleType("src.audio_io")
+    audio_io.load_audio = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
+    modeling = ModuleType("src.modeling_moss_audio")
+    modeling.MossAudioModel = FakeModel  # type: ignore[attr-defined]
+    processing = ModuleType("src.processing_moss_audio")
+    processing.MossAudioProcessor = FakeProcessor  # type: ignore[attr-defined]
+
+    config = SimpleNamespace(moss_audio_repo=None, resident_mode="multi")
+    engine = MpsMossEngine(config)  # type: ignore[arg-type]
+
+    with patch.dict(
+        sys.modules,
+        {
+            "src": src,
+            "src.audio_io": audio_io,
+            "src.modeling_moss_audio": modeling,
+            "src.processing_moss_audio": processing,
+        },
+    ):
+        with (
+            patch(
+                "oida.engine_mps._load_moss_processor",
+                side_effect=lambda processor_cls, _model_id, revision=None: processor_cls(enable_time_marker=True),
+            ),
+            patch.object(engine, "_device", return_value="cpu"),
+        ):
+            engine._load_pair(str(tmp_path))
+
+    assert model_calls == [
+        {
+            "dtype": "auto",
+            "device_map": "cpu",
+            "revision": None,
+            "trust_remote_code": False,
+            "use_safetensors": True,
+        }
+    ]
+    assert processor_calls == [{"enable_time_marker": True}]
+
+
+def test_remote_moss_models_require_immutable_revisions() -> None:
+    config = SimpleNamespace(moss_audio_repo=None, hf_hub_offline=False, allow_hf_hub=True)
+    engine = MpsMossEngine(config)  # type: ignore[arg-type]
+
+    assert engine._resolve_model_source(HF_INSTRUCT_ID) == (
+        HF_INSTRUCT_ID,
+        "6907a499dc0e87cc77c8ae0fe23fd0eb5476a02d",
+    )
+    assert engine._resolve_model_source("org/model@0123456789abcdef0123456789abcdef01234567") == (
+        "org/model",
+        "0123456789abcdef0123456789abcdef01234567",
+    )
+    with pytest.raises(EngineUnavailable, match="immutable commit revision"):
+        engine._resolve_model_source("org/unpinned-model")
+    with pytest.raises(EngineUnavailable, match="immutable commit revision"):
+        engine._resolve_model_source("https://example.test/model@0123456789abcdef0123456789abcdef01234567")
+
+
+def test_transformers_5_whisper_adapter_drops_only_null_head_masks() -> None:
+    class NewWhisperLayer:
+        def forward(self, hidden_states, attention_mask, output_attentions=False):
+            assert attention_mask == "mask"
+            assert output_attentions is True
+            return hidden_states
+
+    layer = NewWhisperLayer()
+    _adapt_whisper_encoder_layer(layer)
+
+    assert layer.forward("hidden", "mask", layer_head_mask=None, output_attentions=True) == ("hidden",)
+    with pytest.raises(ValueError, match="no longer supports"):
+        layer.forward("hidden", "mask", layer_head_mask="non-null")
+
+
+def test_transformers_5_generation_adapter_drops_replayed_audio() -> None:
+    class FakeTensor:
+        def __init__(self, length: int) -> None:
+            self.shape = (1, length)
+
+        def __getitem__(self, key):
+            return key
+
+    class MossModel:
+        def prepare_inputs_for_generation(self, input_ids, **kwargs):
+            return {
+                "input_ids": input_ids,
+                "position_ids": kwargs.get("position_ids"),
+                "audio_data": kwargs.get("audio_data"),
+                "audio_input_mask": kwargs.get("audio_input_mask"),
+                "audio_data_seqlens": kwargs.get("audio_data_seqlens"),
+            }
+
+    _adapt_moss_generation(MossModel)
+    model_inputs = MossModel().prepare_inputs_for_generation(
+        FakeTensor(168),
+        position_ids=FakeTensor(168),
+        audio_data="audio",
+        audio_input_mask=FakeTensor(167),
+        audio_data_seqlens="lengths",
+    )
+
+    assert model_inputs["input_ids"] == (slice(None, None, None), slice(-1, None, None))
+    assert model_inputs["position_ids"] == (slice(None, None, None), slice(-1, None, None))
+    assert model_inputs["audio_data"] is None
+    assert model_inputs["audio_input_mask"] is None
+    assert model_inputs["audio_data_seqlens"] is None
 
 
 def test_cli_http_clients_reject_plaintext_non_loopback_servers() -> None:
