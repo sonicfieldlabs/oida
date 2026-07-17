@@ -19,30 +19,30 @@ jobs:
         working-directory: oida
     steps:
       - name: Checkout Oída
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: oida
 
       - name: Checkout Earworm
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: sonicfieldlabs/earworm
           path: earworm
 
       - name: Checkout AKOÚŌ contract
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: sonicfieldlabs/akouo
           path: akouo
 
       - name: Checkout Akousmata
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: sonicfieldlabs/akousmata
           path: akousmata
 
       - name: Install uv
-        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
 
       - name: Install Python dependencies
         run: uv sync --extra dev
@@ -51,11 +51,16 @@ jobs:
       - name: Run Python tests
         run: uv run pytest -q -W error::starlette.exceptions.StarletteDeprecationWarning
 
+      - name: Lint Python
+        run: uv run ruff check .
+
       - name: Compile Python modules
         run: uv run python -m compileall -q oida harness bench_adapter scripts tests
 
       - name: Check dashboard JavaScript
-        run: node --check oida/static/app.js
+        run: |
+          node --check oida/static/app.js
+          node --check oida/static/remote.js
 
       - name: Build Python distributions and canonical dependency wheels
         run: |
@@ -64,6 +69,9 @@ jobs:
           uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../akouo
           uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../earworm/packages/py-akousma
           uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../akousmata
+
+      - name: Check Python distribution metadata
+        run: uv run twine check dist/*
 
       - name: Smoke isolated Python wheel
         working-directory: ${{ runner.temp }}

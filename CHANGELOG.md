@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.5 - 2026-07-16
+
+- **Stricter API contracts**: JSON request bodies now reject coercions such as
+  integer values for booleans, closing inconsistencies found through generated
+  OpenAPI request testing. Malformed GERM handoffs are rejected at the request
+  boundary instead of reaching integration processing.
+- **Accurate service discovery**: `GET /api` derives its endpoint list from the
+  routes actually mounted by the running service, including sessions,
+  covenants, remote capture, and optional integrations without a stale manual
+  inventory. The OpenAPI document now describes shared error responses and
+  HTML surfaces accurately, while the dashboard and embedded Akousmata
+  navigator share a working root favicon route.
+- **Release and package hardening**: distribution metadata uses current SPDX
+  and license-file declarations, source archives exclude property-test state,
+  and CI checks lint, both browser entry points, and built-package metadata.
+  Obsolete development dependencies and old GitHub Action runtimes were
+  removed or updated.
+
 ## 0.6.0 - 2026-07-14
 
 - **Installable Python release chain**: the public distribution is now

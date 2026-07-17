@@ -184,7 +184,7 @@ def _reject_json_constant(value: str) -> None:
 
 
 class OidaRequest(BaseModel):  # type: ignore[misc,valid-type]
-    model_config = ConfigDict(allow_inf_nan=False)
+    model_config = ConfigDict(allow_inf_nan=False, strict=True)
 
 
 class PathRequest(OidaRequest):
@@ -820,7 +820,48 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
     from oida import __version__
 
-    app = FastAPI(title="oida", version=__version__, lifespan=lifespan)
+    error_response = {
+        "description": "The request could not be completed.",
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "properties": {"detail": {}},
+                    "required": ["detail"],
+                }
+            },
+        },
+    }
+    html_error_response = {
+        400: {
+            "description": "The browser authorization callback failed.",
+            "content": {"text/html": {"schema": {"type": "string"}}},
+        }
+    }
+    event_stream_response = {
+        200: {
+            "description": "A server-sent event stream.",
+            "content": {
+                "text/event-stream": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "event": {"type": "string"},
+                            "data": {"type": "string"},
+                        },
+                        "required": ["data"],
+                    }
+                }
+            },
+        }
+    }
+    documented_error_codes = (400, 401, 403, 404, 409, 413, 422, 423, 500, 501, 503)
+    app = FastAPI(
+        title="oida",
+        version=__version__,
+        lifespan=lifespan,
+        responses={code: copy.deepcopy(error_response) for code in documented_error_codes},
+    )
 
     @app.exception_handler(EngineUnavailable)
     async def engine_unavailable_handler(
@@ -1334,7 +1375,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         broadcaster.publish("engine", status)
         return {"assigned": {kind: selected["name"]}, "warming": started, **status}
 
-    @app.get("/events/stream")
+    @app.get("/events/stream", responses=event_stream_response)
     async def events_stream_endpoint() -> Any:
         return StreamingResponse(
             broadcaster.stream(),
@@ -1377,13 +1418,17 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             raise HTTPException(status_code=500, detail=f"could not reveal path: {exc}") from exc
         return {"revealed": str(target)}
 
-    @app.get("/")
+    @app.get("/", response_class=HTMLResponse)
     def root() -> FileResponse:
         # no-cache: without it browsers reuse a heuristically-cached dashboard
         # after an upgrade (assets are ?v= versioned, the document is not)
         return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
 
-    @app.get("/remote")
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> FileResponse:
+        return FileResponse(static_dir / "icons" / "favicon.svg", media_type="image/svg+xml")
+
+    @app.get("/remote", response_class=HTMLResponse)
     def remote_ear_page() -> FileResponse:
         # Phone-first capture surface. Oída serves the page but does not
         # configure or publish a machine-level remote-access service.
@@ -1441,6 +1486,24 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
     @app.get("/api")
     def api_root() -> dict[str, object]:
+        hidden_paths = {
+            "/",
+            "/api",
+            "/docs",
+            "/docs/oauth2-redirect",
+            "/favicon.ico",
+            "/openapi.json",
+            "/redoc",
+            "/static",
+        }
+        endpoints = sorted(
+            {
+                path
+                for route in app.routes
+                if isinstance((path := getattr(route, "path", None)), str)
+                and path not in hidden_paths
+            }
+        )
         return {
             "name": "oida",
             "legacy_name": "hmm, aear",
@@ -1448,101 +1511,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "profile": config.profile,
             "docs": "/docs",
             "health": "/health",
-            "endpoints": [
-                "/oida/status",
-                "/gateway",
-                "/gateway/capabilities",
-                "/gateway/schema/host-perception",
-                "/gateway/route",
-                "/gateway/listen",
-                "/gateway/harness",
-                "/engine/status",
-                "/engine/warm",
-                "/engine/model",
-                "/events/stream",
-                "/sonicfield/status",
-                "/sonicfield/explore",
-                "/sonicfield/reveal",
-                "/upload",
-                "/sample-tone",
-                "/transcribe",
-                "/events",
-                "/caption",
-                "/speech",
-                "/music",
-                "/moss-analysis",
-                "/acoustic-system",
-                "/sources",
-                "/system-audio/status",
-                "/background/status",
-                "/background/history",
-                "/background/history/export",
-                "/background/history/pin",
-                "/background/history/batch-pin",
-                "/background/history/archive",
-                "/background/history/clear",
-                "/background/config",
-                "/background/pause",
-                "/background/resume",
-                "/background/capture",
-                "/background/capture-request",
-                "/background/capture-request/claim",
-                "/background/capture-request/cancel",
-                "/native/system-audio/analyze",
-                "/native/system-audio/routes",
-                "/native/system-audio/temp",
-                "/native/system-audio/cleanup",
-                "/raw-audio/status",
-                "/raw-audio/wipe",
-                "/listen-event",
-                "/listen-event/rerun",
-                "/akouo/modes",
-                "/akouo/skills",
-                "/akouo/presets",
-                "/akouo/schema",
-                "/akouo/route",
-                "/akouo/listen",
-                "/memory",
-                "/memory/export",
-                "/memory/trace/{trace_id}",
-                "/memory/remember",
-                "/memory/forget",
-                "/memory/similar",
-                "/reasoning/providers",
-                "/reasoning/models?provider_id={provider_id}",
-                "/reasoning/settings",
-                "/reasoning/providers/{provider_id}/probe",
-                "/reasoning/providers/{provider_id}/credential [PUT, DELETE]",
-                "/reasoning/openrouter/oauth/start",
-                "/reasoning/openrouter/oauth/callback",
-                "/conversation",
-                "/conversation/ask",
-                "/conversation/ask/stream",
-                "/conversation/prepare",
-                "/conversation/commit",
-                "/conversation/{conversation_id} [GET, DELETE]",
-                "/generation/prompt",
-                "/generation/history",
-                "/generation/{generation_id}",
-                "/generation/relisten",
-                "/metrics/process",
-                "/live/start",
-                "/live/ingest",
-                "/live/capture",
-                "/live/signal/{session_id}",
-                "/live/status",
-                "/live/stop",
-                "/germ/handoff",
-                "/germ/link",
-                "/akousmata/records",
-                "/akousmata/tags",
-                "/akousmata/records/{akousma_id}",
-                "/akousmata/records/{akousma_id} [PATCH, DELETE]",
-                "/akousmata/audio/{akousma_id}",
-                "/qa",
-                "/think",
-                "/report",
-            ],
+            "endpoints": endpoints,
         }
 
     @app.get("/oida/status")
@@ -2805,8 +2774,16 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/reasoning/providers/openrouter/oauth/callback", response_class=HTMLResponse)
-    @app.get("/reasoning/openrouter/oauth/callback", response_class=HTMLResponse)
+    @app.get(
+        "/reasoning/providers/openrouter/oauth/callback",
+        response_class=HTMLResponse,
+        responses=html_error_response,
+    )
+    @app.get(
+        "/reasoning/openrouter/oauth/callback",
+        response_class=HTMLResponse,
+        responses=html_error_response,
+    )
     def reasoning_openrouter_oauth_callback_endpoint(
         request: Request,
         code: str,
@@ -2848,7 +2825,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.post("/conversation/ask/stream")
+    @app.post("/conversation/ask/stream", responses=event_stream_response)
     async def conversation_ask_stream_endpoint(req: ConversationAskRequest) -> Any:
         event = conversation_event(req)
         comparisons = comparison_events(req.comparison_event_ids, event.get("id"))

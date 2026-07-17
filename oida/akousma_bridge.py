@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import akousma
@@ -270,7 +270,7 @@ def build_germ_router():
     """FastAPI router backing the three oída→germ buttons. Imported lazily so this
     module stays usable without FastAPI (e.g. in cross-app tests)."""
     from fastapi import APIRouter, HTTPException
-    from pydantic import BaseModel
+    from pydantic import BaseModel, ConfigDict
 
     # Must be a module global: with `from __future__ import annotations` FastAPI
     # resolves the route's string annotation through this module's globals, and a
@@ -278,7 +278,9 @@ def build_germ_router():
     global GermHandoffRequest
 
     class GermHandoffRequest(BaseModel):
-        mode: str
+        model_config = ConfigDict(allow_inf_nan=False, extra="forbid", strict=True)
+
+        mode: Literal["sound", "prompt", "lineage"]
         audio: dict[str, Any]
         listening: dict[str, Any] | None = None
         origin: str = "file"
@@ -309,7 +311,7 @@ def build_germ_router():
             )
             _maybe_enrich_songid(record, req.audio)
             return handoff_to_germ(record, req.mode)
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.get("/link")

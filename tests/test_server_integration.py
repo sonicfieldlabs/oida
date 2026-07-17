@@ -44,6 +44,79 @@ def _write_tone(path: Path) -> Path:
 
 
 class ServerSecurityTests(unittest.TestCase):
+    def test_service_discovery_and_shared_favicon_follow_mounted_routes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {
+                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                "AKOUSMATA_WATCHER": "0",
+            },
+            clear=False,
+        ):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            discovery = client.get("/api")
+            favicon = client.get("/favicon.ico")
+            schema = client.get("/openapi.json").json()
+
+        self.assertEqual(discovery.status_code, 200)
+        endpoints = discovery.json()["endpoints"]
+        self.assertEqual(endpoints, sorted(set(endpoints)))
+        self.assertTrue({"/covenant", "/remote", "/sessions"}.issubset(endpoints))
+        self.assertEqual(favicon.status_code, 200)
+        self.assertEqual(favicon.headers["content-type"], "image/svg+xml")
+        self.assertIn("text/html", schema["paths"]["/"]["get"]["responses"]["200"]["content"])
+        self.assertIn(
+            "text/event-stream",
+            schema["paths"]["/conversation/ask/stream"]["post"]["responses"]["200"]["content"],
+        )
+        error_responses = schema["paths"]["/sessions/{session_id}"]["delete"]["responses"]
+        self.assertTrue({"400", "404", "422", "503"}.issubset(error_responses))
+
+    def test_json_boolean_fields_reject_integer_coercion(self) -> None:
+        cases = [
+            ("/akouo/route", {"path": "unused.wav", "validate": 0}),
+            ("/background/history/batch-pin", {"event_ids": [], "pinned": 0}),
+            ("/background/history/clear", {"keep_pinned": 0}),
+            ("/native/system-audio/cleanup", {"dry_run": 0}),
+            ("/raw-audio/wipe", {"include_legacy": 0}),
+        ]
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {
+                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                "AKOUSMATA_WATCHER": "0",
+            },
+            clear=False,
+        ):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            for endpoint, payload in cases:
+                with self.subTest(endpoint=endpoint):
+                    response = client.post(endpoint, json=payload)
+                    self.assertEqual(response.status_code, 422, response.text)
+
+    def test_germ_handoff_rejects_malformed_payload_before_processing_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {
+                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                "AKOUSMATA_WATCHER": "0",
+            },
+            clear=False,
+        ):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            response = client.post(
+                "/germ/handoff",
+                json={"audio": {}, "mode": "invalid", "location": {"source": {}}},
+            )
+
+        self.assertEqual(response.status_code, 422, response.text)
+
     def test_embedded_memory_can_be_renamed_and_forgotten_without_deleting_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             "os.environ",

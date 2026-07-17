@@ -1,11 +1,26 @@
 [project]
 name = "sonicfield-oida"
-version = "0.6.0"
+version = "0.6.5"
 description = "oída unified local listening agent and gateway: AKOÚŌ, Earworm, Akousmata, and optional local audio engines."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Sonic Field Labs" }]
+keywords = ["audio", "listening", "sound-analysis", "FastAPI", "MCP"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: MacOS X",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Multimedia :: Sound/Audio :: Analysis",
+]
 dependencies = [
   "akouo-contract>=0.7.0",
   "akousma>=0.4.0",
@@ -41,8 +56,9 @@ moss = [
 ]
 dev = [
   "httpx>=0.27",
-  "httpx2>=2.7",
-  "pytest>=8.2"
+  "pytest>=8.2",
+  "ruff>=0.15,<0.16",
+  "twine>=6.2,<7",
 ]
 songid = [
   "shazamio>=0.4",
