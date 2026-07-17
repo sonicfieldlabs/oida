@@ -17,6 +17,11 @@
   and CI checks lint, both browser entry points, and built-package metadata.
   Obsolete development dependencies and old GitHub Action runtimes were
   removed or updated.
+- **Secure optional model runtime**: the embedded MOSS dependency set now uses
+  the compatible PyTorch 2.10, TorchCodec 0.10, and Transformers 5.14 releases,
+  removing every fixable finding from the all-extras dependency graph. The
+  loader now requires Safetensors and preserves the official MOSS-Audio API
+  across the patched Transformers runtime.
 
 ## 0.6.0 - 2026-07-14
 

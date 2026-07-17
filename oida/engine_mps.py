@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+import inspect
 import logging
+import re
 import sys
 import threading
 import time
+from functools import wraps
 from pathlib import Path
 
-from oida.config import OidaConfig
+from oida.config import HF_INSTRUCT_ID, HF_THINKING_ID, OidaConfig
 from oida.engine_base import EngineResult, EngineUnavailable, MossEngine
 from oida.recipes import GenerationSettings
 
 LOGGER = logging.getLogger(__name__)
+
+_PINNED_HF_REVISIONS = {
+    HF_INSTRUCT_ID: "6907a499dc0e87cc77c8ae0fe23fd0eb5476a02d",
+    HF_THINKING_ID: "0099773e141bd410bc698c03c9a029e7c2ec8169",
+}
+_COMMIT_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+_HF_REPO_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class MpsMossEngine(MossEngine):
@@ -66,30 +76,31 @@ class MpsMossEngine(MossEngine):
                 "official MOSS-Audio repo/dependencies are unavailable; set OIDA_MOSS_AUDIO_REPO (legacy HMM_/AEAR_ accepted) and install MOSS extras"
             ) from exc
 
+        _adapt_moss_generation(MossAudioModel)
+
         if self.config.resident_mode == "single":
             self._clear_loaded_models(except_model=None)
 
-        self._assert_model_loading_allowed(model_id)
+        model_source, revision = self._resolve_model_source(model_id)
         model = MossAudioModel.from_pretrained(
-            model_id,
-            trust_remote_code=True,
+            model_source,
             dtype="auto",
             device_map=self._device(),
+            revision=revision,
+            trust_remote_code=False,
+            use_safetensors=True,
         )
         model.eval()
-        processor = MossAudioProcessor.from_pretrained(
-            model_id,
-            trust_remote_code=True,
-            enable_time_marker=True,
-        )
+        _adapt_moss_whisper_layers(model)
+        processor = _load_moss_processor(MossAudioProcessor, model_source, revision=revision)
         self._models[model_id] = model
         self._processors[model_id] = processor
         return model, processor
 
-    def _assert_model_loading_allowed(self, model_id: str) -> None:
+    def _resolve_model_source(self, model_id: str) -> tuple[str, str | None]:
         path = Path(model_id).expanduser()
         if path.exists():
-            return
+            return str(path), None
         if path.is_absolute() or model_id.startswith((".", "~")):
             raise EngineUnavailable(f"MOSS-Audio local model path is not available: {path}")
         if self.config.hf_hub_offline:
@@ -98,10 +109,25 @@ class MpsMossEngine(MossEngine):
             raise EngineUnavailable(
                 "Hugging Face model lookup is disabled by default. Download weights into ./weights or set OIDA_ALLOW_HF_HUB=1."
             )
+
+        source = model_id
+        revision = _PINNED_HF_REVISIONS.get(source)
+        if revision is None and "@" in model_id:
+            source, revision = model_id.rsplit("@", 1)
+        if (
+            _HF_REPO_ID_RE.fullmatch(source) is None
+            or revision is None
+            or _COMMIT_REVISION_RE.fullmatch(revision) is None
+        ):
+            raise EngineUnavailable(
+                "Remote MOSS models require an immutable commit revision: use repository@<40-character-commit>."
+            )
         LOGGER.warning(
-            "Hugging Face hub lookup explicitly enabled; '%s' may be downloaded from the network with trust_remote_code=True.",
-            model_id,
+            "Hugging Face hub lookup explicitly enabled; '%s' at commit %.12s may be downloaded from the network.",
+            source,
+            revision,
         )
+        return source, revision.lower()
 
     def prewarm(self, model_kind: str = "instruct") -> None:
         model_id = self.model_id_for_kind(model_kind)
@@ -186,6 +212,7 @@ class MpsMossEngine(MossEngine):
                 "max_new_tokens": settings.max_new_tokens,
                 "do_sample": do_sample,
                 "num_beams": 1,
+                "pad_token_id": processor.tokenizer.eos_token_id,
                 "use_cache": True,
                 "remove_invalid_values": True,
                 "renormalize_logits": True,
@@ -232,6 +259,68 @@ def _safe_decode(processor, token_ids) -> str:
         ids = token_ids.tolist() if hasattr(token_ids, "tolist") else list(token_ids)
         tokens = tokenizer.convert_ids_to_tokens(ids, skip_special_tokens=True)
         return tokenizer.convert_tokens_to_string([token for token in tokens if isinstance(token, str)]).strip()
+
+
+def _adapt_whisper_encoder_layer(layer) -> None:
+    """Accept MOSS-Audio's removed, always-null ``layer_head_mask`` argument."""
+    forward = layer.forward
+    if getattr(forward, "_oida_moss_compat", False):
+        return
+    if "layer_head_mask" in inspect.signature(forward).parameters:
+        return
+
+    @wraps(forward)
+    def compatible_forward(*args, layer_head_mask=None, **kwargs):
+        if layer_head_mask is not None:
+            raise ValueError("Transformers 5 no longer supports Whisper layer head masks")
+        result = forward(*args, **kwargs)
+        return result if isinstance(result, (tuple, list)) else (result,)
+
+    compatible_forward._oida_moss_compat = True  # type: ignore[attr-defined]
+    layer.forward = compatible_forward
+
+
+def _adapt_moss_whisper_layers(model) -> None:
+    audio_encoder = getattr(model, "audio_encoder", None)
+    for layer in getattr(audio_encoder, "layers", ()):
+        _adapt_whisper_encoder_layer(layer)
+
+
+def _adapt_moss_generation(model_cls: type) -> None:
+    """Keep one-shot audio inputs out of cached Transformers 5 decode steps."""
+    prepare = model_cls.prepare_inputs_for_generation
+    if getattr(prepare, "_oida_moss_compat", False):
+        return
+
+    @wraps(prepare)
+    def compatible_prepare(self, input_ids, *args, **kwargs):
+        model_inputs = prepare(self, input_ids, *args, **kwargs)
+        audio_input_mask = kwargs.get("audio_input_mask")
+        if (
+            audio_input_mask is not None
+            and input_ids is not None
+            and input_ids.shape[-1] > audio_input_mask.shape[-1]
+        ):
+            model_inputs.pop("inputs_embeds", None)
+            model_inputs["input_ids"] = input_ids[:, -1:]
+            position_ids = model_inputs.get("position_ids")
+            if position_ids is not None:
+                model_inputs["position_ids"] = position_ids[:, -1:]
+            model_inputs["audio_data"] = None
+            model_inputs["audio_input_mask"] = None
+            model_inputs["audio_data_seqlens"] = None
+        return model_inputs
+
+    compatible_prepare._oida_moss_compat = True  # type: ignore[attr-defined]
+    model_cls.prepare_inputs_for_generation = compatible_prepare
+
+
+def _load_moss_processor(processor_cls: type, model_id: str, *, revision: str | None):
+    """Load the standard tokenizer without executing checkpoint Python code."""
+    from transformers import Qwen2Tokenizer
+
+    tokenizer = Qwen2Tokenizer.from_pretrained(model_id, revision=revision)
+    return processor_cls(tokenizer, enable_time_marker=True)
 
 
 def split_reasoning(text: str) -> tuple[str | None, str]:

@@ -368,8 +368,10 @@ scripts/run_oida_mps.sh
 `oida` never silently downloads model code or weights. If the local `weights/`
 paths are absent, `mac-mps` falls back to the stub engine unless
 `OIDA_REQUIRE_MODEL=1`; Hugging Face hub lookup is refused unless
-`OIDA_ALLOW_HF_HUB=1`, and `HF_HUB_OFFLINE=1` always wins. The daemon prewarms
-the Instruct model in the background (`OIDA_MOSS_PREWARM=0` disables);
+`OIDA_ALLOW_HF_HUB=1`, and `HF_HUB_OFFLINE=1` always wins. Built-in 4B Hub IDs
+use audited commit pins; any custom remote ID must be written as
+`repository@<40-character-commit>`. The daemon prewarms the Instruct model in
+the background (`OIDA_MOSS_PREWARM=0` disables);
 `/engine/status` reports readiness, and the dashboard's Engine fold can
 reassign models and warm on demand.
 

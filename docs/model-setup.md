@@ -94,6 +94,8 @@ and a supported device. The dashboard can then run **General** for an Instruct
 pass and **Deep** or **Music** for a Thinking pass.
 
 Oída refuses silent Hub lookup by default. `HF_HUB_OFFLINE=1` disables it even
-when another setting attempts to enable it. Model paths, weights, listening
+when another setting attempts to enable it. If Hub lookup is explicitly
+enabled, built-in 4B IDs use audited commit pins and custom remote model IDs
+must use `repository@<40-character-commit>`. Model paths, weights, listening
 history, captures, credentials, and local machine configuration are ignored by
 Git and must remain outside commits and public issues.

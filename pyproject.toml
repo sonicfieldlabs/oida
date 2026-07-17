@@ -49,10 +49,10 @@ akousmata = { path = "../akousmata", editable = true }
 [project.optional-dependencies]
 moss = [
   "accelerate",
-  "torch==2.9.1",
-  "torchaudio==2.9.1",
-  "transformers==4.57.1",
-  "torchcodec==0.8.1"
+  "torch==2.10.0",
+  "torchaudio==2.10.0",
+  "transformers==5.14.1",
+  "torchcodec==0.10.0"
 ]
 dev = [
   "httpx>=0.27",
