@@ -5,7 +5,7 @@ Installing Oída installs and exposes the complete stack: AKOÚŌ routing and
 claim discipline, Earworm event/provenance envelopes, and the Akousmata store
 and navigator.
 
-The stable gateway contract is `oida/gateway/v0.2`. It supports two paths:
+The stable gateway contract is `oida/gateway/v0.3`. It supports two paths:
 
 1. **Oída-owned perception** — pass Oída a local audio path. Its configured
    engine (MOSS-Audio when available, DSP-only stub otherwise) performs the
@@ -13,7 +13,7 @@ The stable gateway contract is `oida/gateway/v0.2`. It supports two paths:
    normalized listening event, and an optional memory trace.
 2. **Host-supplied perception** — an audio-capable Hermes, Codex, Claude, or
    generic host describes what its active model heard using
-   `oida/host-perception/v0.1`. Oída does not run MOSS again. It applies the
+   `oida/host-perception/v0.2`. Oída does not run MOSS again. It applies the
    same router, evidence permissions, claim taxonomy, Earworm provenance, and
    Akousmata memory flow.
 
@@ -23,6 +23,14 @@ claims can be supported. An undeclared apparatus is accepted but explicitly
 marked undetermined. Model output can never become a `measured` claim merely
 because the model used a number; measurements need DSP, metadata, a measuring
 tool, or a declared human measurement.
+
+Before direct host perception, the host inspects the active Covenant and reads
+the bounded `LISTENING.md`. The Covenant governs what the host may listen to,
+retain, or reveal; the identity may only orient attention and voice. A host
+that applied the identity declares the digest it used. Oída records a matching
+revision as host-declared provenance, reports missing or changed revisions,
+and never treats identity text as evidence. Oída-owned perception snapshots
+the same file for the whole multi-pass event.
 
 ## Lifecycle
 
@@ -44,12 +52,17 @@ deployment must provide its own authenticated HTTPS boundary.
 
 ```json
 {
-  "contract": "oida/host-perception/v0.1",
+  "contract": "oida/host-perception/v0.2",
   "host": {
     "id": "codex",
     "model": "audio-capable-model",
     "session_id": "session-123",
     "audio_input_capable": true
+  },
+  "listening_identity": {
+    "contract": "oida/listening-identity/v0.1",
+    "sha256": "718835e68333f5fca24863afda54fc6258f28c7158d1aa24578b95abfb8f811d",
+    "applied": true
   },
   "source": {
     "label": "attached field recording",
@@ -78,3 +91,5 @@ deployment must provide its own authenticated HTTPS boundary.
 ```
 
 See `oida/schemas/host-perception.schema.json` for the complete input schema.
+The digest in this example is illustrative; use the exact value returned by
+`GET /listening` or `oida_listening_identity(action="read")`.

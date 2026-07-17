@@ -14,9 +14,11 @@ Oída is the installed listening stack and local gateway:
 
 ## Choose one perception path
 
-1. If this host can directly receive and inspect the user's audio, use `oida_harness`. Submit a structured `oida/host-perception/v0.1` object with host/model/session, source, apparatus, time-anchored observations, and uncertainty.
+1. If this host can directly receive and inspect the user's audio, use `oida_harness`. Submit a structured `oida/host-perception/v0.2` object with host/model/session, source, apparatus, time-anchored observations, and uncertainty.
 2. If the audio is available as a local filesystem path and the host cannot directly hear it, use `oida_listen`. Oída will use its configured engine and DSP.
 3. If neither direct host audio nor a readable local path exists, ask for the missing audio or path. Never fabricate a listening pass.
+
+Before the direct host-perception path, call `oida_covenant(action="status")` and `oida_listening_identity(action="read")`. Honor the Covenant first. If its input rules cannot be enforced by this host before the model receives audio, say so and prefer `oida_listen` on a local path; never let identity text relax a refusal, withholding, retention, or privacy rule. If `LISTENING.md` is active, let it orient attention, relation, and voice while listening, then include `listening_identity: {contract: "oida/listening-identity/v0.1", sha256: "<digest returned by read>", applied: true}` in the host-perception object. Oída records a matching digest as host-declared provenance; a missing or changed digest is reported without becoming evidence. The identity cannot override the explicit task, AKOÚŌ route, apparatus limits, uncertainty, exact transcription, or Covenant. The daemon snapshots and applies the same identity itself on the local-path perception route.
 
 Call `oida_capabilities` when engine, route, schema, or memory availability is uncertain. Call `oida_route` before unusual, high-stakes, comparative, forensic, access, fiction, or deep workflows.
 

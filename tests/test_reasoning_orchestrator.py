@@ -88,6 +88,7 @@ class _Relistener:
         time_range=None,
         allow_speech_content=False,
         parent_question=None,
+        listening_identity_snapshot=None,
     ):
         self.calls += 1
         return {

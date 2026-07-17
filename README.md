@@ -62,6 +62,7 @@ instead of promising one universal RAM minimum.
 | Question | Where to begin |
 | --- | --- |
 | How does it work? | [Architecture](docs/architecture.md) and [gateway contract](docs/gateway-contract.md) |
+| Where do I define the ear's perspective? | [`LISTENING.md` and the harness](docs/listening-identity.md) |
 | How does it connect? | [The Listening Stack](https://sonicfield.org/stack) and [GERM handoff](#stack-compatibility) |
 | How do I install the tested models? | [MOSS-Audio setup](docs/model-setup.md) |
 | Which models and licenses apply? | [Models and licensing](docs/models-and-licensing.md) |
@@ -88,7 +89,7 @@ name **oída**.
 
 ## What Is Implemented
 
-- **Unified gateway contract** (`oida/gateway/v0.2`) with two honest perception
+- **Unified gateway contract** (`oida/gateway/v0.3`) with two honest perception
   paths: Oída-owned audio through `POST /gateway/listen`, and host-owned model
   perception through `POST /gateway/harness`. `GET /gateway` advertises the
   installed AKOÚŌ, Earworm, and Akousmata contracts; `GET
@@ -159,6 +160,15 @@ name **oída**.
   OpenRouter, or an explicitly enabled Codex, Claude, Hermes, OpenClaw, or
   OpenCode host. Invalid or failed provider output gets one repair attempt,
   then a visible deterministic local fallback.
+- **`LISTENING.md` listening identity**: one empty-by-default, local Markdown
+  file in Oída's data directory can orient how model-backed interpretive
+  listening and grounded dialogue attend, relate, speak, and ask. The shared
+  dashboard edits it under Settings → Listening. It remains subordinate to
+  evidence, privacy, AKOÚŌ routes, and Covenants; DSP and exact transcription
+  stay literal. Every event carries a content-free identity revision and
+  application state; hosted ears declare the revision they actually used
+  through `oida/host-perception/v0.2`. See [the harness
+  contract](docs/listening-identity.md).
 - **Model roles and conversation profiles** in the shared dashboard: assign
   separate providers/models to fast perception, deep perception, transcription,
   music analysis, conversation, and targeted re-listening; shape tone, depth,
@@ -209,7 +219,7 @@ and cultivation.
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.7.0` / `akouo/v0.7` | 15 listening modes, router, reference layer, 18 commands, presets, evidence permissions, and covenants. |
 | [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.4.0` / spec v1.3 | Session provenance, lineage, kinship, location/capture, and covenant-aware memory records. |
 | [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.4.0` | Embedded library at `/library/` and the shared durable sonic-memory store. |
-| OÍDA gateway | `sonicfield-oida 0.6.5` / `oida/gateway/v0.2` | Unified REST, MCP, agent, dashboard, local perception, and host-perception surface. |
+| OÍDA gateway | `sonicfield-oida 0.7.0` / `oida/gateway/v0.3` | Unified REST, MCP, agent, dashboard, local perception, and host-perception surface. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | 0.2.0 integration | Optional sound, prompt, and lineage handoff after listening. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.0 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.0 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
@@ -379,9 +389,9 @@ The same rule applies to local conversation and audio models. Oída can discover
 an existing Ollama or OpenAI-compatible endpoint, but it never pulls a model.
 The built-in catalog covers MOSS-Audio/Music/Transcribe, MiDashengLM,
 MiMo-Audio, Qwen3-Omni, Gemma 3n, Mellow, Gemini 3.5 Flash, Alibaba Qwen Omni,
-and NVIDIA Nemotron/OpenRouter presets. Provider setup, six-role assignment,
-prompt profiles, RAM warnings, and data-sharing permissions live in the
-dashboard's Reasoning settings. See
+and NVIDIA Nemotron/OpenRouter presets. The global listening identity lives in
+Settings → Listening; provider setup, six-role assignment, prompt profiles,
+RAM warnings, and data-sharing permissions live in Reasoning. See
 [Reasoning providers and boundaries](docs/reasoning-providers.md).
 
 For CUDA, start the official MOSS-Audio SGLang fork separately:
@@ -460,6 +470,8 @@ promising production stability.
 - `docs/akouo-skills.md` / `docs/akousmata-memory.md` — skills and memory.
 - `docs/architecture.md` — runtime surfaces, package boundaries, data flow,
   and local-state ownership.
+- `docs/listening-identity.md` — `LISTENING.md`, harness precedence, Covenants,
+  editing surfaces, and provider boundaries.
 - `docs/gateway-contract.md` — lifecycle, host-perception envelope, and local
   integration boundaries.
 - `docs/reasoning-providers.md` — prompt ownership, provider setup, model roles,

@@ -57,6 +57,12 @@ from oida.engine_base import EngineUnavailable
 from oida.generation import GenerationStore
 from oida.gateway import GATEWAY_CONTRACT, gateway_manifest, harness_host_perception
 from oida.listening import listening_event_dict
+from oida.listening_identity import (
+    MAX_LISTENING_IDENTITY_CHARS,
+    ListeningIdentityConflict,
+    ListeningIdentitySnapshot,
+    ListeningIdentityStore,
+)
 from oida.live import LiveManager
 from oida.memory import AkousmataStore, earworm_context_for_event
 from oida.metrics import process_metrics
@@ -72,7 +78,7 @@ from oida.raw_audio import (
     finalize_upload_audio_session,
     upload_audio_status,
 )
-from oida.reporting import caption, direct_analysis, events, forbidden_topics_for_text, music, qa, report, report_to_dict, speech, think, transcribe
+from oida.reporting import ALL_MOSS_PASSES, caption, direct_analysis, events, forbidden_topics_for_text, music, qa, report, report_to_dict, speech, think, transcribe
 from oida.reportschema import dump_model
 from oida.route_comparison import compare_route_events
 from oida.reasoning.contracts import ModelDescriptor, ModelRole
@@ -366,6 +372,11 @@ class CovenantActivateRequest(OidaRequest):
     name: str | None = None
 
 
+class ListeningIdentitySaveRequest(OidaRequest):
+    text: str = Field(default="", max_length=MAX_LISTENING_IDENTITY_CHARS)
+    expected_sha256: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
+
+
 class MemoryRememberRequest(OidaRequest):
     event: dict[str, object]
     user_notes: str | None = None
@@ -525,6 +536,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     live = LiveManager()
     memory = AkousmataStore()
     covenant_store = CovenantStore(config.data_dir)
+    listening_identity_store = ListeningIdentityStore(config.data_dir)
     background = BackgroundRuntime()
     conversations = ConversationStore(config.data_dir / "sessions" / "conversations")
     reasoning_settings = ReasoningSettingsStore(config.data_dir / "settings" / "reasoning.json")
@@ -534,6 +546,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         settings_store=reasoning_settings,
         secret_store=reasoning_secrets,
         covenant_store=covenant_store,
+        listening_identity_store=listening_identity_store,
         incognito_getter=lambda: bool(background.config.incognito),
     )
     generations = GenerationStore()
@@ -565,6 +578,52 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     perception_role_notes: list[str] = []
     weights_root = REPO_ROOT / "weights"
     available_models = scan_moss_models(weights_root)
+
+    def current_listening_identity_snapshot() -> ListeningIdentitySnapshot:
+        try:
+            return listening_identity_store.snapshot()
+        except (OSError, ValueError):
+            # Identity is optional orientation. A malformed manual edit stays
+            # repairable through /listening without disabling perception.
+            return ListeningIdentitySnapshot.empty()
+
+    def prepare_covenant_perception(
+        path: str | Path,
+        *,
+        source_type: str,
+        passes: list[str] | tuple[str, ...],
+    ) -> tuple[Any | None, list[str], list[str]]:
+        """Apply the active Covenant's input/content gates to a new hearing."""
+
+        covenant_engine = covenant_store.engine()
+        selected = list(passes)
+        rules_applied: list[str] = []
+        if covenant_engine is None:
+            return None, selected, rules_applied
+        refusal = (
+            covenant_engine.refuse_source(source_type)
+            or covenant_engine.refuse_quiet_hours()
+        )
+        if refusal:
+            raise HTTPException(
+                status_code=423,
+                detail=f"withheld under covenant {covenant_engine.covenant.id}: {refusal}",
+            )
+        max_window = covenant_engine.max_window_seconds()
+        if max_window is not None:
+            info = audio_info(path)
+            actual_seconds = float(info.get("durationSeconds") or 0.0) if isinstance(info, dict) else 0.0
+            if actual_seconds <= 0 or actual_seconds > max_window + 1e-6:
+                raise HTTPException(
+                    status_code=423,
+                    detail=(
+                        f"withheld under covenant {covenant_engine.covenant.id}: "
+                        f"audio must be bounded to {max_window:g} seconds or less"
+                    ),
+                )
+        selected, pass_rules = covenant_engine.filter_passes(selected)
+        rules_applied.extend(pass_rules)
+        return covenant_engine, selected, rules_applied
 
     def resolve_moss_model(model_id: str) -> str | None:
         normalized = str(model_id or "").strip()
@@ -691,6 +750,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         secret_store=reasoning_secrets,
         conversations=conversations,
         memory=memory,
+        listening_identity_store=listening_identity_store,
         relistener=TargetedRelistener(
             engine,
             covenant_store,
@@ -985,21 +1045,33 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     ) -> dict[str, object]:
         preset = route_preset(preset_id)
         path = str(capture["path"])
+        covenant_engine, passes, covenant_rules_applied = prepare_covenant_perception(
+            path,
+            source_type="buffer",
+            passes=preset.moss_passes,
+        )
+        covenant_withheld: list[dict[str, object]] = []
         broadcaster.publish("listen_started", {"path": path, "route_preset": preset.id, "source": "live-capture"})
         with engine.request_policy(
             privacy_mode=privacy_mode,
-            covenant_engine=covenant_store.engine(),
-        ):
+            covenant_engine=covenant_engine,
+        ) as audio_policy:
             perception = report(
                 engine,
                 path,
                 "oida-live-capture",
-                passes=preset.moss_passes,
+                passes=passes,
                 chunk_seconds=config.moss_chunk_seconds,
                 overlap_seconds=_chunk_overlap(config),
             )
         perception_dict = report_to_dict(perception)
+        if covenant_engine is not None:
+            perception_dict, perception_withheld = covenant_engine.redact_perception(perception_dict)
+            covenant_withheld.extend(perception_withheld)
         command_output = build_harness_output(perception_dict, command=preset.akouo_command)
+        if covenant_engine is not None:
+            command_output, claim_withheld = covenant_engine.redact_command_output(command_output)
+            covenant_withheld.extend(claim_withheld)
         event = listening_event_dict(
             perception_dict,
             command_output=command_output,
@@ -1009,8 +1081,26 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             disabled_skill_ids=disabled_skill_ids,
             privacy_mode=_privacy_mode(privacy_mode),
             raw_audio_policy="temp",
+            listening_identity=audio_policy.listening_identity_block(passes),
         )
-        enrich_music_id(event, Path(path), preset_id=preset.id, requested=song_id)
+        song_identity_withheld = None
+        if song_id and preset.id == "music" and covenant_engine is not None and covenant_engine.forbids_song_identity():
+            song_identity_withheld = f"Song identity withheld under covenant {covenant_engine.covenant.id}."
+            covenant_withheld.append(
+                {"rule": "do_not_reveal", "subject": "song-identity", "count": 1}
+            )
+        enrich_music_id(
+            event,
+            Path(path),
+            preset_id=preset.id,
+            requested=song_id,
+            withheld_reason=song_identity_withheld,
+        )
+        if covenant_engine is not None:
+            event["covenant"] = covenant_engine.event_block(
+                rules_applied=covenant_rules_applied,
+                withheld=covenant_withheld,
+            )
         event = memory.enrich_event(event)
         # Session ownership is daemon state and must be attached before the
         # completion event reaches any UI. That keeps dashboard, floating
@@ -1094,6 +1184,11 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 summary=str(aggregate.get("short_summary") or aggregate.get("title") or "") or None,
                 capture=event.get("capture") if isinstance(event.get("capture"), dict) else None,
                 covenant=event.get("covenant") if isinstance(event.get("covenant"), dict) else None,
+                listening_identity=(
+                    event.get("listening_identity")
+                    if isinstance(event.get("listening_identity"), dict)
+                    else None
+                ),
             )
             akousma_id = persist_akousma(record)
             memory_block["akousma_id"] = akousma_id
@@ -1434,6 +1529,39 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         # configure or publish a machine-level remote-access service.
         return FileResponse(static_dir / "remote.html", headers={"Cache-Control": "no-cache"})
 
+    # ── the listening identity: data_dir()/LISTENING.md ──────────────────
+    # Empty by default. This is an operator-authored perspective for model
+    # attention and voice, not an evidence source or an enforceable covenant.
+
+    @app.get("/listening")
+    def listening_identity_status() -> dict[str, object]:
+        try:
+            return listening_identity_store.status()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.put("/listening")
+    def listening_identity_save(body: ListeningIdentitySaveRequest) -> dict[str, object]:
+        try:
+            listening_identity_store.save(
+                body.text,
+                expected_sha256=body.expected_sha256,
+            )
+        except ListeningIdentityConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status = listening_identity_store.status()
+        broadcaster.publish(
+            "listening_identity_changed",
+            {
+                "filename": status["filename"],
+                "active": status["active"],
+                "sha256": status["sha256"],
+            },
+        )
+        return status
+
     # ── the sovereignty layer: covenants (spec v1.3) ─────────────────────
     # Empty by default. Documents are plain local text under
     # data_dir()/covenants/; activating one turns the layer on for every
@@ -1550,11 +1678,25 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     @app.get("/gateway/capabilities")
     def gateway_capabilities_endpoint() -> dict[str, object]:
         manifest = gateway_manifest(version=__version__)
+        try:
+            identity_status = listening_identity_store.status()
+            listening_identity: dict[str, object] = {
+                key: value
+                for key, value in identity_status.items()
+                if key not in {"text", "path"}
+            }
+        except ValueError as exc:
+            listening_identity = {
+                "filename": "LISTENING.md",
+                "active": False,
+                "error": str(exc),
+            }
         return {
             "contract": GATEWAY_CONTRACT,
             "gateway": manifest,
             "engine": engine_status(),
             "akouo": akouo_manifest(),
+            "listening_identity": listening_identity,
             "memory": {"available": True, "trace_count": len(memory.list(limit=None))},
             "host_perception_schema": "/gateway/schema/host-perception",
         }
@@ -1796,8 +1938,19 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             trace = None
             should_remember = (req.remember or background.config.save_events_by_default) and not background.config.incognito
             if should_remember and event:
-                trace = memory.remember(event, tags=["background-capture"])
-                event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
+                retention_checker = covenant_store.engine()
+                memory_refusal = (
+                    retention_checker.forbids_retention("memory")
+                    if retention_checker is not None
+                    else None
+                )
+                if memory_refusal:
+                    event.setdefault("covenant", {}).setdefault("withheld", []).append(
+                        {"rule": "do_not_retain", "subject": "memory", "count": 1}
+                    )
+                else:
+                    trace = memory.remember(event, tags=["background-capture"])
+                    event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
             return {"action_id": action_id, **analyzed, "trace": trace, "background": background.status()}
         except (RuntimeError, ValueError) as exc:
             background.fail_action(str(exc))
@@ -1964,7 +2117,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             with engine.request_policy(
                 privacy_mode=privacy_mode,
                 covenant_engine=covenant_engine,
-            ):
+            ) as audio_policy:
                 perception = report(
                     engine,
                     str(path),
@@ -1990,6 +2143,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 disabled_skill_ids=req.disabled_skill_ids,
                 privacy_mode=privacy_mode,
                 raw_audio_policy=raw_audio_policy,
+                listening_identity=audio_policy.listening_identity_block(passes),
             )
             song_identity_withheld = None
             if req.song_id and preset.id == "music" and covenant_engine is not None and covenant_engine.forbids_song_identity():
@@ -2169,6 +2323,11 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                     location=event_location,
                     capture={"direction": direction, "seconds": seconds, "trigger": "remote-ear", "armed_at": armed_at},
                     covenant=event_covenant,
+                    listening_identity=(
+                        event.get("listening_identity")
+                        if isinstance(event.get("listening_identity"), dict)
+                        else None
+                    ),
                 )
                 akousma_id = persist_akousma(record, store=store)
                 remote_info["akousma_id"] = akousma_id
@@ -2203,6 +2362,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 enabled_skill_ids=req.enabled_skill_ids,
                 disabled_skill_ids=req.disabled_skill_ids,
                 covenant_engine=covenant_store.engine(),
+                listening_identity_snapshot=current_listening_identity_snapshot(),
             )
             background.finish_action(result["listening_event"])
             broadcaster.publish(
@@ -2232,25 +2392,38 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 privacy_mode=req.privacy_mode,
                 raw_audio_policy=req.raw_audio_policy,
             )
+            source = source_event.get("source") if isinstance(source_event.get("source"), dict) else {}
+            covenant_engine, passes, covenant_rules_applied = prepare_covenant_perception(
+                path,
+                source_type=str(source.get("type") or "file"),
+                passes=preset.moss_passes,
+            )
+            covenant_withheld: list[dict[str, object]] = []
             with engine.request_policy(
                 privacy_mode=privacy_mode,
-                covenant_engine=covenant_store.engine(),
+                covenant_engine=covenant_engine,
                 covenant_block=(
                     source_event.get("covenant")
                     if isinstance(source_event.get("covenant"), dict)
                     else None
                 ),
-            ):
+            ) as audio_policy:
                 perception = report(
                     engine,
                     str(path),
                     f"oida-route-rerun-{preset.id}",
-                    passes=preset.moss_passes,
+                    passes=passes,
                     chunk_seconds=config.moss_chunk_seconds,
                     overlap_seconds=_chunk_overlap(config),
                 )
             perception_dict = report_to_dict(perception)
+            if covenant_engine is not None:
+                perception_dict, perception_withheld = covenant_engine.redact_perception(perception_dict)
+                covenant_withheld.extend(perception_withheld)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
+            if covenant_engine is not None:
+                command_output, claim_withheld = covenant_engine.redact_command_output(command_output)
+                covenant_withheld.extend(claim_withheld)
             event = listening_event_dict(
                 perception_dict,
                 command_output=command_output,
@@ -2260,10 +2433,25 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 disabled_skill_ids=req.disabled_skill_ids,
                 privacy_mode=privacy_mode,
                 raw_audio_policy=raw_audio_policy,
+                listening_identity=audio_policy.listening_identity_block(passes),
             )
+            if covenant_engine is not None:
+                event["covenant"] = covenant_engine.event_block(
+                    rules_applied=covenant_rules_applied,
+                    withheld=covenant_withheld,
+                )
             event = memory.enrich_event(event)
             trace = None
-            if req.remember and privacy_mode != "incognito":
+            memory_refusal = (
+                covenant_engine.forbids_retention("memory")
+                if covenant_engine is not None
+                else None
+            )
+            if req.remember and memory_refusal:
+                event.setdefault("covenant", {}).setdefault("withheld", []).append(
+                    {"rule": "do_not_retain", "subject": "memory", "count": 1}
+                )
+            elif req.remember and privacy_mode != "incognito":
                 trace = memory.remember(event, tags=["route-rerun", f"route-{preset.id}"])
                 event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
             route_comparison = compare_route_events(
@@ -2349,7 +2537,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             with engine.request_policy(
                 privacy_mode=_privacy_mode(req.privacy_mode),
                 covenant_engine=covenant_engine,
-            ):
+            ) as audio_policy:
                 perception = report(
                     engine,
                     str(path),
@@ -2375,6 +2563,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 disabled_skill_ids=req.disabled_skill_ids,
                 privacy_mode=_privacy_mode(req.privacy_mode),
                 raw_audio_policy="temp",
+                listening_identity=audio_policy.listening_identity_block(passes),
             )
             song_identity_withheld = None
             if req.song_id and preset.id == "music" and covenant_engine is not None and covenant_engine.forbids_song_identity():
@@ -2509,7 +2698,11 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     @app.post("/akouo/listen")
     def akouo_listen_endpoint(req: AkouoHarnessRequest) -> dict[str, object]:
         try:
-            perception = report(engine, req.path, "akouo")
+            with engine.request_policy(
+                privacy_mode="ephemeral",
+                covenant_engine=covenant_store.engine(),
+            ) as audio_policy:
+                perception = report(engine, req.path, "akouo")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         perception_dict = report_to_dict(perception)
@@ -2528,6 +2721,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "perception_report": perception_dict,
             "command_output": command_output,
             "selected_output": (command_output.get("outputs") or [None])[0],
+            "listening_identity": audio_policy.listening_identity_block(ALL_MOSS_PASSES),
         }
 
     @app.get("/metrics/process")
@@ -2945,26 +3139,38 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             preset = route_preset(req.route_preset)
             output_path = _require_existing_path(req.path)
             privacy_mode = _privacy_mode(req.privacy_mode)
+            covenant_engine, passes, covenant_rules_applied = prepare_covenant_perception(
+                output_path,
+                source_type="generated",
+                passes=preset.moss_passes,
+            )
+            covenant_withheld: list[dict[str, object]] = []
             with engine.request_policy(
                 privacy_mode=privacy_mode,
-                covenant_engine=covenant_store.engine(),
+                covenant_engine=covenant_engine,
                 covenant_block=(
                     generation.get("source_event", {}).get("covenant")
                     if isinstance(generation.get("source_event"), dict)
                     and isinstance(generation.get("source_event", {}).get("covenant"), dict)
                     else None
                 ),
-            ):
+            ) as audio_policy:
                 perception = report(
                     engine,
                     str(output_path),
                     f"oida-generation-relisten-{preset.id}",
-                    passes=preset.moss_passes,
+                    passes=passes,
                     chunk_seconds=config.moss_chunk_seconds,
                     overlap_seconds=_chunk_overlap(config),
                 )
             perception_dict = report_to_dict(perception)
+            if covenant_engine is not None:
+                perception_dict, perception_withheld = covenant_engine.redact_perception(perception_dict)
+                covenant_withheld.extend(perception_withheld)
             command_output = build_harness_output(perception_dict, command=preset.akouo_command)
+            if covenant_engine is not None:
+                command_output, claim_withheld = covenant_engine.redact_command_output(command_output)
+                covenant_withheld.extend(claim_withheld)
             event = listening_event_dict(
                 perception_dict,
                 command_output=command_output,
@@ -2973,10 +3179,25 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 disabled_skill_ids=req.disabled_skill_ids,
                 privacy_mode=privacy_mode,
                 raw_audio_policy="external_ref",
+                listening_identity=audio_policy.listening_identity_block(passes),
             )
+            if covenant_engine is not None:
+                event["covenant"] = covenant_engine.event_block(
+                    rules_applied=covenant_rules_applied,
+                    withheld=covenant_withheld,
+                )
             event = memory.enrich_event(event)
             trace = None
-            if req.remember and privacy_mode != "incognito":
+            memory_refusal = (
+                covenant_engine.forbids_retention("memory")
+                if covenant_engine is not None
+                else None
+            )
+            if req.remember and memory_refusal:
+                event.setdefault("covenant", {}).setdefault("withheld", []).append(
+                    {"rule": "do_not_retain", "subject": "memory", "count": 1}
+                )
+            elif req.remember and privacy_mode != "incognito":
                 trace = memory.remember(event, tags=["generation", f"source-{generation.get('source_event_id')}"])
                 event.setdefault("memory", {})["saved_trace_id"] = trace["id"]
             route_comparison = compare_route_events(
@@ -3035,16 +3256,22 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     @app.post("/report")
     def report_endpoint(req: ReportRequest) -> dict[str, object]:
         try:
-            result = report(
-                engine,
-                req.path,
-                req.profile,
-                chunk_seconds=config.moss_chunk_seconds,
-                overlap_seconds=_chunk_overlap(config),
-            )
+            with engine.request_policy(
+                privacy_mode="ephemeral",
+                covenant_engine=covenant_store.engine(),
+            ) as audio_policy:
+                result = report(
+                    engine,
+                    req.path,
+                    req.profile,
+                    chunk_seconds=config.moss_chunk_seconds,
+                    overlap_seconds=_chunk_overlap(config),
+                )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return report_to_dict(result)
+        payload = report_to_dict(result)
+        payload["listening_identity"] = audio_policy.listening_identity_block(ALL_MOSS_PASSES)
+        return payload
 
     @app.get("/memory")
     def memory_list_endpoint(

@@ -23,6 +23,7 @@ from oida.contracts import (
     now_iso,
     to_dict,
 )
+from oida.listening_identity import ListeningIdentitySnapshot
 
 _SEGMENT_PREFIX_RE = re.compile(r"^Segment \d+ \[[0-9.]+-[0-9.]+s\]:\s*")
 
@@ -37,6 +38,7 @@ def listening_event_from_report(
     disabled_skill_ids: list[str] | None = None,
     privacy_mode: PrivacyMode = "session",
     raw_audio_policy: RawAudioPolicy = "external_ref",
+    listening_identity: dict[str, Any] | None = None,
 ) -> ListeningEvent:
     preset = route_preset(route_preset_id)
     selected_skill_ids = resolve_route_skill_ids(
@@ -83,6 +85,9 @@ def listening_event_from_report(
         routes=routes,
         aggregate=aggregate,
         features=features,
+        listening_identity=dict(
+            listening_identity or ListeningIdentitySnapshot.empty().event_block()
+        ),
         memory=AkousmataLinks(),
         artifacts=artifacts,
         tags=tags,

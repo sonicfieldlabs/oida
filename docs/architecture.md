@@ -57,9 +57,11 @@ apparatus, evidence level, and blind spots.
 
 ### Host-owned perception
 
-`POST /gateway/harness` accepts a declared observation from an
-audio-capable host. Host observations remain model evidence; they are never
-relabeled as measured DSP. Both paths produce the same listening-event shape.
+`POST /gateway/harness` accepts an `oida/host-perception/v0.2` observation from
+an audio-capable host. Host observations remain model evidence; they are never
+relabeled as measured DSP. A host preflights the Covenant before direct
+perception and may declare the `LISTENING.md` revision that oriented its
+hearing. Both paths produce the same listening-event shape.
 
 ## Evidence and reasoning
 
@@ -68,6 +70,15 @@ whitelist-built, covenant-filtered packet containing stable evidence
 references. It can use deterministic local reasoning, a configured local
 endpoint, an enabled host, or an enabled provider. A provider failure never
 silently reroutes the packet to another service.
+
+Model-backed interpretive listening and grounded conversation may also carry
+the operator's bounded [`LISTENING.md`](listening-identity.md) perspective.
+That document orients attention and voice; it is not part of the evidence
+packet and cannot alter evidence, privacy, route, or Covenant policy.
+The event stores only a content-free `oida/listening-identity/v0.1` reference:
+revision hash, application state, and affected model roles. Private Earworm
+context, shared akousma extensions, and conversation audits preserve that
+reference without copying the identity text.
 
 A reasoner may request one disclosed targeted re-listen when local audio is
 available and policy permits it. That observation is appended as derived
@@ -82,6 +93,7 @@ evidence; it does not modify the original event.
 | Provider settings | OÍDA settings without secret values | OÍDA |
 | Provider secrets | system keyring/Keychain or read-only environment | operator |
 | Akousma records and objects | configured `AKOUSMATA_PATH` | Earworm store / Akousmata |
+| Global listening identity (`LISTENING.md`) | OÍDA data directory | operator |
 | Covenant documents | OÍDA data directory | operator |
 
 Incognito listening disables durable conversation and memory writes and keeps

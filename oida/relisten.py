@@ -6,6 +6,7 @@ import json
 import math
 import re
 import threading
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -15,6 +16,7 @@ from oida.contracts import new_id, now_iso
 from oida.covenant import CovenantStore
 from oida.dsp import audio_info
 from oida.engine_base import EngineUnavailable, MossEngine
+from oida.listening_identity import ListeningIdentitySnapshot
 from oida.recipes import TARGETED_RELISTEN_REASONING
 from oida.reporting import forbidden_topics_for_text
 
@@ -51,6 +53,7 @@ class TargetedRelistener:
         time_range: dict[str, float] | None = None,
         allow_speech_content: bool = False,
         parent_question: str | None = None,
+        listening_identity_snapshot: ListeningIdentitySnapshot | None = None,
     ) -> dict[str, Any]:
         normalized_question = " ".join(str(question or "").split())
         normalized_parent = " ".join(str(parent_question or "").split())
@@ -130,41 +133,57 @@ class TargetedRelistener:
             + f"{range_instruction}\n\n"
             + f"Question: {normalized_question}"
         )
-        # A selected checkpoint is a temporary override on a shared engine.
-        # Keep selection, inference, and restoration atomic across concurrent
-        # conversation turns, including turns that use the configured default.
-        with self._model_lock:
-            previous_model: str | None = None
-            switched_model = False
-            if model_id and self.model_resolver is not None:
-                resolved = self.model_resolver(model_id)
-                if resolved is None:
-                    raise RelistenUnavailable(f"unknown local targeted re-listen model: {model_id}")
-                assignments = self.engine.runtime_status().get("assignments")
-                supports_selection = isinstance(assignments, dict) and bool(assignments)
-                if supports_selection and assignments.get("targeted_relisten"):
-                    previous_model = str(assignments["targeted_relisten"])
-                if supports_selection:
-                    try:
-                        self.engine.set_model("targeted_relisten", resolved)
-                        switched_model = True
-                    except ValueError as exc:
-                        raise RelistenUnavailable(str(exc)) from exc
-                elif model_id not in {"thinking", "instruct"}:
-                    raise RelistenUnavailable(
-                        f"the {self.engine.profile} engine does not support selecting checkpoint {model_id!r}"
-                    )
-            try:
-                result = self.engine.generate(str(audio_path), prompt, TARGETED_RELISTEN_REASONING)
-            except EngineUnavailable as exc:
-                raise RelistenUnavailable(str(exc)) from exc
-            finally:
-                if switched_model and previous_model and self.model_resolver is not None:
-                    restore = self.model_resolver(previous_model) or previous_model
-                    try:
-                        self.engine.set_model("targeted_relisten", restore)
-                    except ValueError:
-                        pass
+        policy_factory = getattr(self.engine, "request_policy", None)
+        policy_context = (
+            policy_factory(
+                privacy_mode=str(event.get("privacy_mode") or "session"),
+                covenant_engine=active_engine,
+                covenant_block=(
+                    event.get("covenant")
+                    if isinstance(event.get("covenant"), dict)
+                    else None
+                ),
+                listening_identity_snapshot=listening_identity_snapshot,
+            )
+            if callable(policy_factory)
+            else nullcontext(None)
+        )
+        with policy_context as audio_policy:
+            # A selected checkpoint is a temporary override on a shared engine.
+            # Keep selection, inference, and restoration atomic across concurrent
+            # conversation turns, including turns that use the configured default.
+            with self._model_lock:
+                previous_model: str | None = None
+                switched_model = False
+                if model_id and self.model_resolver is not None:
+                    resolved = self.model_resolver(model_id)
+                    if resolved is None:
+                        raise RelistenUnavailable(f"unknown local targeted re-listen model: {model_id}")
+                    assignments = self.engine.runtime_status().get("assignments")
+                    supports_selection = isinstance(assignments, dict) and bool(assignments)
+                    if supports_selection and assignments.get("targeted_relisten"):
+                        previous_model = str(assignments["targeted_relisten"])
+                    if supports_selection:
+                        try:
+                            self.engine.set_model("targeted_relisten", resolved)
+                            switched_model = True
+                        except ValueError as exc:
+                            raise RelistenUnavailable(str(exc)) from exc
+                    elif model_id not in {"thinking", "instruct"}:
+                        raise RelistenUnavailable(
+                            f"the {self.engine.profile} engine does not support selecting checkpoint {model_id!r}"
+                        )
+                try:
+                    result = self.engine.generate(str(audio_path), prompt, TARGETED_RELISTEN_REASONING)
+                except EngineUnavailable as exc:
+                    raise RelistenUnavailable(str(exc)) from exc
+                finally:
+                    if switched_model and previous_model and self.model_resolver is not None:
+                        restore = self.model_resolver(previous_model) or previous_model
+                        try:
+                            self.engine.set_model("targeted_relisten", restore)
+                        except ValueError:
+                            pass
         if result.unavailable_reason:
             raise RelistenUnavailable(result.unavailable_reason)
         observation = str(result.text or "").strip()
@@ -198,6 +217,19 @@ class TargetedRelistener:
             ],
             "created_at": now_iso(),
         }
+        if audio_policy is not None and hasattr(audio_policy, "listening_identity_block"):
+            sidecar["listening_identity"] = audio_policy.listening_identity_block(
+                ["targeted_relisten"]
+            )
+        elif listening_identity_snapshot is not None:
+            sidecar["listening_identity"] = listening_identity_snapshot.event_block(
+                application=(
+                    "available_not_applied"
+                    if listening_identity_snapshot.active
+                    else "inactive"
+                ),
+                applied_to=[],
+            )
         sidecar["sha256"] = hashlib.sha256(
             json.dumps(sidecar, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         ).hexdigest()

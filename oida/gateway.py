@@ -27,10 +27,16 @@ from oida.contracts import (
 )
 from oida import __version__
 from oida.listening import listening_event_dict
+from oida.listening_identity import (
+    LISTENING_IDENTITY_CONTRACT,
+    LISTENING_IDENTITY_FILENAME,
+    LISTENING_IDENTITY_ROLE,
+    ListeningIdentitySnapshot,
+)
 from oida.memory import earworm_context_for_event
 
-GATEWAY_CONTRACT = "oida/gateway/v0.2"
-HOST_PERCEPTION_CONTRACT = "oida/host-perception/v0.1"
+GATEWAY_CONTRACT = "oida/gateway/v0.3"
+HOST_PERCEPTION_CONTRACT = "oida/host-perception/v0.2"
 SUPPORTED_HOSTS = ("hermes", "codex", "claude", "openclaw", "opencode", "generic")
 CLAIM_CATEGORIES = ("heard", "measured", "inferred", "interpreted", "speculative", "undetermined")
 
@@ -65,12 +71,21 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
                 "supported_hosts": list(SUPPORTED_HOSTS),
             },
         },
+        "listening_identity": {
+            "contract": LISTENING_IDENTITY_CONTRACT,
+            "filename": LISTENING_IDENTITY_FILENAME,
+            "role": LISTENING_IDENTITY_ROLE,
+            "empty_by_default": True,
+            "event_content_included": False,
+            "host_declaration_contract": HOST_PERCEPTION_CONTRACT,
+        },
         "transports": {
             "rest": "/gateway/*",
             "mcp_stdio": "oida gateway --stdio --ensure-daemon",
             "dashboard": "/",
             "library": "/library/",
             "remote_ear": "/remote",
+            "listening_identity": "/listening",
             "covenant": "/covenant",
         },
         "privacy": {
@@ -143,6 +158,7 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
             "provider": host.get("provider"),
             "audio_input_capable": bool(host.get("audio_input_capable", True)),
         },
+        "listening_identity": _dict(payload.get("listening_identity")) or None,
         "apparatus": apparatus,
         "host_observations": observations,
         "dsp": dsp,
@@ -171,6 +187,7 @@ def harness_host_perception(
     enabled_skill_ids: list[str] | None = None,
     disabled_skill_ids: list[str] | None = None,
     covenant_engine: Any | None = None,
+    listening_identity_snapshot: ListeningIdentitySnapshot | None = None,
 ) -> dict[str, Any]:
     """Run host perception through the complete listening harness."""
     preset = route_preset(route_preset_id)
@@ -194,6 +211,8 @@ def harness_host_perception(
         command_output, command_withheld = covenant_engine.redact_command_output(command_output)
         withheld.extend(command_withheld)
     segment = _host_segment(perception, privacy_mode=privacy_mode, raw_audio_policy=raw_audio_policy)
+    identity_snapshot = listening_identity_snapshot or ListeningIdentitySnapshot.empty()
+    identity_block = identity_snapshot.host_event_block(payload.get("listening_identity"))
     event = listening_event_dict(
         perception,
         command_output=command_output,
@@ -203,7 +222,12 @@ def harness_host_perception(
         disabled_skill_ids=disabled_skill_ids,
         privacy_mode=privacy_mode,
         raw_audio_policy=raw_audio_policy,
+        listening_identity=identity_block,
     )
+    if identity_block.get("application") == "revision_mismatch":
+        event.setdefault("aggregate", {}).setdefault("warnings", []).append(
+            "The host declared a different LISTENING.md revision; identity application is not attributed."
+        )
     if covenant_engine is not None:
         event["covenant"] = covenant_engine.event_block(
             rules_applied=rules_applied,

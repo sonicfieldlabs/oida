@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0 - 2026-07-17
+
+- **Explicit listening identity**: Oída now creates an empty, local
+  `LISTENING.md` in its data directory and exposes it in the shared desktop
+  dashboard under Settings → Listening. Its bounded perspective is carried by
+  interpretive perception and every model-backed grounded conversation while
+  remaining subordinate to evidence, privacy, routes, and Covenants. DSP and
+  exact transcription remain literal. The freeform document has an optional
+  conceptual scaffold for position, conditions, intentions, attention,
+  relations, open questions, voice, and possibilities.
+- **Identity provenance across the stack**: normalized events, private
+  Earworm context, shared akousma extensions, and conversation audits now
+  preserve a content-free `oida/listening-identity/v0.1` revision block. The
+  `oida/host-perception/v0.2` contract lets a hosted ear declare the revision
+  it applied; missing and changed revisions remain visible without becoming
+  evidence. Host integrations preflight the active Covenant before direct
+  perception, so perspective cannot be mistaken for permission.
+- **Release contract and editing safety**: the gateway advances to
+  `oida/gateway/v0.3`, advertises the listening-identity contract explicitly,
+  and exposes 14 structured MCP tools. Dashboard edits use revision-aware
+  atomic saves, preserving a newer external or agent edit instead of silently
+  overwriting it. Capability discovery reports only identity metadata; reading
+  the text is an explicit action. The release is covered by 316 tests plus
+  package, macOS, dependency, schema, and JavaScript release gates.
+- **Covenant coverage closed around secondary hearings**: live/background
+  analysis, route reruns, and generation re-listening now apply the active
+  Covenant's input, content, output, and memory-retention gates before their
+  identity-shaped event is emitted. A new perspective can never become a path
+  around an existing refusal.
+
 ## 0.6.5 - 2026-07-16
 
 - **Stricter API contracts**: JSON request bodies now reject coercions such as

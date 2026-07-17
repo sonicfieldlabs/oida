@@ -119,6 +119,7 @@ class ListeningEvent:
     routes: list[ListeningRouteResult]
     aggregate: ListeningAggregate
     features: dict[str, Any]
+    listening_identity: dict[str, Any] = field(default_factory=dict)
     memory: AkousmataLinks = field(default_factory=AkousmataLinks)
     artifacts: list[ListeningArtifact] = field(default_factory=list)
     user_notes: str | None = None

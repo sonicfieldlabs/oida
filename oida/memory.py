@@ -349,6 +349,11 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
                 "features": features,
                 "claim_summary": _claim_summary_from_event(event),
                 "routes": event.get("routes") if isinstance(event.get("routes"), list) else [],
+                "listening_identity": (
+                    event.get("listening_identity")
+                    if isinstance(event.get("listening_identity"), dict)
+                    else None
+                ),
             },
             reversible=False,
             provenance_id=provenance_id,
@@ -622,6 +627,13 @@ def _trace_preview(trace: dict[str, Any]) -> dict[str, Any]:
         # Internal preview only: the evidence packet applies its own strict
         # covenant whitelist before anything can reach a reasoner.
         preview["covenant"] = copy.deepcopy(covenant)
+    listening_identity = (
+        event.get("listening_identity")
+        if isinstance(event.get("listening_identity"), dict)
+        else None
+    )
+    if listening_identity is not None:
+        preview["listening_identity"] = copy.deepcopy(listening_identity)
     return preview
 
 

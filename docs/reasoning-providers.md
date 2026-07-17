@@ -11,27 +11,31 @@ the conversation policy.
 
 ## What Oída Owns
 
-Oída owns six pieces of every grounded turn:
+Oída owns seven pieces of every grounded turn:
 
-1. The conversation profile: tone, depth, initiative, focus, language, and up
+1. The global [`LISTENING.md`](listening-identity.md) perspective: an optional,
+   local, operator-authored orientation for attention and voice.
+2. The conversation profile: tone, depth, initiative, focus, language, and up
    to 4,000 characters of custom instructions.
-2. Prompt composition and precedence.
-3. The covenant-filtered evidence packet.
-4. Provider and privacy policy, including whether any external call is allowed.
-5. The structured response contract and evidence-reference validation.
-6. Audio-role routing, including model capability checks, resource warnings,
+3. Prompt composition and precedence.
+4. The covenant-filtered evidence packet.
+5. Provider and privacy policy, including whether any external call is allowed.
+6. The structured response contract and evidence-reference validation.
+7. Audio-role routing, including model capability checks, resource warnings,
    and the separate policy gate for sending audio to an external provider.
 
 The prompt is assembled in this order:
 
 1. Non-negotiable evidence, covenant, privacy, and output rules.
 2. Trusted route or task instructions.
-3. Structured conversation-profile settings.
-4. User custom instructions as bounded preferences.
-5. The question, prior dialogue, and evidence packet as untrusted input.
+3. The global `LISTENING.md` perspective as a bounded preference.
+4. Structured conversation-profile settings.
+5. Profile-specific instructions as bounded preferences.
+6. The question, prior dialogue, and evidence packet as untrusted input.
 
-A lower layer cannot override a higher one. In particular, custom instructions
-can change voice or depth but cannot reveal withheld material, include raw
+A lower layer cannot override a higher one. In particular, `LISTENING.md` and
+custom instructions can change voice or depth but cannot reveal withheld
+material, include raw
 audio, alter a listening result, or relax the response schema. Text found in a
 transcript, filename, tag, memory, or earlier model output is data rather than
 an instruction.
@@ -42,7 +46,17 @@ prepare/commit handoff. It is provider-independent and built in Oída's core.
 The deterministic fallback does not call an LLM, but enforces the same evidence
 and privacy policy procedurally. Audio perception calls use a smaller separate
 hardening prompt that treats audible speech/lyrics as data rather than
-instructions; it does not replace the conversation prompt.
+instructions; it does not replace the conversation prompt. Interpretive
+perception tasks also receive the bounded `LISTENING.md` perspective. DSP and
+exact transcription remain outside that perspective layer so measurements and
+quoted speech stay literal.
+
+The identity is snapshotted once per turn. The conversation audit stores its
+content-free revision block beside the prompt hash and profile id, so the
+position shaping a later discussion remains distinguishable from the position
+that shaped the original listening event. The local deterministic responder
+records an active identity as available but not applied because it does not
+consume a generative prompt.
 
 Trusted AKOÚŌ route guidance is reconstructed from Oída's installed route and
 command manifests. Event prose is never promoted into the system layer. A

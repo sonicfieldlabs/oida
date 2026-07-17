@@ -13,11 +13,18 @@ Requires the ``akousma`` package (earworm/packages/py-akousma).
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any, Literal
 from urllib.parse import urlencode
 
 import akousma
+
+from oida.listening_identity import (
+    LISTENING_IDENTITY_CONTRACT,
+    LISTENING_IDENTITY_FILENAME,
+    LISTENING_IDENTITY_ROLE,
+)
 
 MODES = ("sound", "prompt", "lineage")
 
@@ -152,6 +159,33 @@ def _checked_covenant(value: dict[str, Any] | None) -> dict[str, Any] | None:
     )
 
 
+def _checked_listening_identity(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Keep only content-free identity provenance in a shared akousma."""
+
+    if not isinstance(value, dict):
+        return None
+    digest = str(value.get("sha256") or "").lower()
+    declared = str(value.get("declared_sha256") or "").lower()
+    block: dict[str, Any] = {
+        "contract": LISTENING_IDENTITY_CONTRACT,
+        "filename": LISTENING_IDENTITY_FILENAME,
+        "active": value.get("active") is True,
+        "sha256": digest if re.fullmatch(r"[0-9a-f]{64}", digest) else None,
+        "truncated": value.get("truncated") is True,
+        "application": str(value.get("application") or "unknown")[:80],
+        "applied_to": [
+            str(item)[:120]
+            for item in value.get("applied_to", [])[:32]
+            if isinstance(item, str) and item
+        ] if isinstance(value.get("applied_to"), list) else [],
+        "content_included": False,
+        "role": LISTENING_IDENTITY_ROLE,
+    }
+    if re.fullmatch(r"[0-9a-f]{64}", declared):
+        block["declared_sha256"] = declared
+    return block
+
+
 def build_akousma_from_listen(
     *,
     audio: dict[str, Any],
@@ -164,6 +198,7 @@ def build_akousma_from_listen(
     location: dict[str, Any] | None = None,
     capture: dict[str, Any] | None = None,
     covenant: dict[str, Any] | None = None,
+    listening_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a valid akousma record from an oída listen result.
 
@@ -175,6 +210,8 @@ def build_akousma_from_listen(
     """
     origin = _normalize_origin(origin)
     enveloped = _envelope_listening(listening or {})
+    identity_extension = _checked_listening_identity(listening_identity)
+    extensions = {"oida.listening_identity": identity_extension} if identity_extension else None
     record = akousma.new_akousma(
         audio=audio,
         originating_app="oida",
@@ -188,6 +225,7 @@ def build_akousma_from_listen(
         location=_checked_location(location),
         capture=_checked_capture(capture),
         covenant=_checked_covenant(covenant),
+        extensions=extensions,
     )
     if device:
         record["provenance"]["device"] = device
@@ -291,6 +329,7 @@ def build_germ_router():
         location: dict[str, Any] | None = None
         capture: dict[str, Any] | None = None
         covenant: dict[str, Any] | None = None
+        listening_identity: dict[str, Any] | None = None
 
     router = APIRouter(prefix="/germ", tags=["germ"])
 
@@ -308,6 +347,7 @@ def build_germ_router():
                 location=req.location,
                 capture=req.capture,
                 covenant=req.covenant,
+                listening_identity=req.listening_identity,
             )
             _maybe_enrich_songid(record, req.audio)
             return handoff_to_germ(record, req.mode)
