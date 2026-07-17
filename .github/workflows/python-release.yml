@@ -81,11 +81,24 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publish verified stack to PyPI
+    name: Publish ${{ matrix.project }} to PyPI
     needs: build
     if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: akouo-contract
+            directory: akouo
+            environment: pypi
+          - project: akousma
+            directory: akousma
+            environment: pypi-akousma
+          - project: akousmata
+            directory: akousmata
+            environment: pypi-akousmata
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: ${{ matrix.environment }}
     permissions:
       contents: read
       id-token: write
@@ -96,25 +109,31 @@ jobs:
           name: python-distributions
           path: release
 
-      - name: Publish AKOÚŌ contract
+      - name: Publish ${{ matrix.project }}
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:
-          packages-dir: release/akouo
+          packages-dir: release/${{ matrix.directory }}
           skip-existing: true
 
-      - name: Publish Akousma
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+  publish-oida:
+    name: Publish sonicfield-oida to PyPI
+    needs:
+      - build
+      - publish
+    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' && vars.PYPI_OIDA_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: pypi-sonicfield-oida
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          packages-dir: release/akousma
-          skip-existing: true
+          name: python-distributions
+          path: release
 
-      - name: Publish Akousmata
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
-        with:
-          packages-dir: release/akousmata
-          skip-existing: true
-
-      - name: Publish Oída
+      - name: Publish sonicfield-oida
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:
           packages-dir: release/oida
