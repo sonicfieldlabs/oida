@@ -5,7 +5,7 @@ Installing Oída installs and exposes the complete stack: AKOÚŌ routing and
 claim discipline, Earworm event/provenance envelopes, and the Akousmata store
 and navigator.
 
-The stable gateway contract is `oida/gateway/v0.3`. It supports two paths:
+The stable gateway contract is `oida/gateway/v0.4`. It supports two paths:
 
 1. **Oída-owned perception** — pass Oída a local audio path. Its configured
    engine (MOSS-Audio when available, DSP-only stub otherwise) performs the
@@ -13,7 +13,7 @@ The stable gateway contract is `oida/gateway/v0.3`. It supports two paths:
    normalized listening event, and an optional memory trace.
 2. **Host-supplied perception** — an audio-capable Hermes, Codex, Claude, or
    generic host describes what its active model heard using
-   `oida/host-perception/v0.2`. Oída does not run MOSS again. It applies the
+   `oida/host-perception/v0.3`. Oída does not run MOSS again. It applies the
    same router, evidence permissions, claim taxonomy, Earworm provenance, and
    Akousmata memory flow.
 
@@ -23,6 +23,18 @@ claims can be supported. An undeclared apparatus is accepted but explicitly
 marked undetermined. Model output can never become a `measured` claim merely
 because the model used a number; measurements need DSP, metadata, a measuring
 tool, or a declared human measurement.
+
+Both paths emit `oida/listening-event/v0.2` with an
+`akouo/listening-context/v1` block. The context answers different questions
+than the apparatus: position says where the listener stands in relation to the
+object; apertures say which evidence openings were actually available;
+auditory scales say at what temporal or infrastructural resolution it listened;
+participants keep plural hearing attributable; honest absences say what was
+unavailable, withheld, refused, or not retained; action authority says what the
+runtime may do. A capable host may declare `execute_scoped`, but that declaration
+is only attributed input—the OÍDA hearing boundary remains `observe_only` until
+a separate explicit action, such as Remember, grants a narrow scope and yields
+a receipt.
 
 Before direct host perception, the host inspects the active Covenant and reads
 the bounded `LISTENING.md`. The Covenant governs what the host may listen to,
@@ -52,7 +64,7 @@ deployment must provide its own authenticated HTTPS boundary.
 
 ```json
 {
-  "contract": "oida/host-perception/v0.2",
+  "contract": "oida/host-perception/v0.3",
   "host": {
     "id": "codex",
     "model": "audio-capable-model",
@@ -77,6 +89,34 @@ deployment must provide its own authenticated HTTPS boundary.
     "bandwidth_limit_hz": 24000,
     "known_blind_spots": ["The host does not expose its resampling path."]
   },
+  "listening_context": {
+    "contract": "akouo/listening-context/v1",
+    "position": {
+      "relation_to_object": "host model inspecting an attached recording",
+      "limitations": ["The gateway does not receive the raw audio."]
+    },
+    "apertures": [{
+      "id": "host-audio",
+      "kind": "direct_audio",
+      "status": "available",
+      "limits": ["Host preprocessing is opaque."]
+    }],
+    "auditory_scales": ["event", "scene"],
+    "sources_of_listening": ["audio", "model"],
+    "participants": [{
+      "id": "codex",
+      "type": "agent",
+      "role": "host perceptual listener",
+      "report_ref": "#/observations"
+    }],
+    "action_authority": {
+      "mode": "observe_only",
+      "scopes": ["describe"],
+      "requires_confirmation": true,
+      "reversible": true
+    },
+    "honest_absences": []
+  },
   "observations": [
     {
       "statement": "A repeating metallic impact is audible.",
@@ -90,6 +130,10 @@ deployment must provide its own authenticated HTTPS boundary.
 }
 ```
 
-See `oida/schemas/host-perception.schema.json` for the complete input schema.
+See `oida/schemas/host-perception.schema.json` for the complete input schema
+and `oida/schemas/listening-event.schema.json` for the output boundary. A
+running gateway publishes those schemas plus AKOÚŌ's canonical context schema
+under `/gateway/schema/*`; OÍDA references the AKOÚŌ schema instead of forking
+its semantic owner.
 The digest in this example is illustrative; use the exact value returned by
 `GET /listening` or `oida_listening_identity(action="read")`.

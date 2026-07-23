@@ -1,6 +1,6 @@
 # Oída Roadmap
 
-Oída 0.7.0 is a public alpha and open research release. This roadmap describes
+Oída 0.8.0 is a public alpha and open research release. This roadmap describes
 the questions being worked on; it is not a promise of dates or production
 stability.
 
@@ -9,11 +9,12 @@ stability.
 - Model-free deterministic listening through the dashboard, CLI, REST, and
   MCP surfaces.
 - Optional local MOSS-Audio and declared host-perception paths.
-- AKOÚŌ claim categories, route presets, apparatus, and listening covenants.
+- AKOÚŌ claim categories, route presets, apparatus, listening context, and
+  listening covenants.
 - Empty-by-default `LISTENING.md` identities with content-free revision
   provenance across local, hosted, conversational, and remembered hearing.
-- Explicit memory, Akousmata navigation, and sound, prompt, or lineage handoff
-  to GERM.
+- Explicit accountable memory, Akousmata structural audit and navigation, and
+  sound, prompt, or lineage handoff to GERM.
 - Event-grounded discussion that cannot rewrite the source listening event.
 - A shared web dashboard and native macOS shell.
 
@@ -25,12 +26,12 @@ stability.
   operator-managed CUDA paths.
 - Improve keyboard, screen-reader, reduced-motion, and low-vision coverage
   across the dashboard and floating listener.
-- Strengthen round-trip lineage tests across Oída, GERM, Earworm, and
-  Akousmata.
+- Strengthen round-trip auditum, revision, and disagreement tests across Oída,
+  GERM, Earworm, and Akousmata.
 - Improve long-recording segmentation while preserving uncertainty at chunk
   boundaries.
-- Make model, apparatus, and provider attribution easier to export with a
-  listening record.
+- Expand human/agent ear-swarm fixtures without collapsing distinct listeners
+  into synthetic consensus.
 
 ## Toward a Stable Contract
 

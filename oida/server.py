@@ -1152,19 +1152,43 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 audio["uri"] = uri if "://" in uri else f"file://{uri}"
 
             routes = event.get("routes") if isinstance(event.get("routes"), list) else []
-            first_route = next((route for route in routes if isinstance(route, dict)), None)
-            structured = first_route.get("structured") if first_route else None
             event_tags = event.get("tags") if isinstance(event.get("tags"), list) else []
             listening: dict[str, Any] = {
                 "oida.listen": {
+                    "contract": event.get("contract") or "oida/listening-event/v0.2",
                     "summary": aggregate.get("short_summary") or aggregate.get("title"),
                     "title": aggregate.get("title"),
                     "event_id": event.get("id"),
                     "features": event.get("features") or {},
+                    "listening_context": event.get("listening_context") or {},
+                    "apparatus": event.get("apparatus") or {},
+                    "disagreements": event.get("disagreements") or [],
+                    "routes": [
+                        {
+                            "route_id": route.get("route_id"),
+                            "summary": route.get("summary"),
+                        }
+                        for route in routes
+                        if isinstance(route, dict)
+                    ],
                 }
             }
-            if isinstance(structured, dict):
-                listening["akouo.describe"] = structured
+            for index, route in enumerate(routes):
+                if not isinstance(route, dict):
+                    continue
+                structured = route.get("structured")
+                if not isinstance(structured, dict):
+                    continue
+                route_id = str(route.get("route_id") or f"route-{index + 1}")
+                namespace = f"akouo.{route_id}"
+                if namespace in listening:
+                    namespace = f"{namespace}.{index + 1}"
+                listening[namespace] = {
+                    "route_id": route_id,
+                    "route_name": route.get("route_name"),
+                    "summary": route.get("summary"),
+                    **structured,
+                }
             from .akousma_bridge import build_akousma_from_listen, persist_akousma
 
             origin = {
@@ -1189,6 +1213,30 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                     if isinstance(event.get("listening_identity"), dict)
                     else None
                 ),
+                disagreements=(
+                    event.get("disagreements")
+                    if isinstance(event.get("disagreements"), list)
+                    else None
+                ),
+                actions=[{
+                    "action_id": f"remember_{trace['id']}",
+                    "proposal": "Remember this listening in the local Akousmata store.",
+                    "status": "executed",
+                    "authority": {
+                        "mode": "execute_scoped",
+                        "scopes": ["memory.remember"],
+                        "granted_by": "explicit remember request",
+                        "expires_at": None,
+                        "requires_confirmation": False,
+                        "reversible": True,
+                    },
+                    "receipt": {
+                        "created_at": str(trace.get("createdAt") or "unknown"),
+                        "actor": "oida",
+                        "result": str(trace["id"]),
+                        "recovery": "memory.forget",
+                    },
+                }],
             )
             akousma_id = persist_akousma(record)
             memory_block["akousma_id"] = akousma_id
@@ -1704,6 +1752,18 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     @app.get("/gateway/schema/host-perception")
     def gateway_host_schema_endpoint() -> dict[str, object]:
         path = REPO_ROOT / "oida" / "schemas" / "host-perception.schema.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @app.get("/gateway/schema/listening-event")
+    def gateway_listening_event_schema_endpoint() -> dict[str, object]:
+        path = REPO_ROOT / "oida" / "schemas" / "listening-event.schema.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @app.get("/gateway/schema/listening-context")
+    def gateway_listening_context_schema_endpoint() -> dict[str, object]:
+        from akouo_contract import schema_path
+
+        path = schema_path("listening-context")
         return json.loads(path.read_text(encoding="utf-8"))
 
     @app.post("/gateway/route")
@@ -2304,11 +2364,16 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 if isinstance(signal, dict) and signal:
                     listening["oida.signal"] = signal
                 listening["oida.remote"] = {
+                    "contract": event.get("contract") or "oida/listening-event/v0.2",
                     "summary": aggregate.get("short_summary") or aggregate.get("title"),
                     "aggregate": aggregate,
                     "claim_summary": command_output.get("claim_summary"),
                     "route_preset": route_preset_name,
                     "event_id": event.get("id"),
+                    "listening_context": event.get("listening_context") or {},
+                    "apparatus": event.get("apparatus") or {},
+                    "disagreements": event.get("disagreements") or [],
+                    "routes": event.get("routes") or [],
                 }
                 # the covenant may have withheld or coarsened the location and
                 # attached its identity — the record carries the event's truth
@@ -2328,6 +2393,30 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                         if isinstance(event.get("listening_identity"), dict)
                         else None
                     ),
+                    disagreements=(
+                        event.get("disagreements")
+                        if isinstance(event.get("disagreements"), list)
+                        else None
+                    ),
+                    actions=[{
+                        "action_id": f"remote_store_{event.get('id') or 'listen'}",
+                        "proposal": "Store this remote-ear listening in local Akousmata memory.",
+                        "status": "executed",
+                        "authority": {
+                            "mode": "execute_scoped",
+                            "scopes": ["memory.remember", "audio.store_local"],
+                            "granted_by": "remote-ear request",
+                            "expires_at": None,
+                            "requires_confirmation": False,
+                            "reversible": True,
+                        },
+                        "receipt": {
+                            "created_at": str(event.get("created_at") or "unknown"),
+                            "actor": "oida.remote-ear",
+                            "result": "local akousma write requested",
+                            "recovery": "akousmata delete/forget",
+                        },
+                    }],
                 )
                 akousma_id = persist_akousma(record, store=store)
                 remote_info["akousma_id"] = akousma_id

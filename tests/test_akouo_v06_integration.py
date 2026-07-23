@@ -1,10 +1,8 @@
-"""AKOÚŌ v0.6 + Earworm v0.2 integration tests.
+"""AKOÚŌ v0.8 + Earworm v0.5 integration tests.
 
-Covers the v0.6 surface oída now implements: the /remember command and
-memory-lineage-listening mode, per-claim source/time_range tagging, apparatus
-and listener declarations, the earworm spec v1.1 bridge (listening envelopes,
-summaries, recurrence relations), and the drift check against the published
-akouo.manifest.json contract.
+Covers accountable context, per-claim source/time-range tagging, apparatus and
+listener declarations, addressable auditums, listening envelopes, recurrence,
+and drift checks against the published AKOÚŌ manifest.
 """
 from __future__ import annotations
 
@@ -41,11 +39,11 @@ def _report() -> dict:
     }
 
 
-class TestAkouoV06Contract(unittest.TestCase):
-    def test_contract_version_is_v07(self) -> None:
-        self.assertEqual(AKOUO_CONTRACT_VERSION, "v0.7")
+class TestAkouoV08Contract(unittest.TestCase):
+    def test_contract_version_is_v08(self) -> None:
+        self.assertEqual(AKOUO_CONTRACT_VERSION, "v0.8")
         manifest = akouo_manifest()
-        self.assertEqual(manifest["version"], "0.7-oida.1")
+        self.assertEqual(manifest["version"], "0.8-oida.1")
         self.assertIn("/remember", manifest["public_commands"])
         self.assertIn("/covenant", manifest["public_commands"])
         self.assertEqual(manifest["errors"], [])
@@ -110,21 +108,22 @@ class TestClaimInstrumentation(unittest.TestCase):
 
     def test_command_output_declares_apparatus(self) -> None:
         output = build_command_output(_report(), command="/remember")
-        self.assertEqual(output["akouo_version"], "0.6")
+        self.assertEqual(output["akouo_version"], "0.8")
         self.assertEqual(output["command"], "/remember")
         modes = [item["listening_mode"] for item in output["outputs"]]
         self.assertIn("memory-lineage-listening", modes)
         first = output["outputs"][0]
-        self.assertEqual(first["akouo_version"], "0.6")
+        self.assertEqual(first["akouo_version"], "0.8")
         self.assertEqual(first["listener"], {"type": "agent", "process": "agent_automated"})
         apparatus = first["apparatus"]
         self.assertEqual(apparatus["substrate"], "hybrid_agent_stack")
         self.assertEqual(apparatus["model_ids"], ["moss-audio-test"])
         self.assertIn("MOSS-Audio caption pass", apparatus["perception_sources"])
         self.assertTrue(apparatus["known_blind_spots"])
+        self.assertEqual(first["listening_context"]["contract"], "akouo/listening-context/v1")
 
 
-class TestEarwormV02Bridge(unittest.TestCase):
+class TestEarwormV05Bridge(unittest.TestCase):
     def test_listening_envelope_and_summary(self) -> None:
         record = build_akousma_from_listen(
             audio={"asset_id": "a1", "content_hash": "sha256:abc"},
@@ -140,8 +139,11 @@ class TestEarwormV02Bridge(unittest.TestCase):
         self.assertEqual(signal_entry["payload"]["class"], "music-like")
         self.assertIn("created_at", signal_entry)
         akouo_entry = record["listening"]["akouo.memory-lineage-listening"]
-        self.assertEqual(akouo_entry["contract"], "akouo/v0.7")
+        self.assertEqual(akouo_entry["contract"], "akouo/v0.8")
         self.assertEqual(akouo_entry["summary"], "recurrence of the hum")
+        self.assertEqual(record["auditum"]["contract"], "earworm/auditum/v1")
+        self.assertEqual({item["listener_id"] for item in record["auditum"]["listenings"]}, {"oida"})
+        self.assertEqual(len(record["auditum"]["listenings"]), 2)
 
     def test_recurrence_relation_on_same_hash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

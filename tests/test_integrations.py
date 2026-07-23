@@ -192,7 +192,7 @@ class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
 
         def fake_get_json(*_args: object, **_kwargs: object) -> dict[str, str]:
             worker_threads.append(threading.get_ident())
-            return {"contract": "oida/gateway/v0.3"}
+            return {"contract": "oida/gateway/v0.4"}
 
         with patch("oida.mcp_server.post_json", side_effect=fake_post_json), patch(
             "oida.mcp_server.get_json",
@@ -202,7 +202,7 @@ class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             manifest = json.loads(await manifest_resource())
 
         self.assertEqual(result, {"ok": True})
-        self.assertEqual(manifest["contract"], "oida/gateway/v0.3")
+        self.assertEqual(manifest["contract"], "oida/gateway/v0.4")
         self.assertEqual(len(worker_threads), 2)
         self.assertTrue(all(thread_id != event_loop_thread for thread_id in worker_threads))
 

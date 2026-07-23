@@ -11,7 +11,7 @@ embedded Akousmata library.
 audio file / live capture / declared host perception
                         |
                         v
-                OÍDA gateway v0.2
+                OÍDA gateway v0.4
                         |
           +-------------+--------------+
           |                            |
@@ -24,7 +24,8 @@ audio file / live capture / declared host perception
           AKOÚŌ route + evidence permissions
                         |
                         v
-              immutable listening event
+        accountable immutable listening event
+       (position · apertures · claims · authority)
           +-------------+--------------+
           |             |              |
           v             v              v
@@ -38,9 +39,9 @@ audio file / live capture / declared host perception
 
 | Package | Owns | Does not own |
 | --- | --- | --- |
-| `akouo-contract` | Skills, commands, presets, schemas, evidence ladder, covenants, and routing vocabulary. | Audio decoding, model inference, persistence, or UI state. |
-| `akousma` (Earworm) | Open sonic-memory record, lineage, kinship, provenance, and store operations. | Listening policy or application UI. |
-| `akousmata` | Library, graph, map, timeline, wiki, research, consent/export, and human annotation over the store. | Audio perception or another producer's listening block. |
+| `akouo-contract` | Semantic vocabulary: claims, accountable context, skills, commands, presets, covenants, and routing. | Audio decoding, model inference, persistence, or UI state. |
+| `akousma` (Earworm) | Addressable auditum, open sonic-memory record, events, lineage, disagreement, absence, action receipts, and store operations. | Listening policy or application UI. |
+| `akousmata` | Rendering and structural audit of accountable memory: library, graph, map, timeline, wiki, research, consent/export, and human annotation. | Audio perception or another producer's listening block. |
 | `sonicfield-oida` | Gateway lifecycle, capture, DSP, optional model adapters, AKOÚŌ execution, sessions, conversations, integrations, and app surfaces. | Hidden provider credentials, automatic cloud fallback, or implicit durable memory. |
 
 OÍDA installs the canonical packages and loads their contracts. It does not
@@ -57,11 +58,18 @@ apparatus, evidence level, and blind spots.
 
 ### Host-owned perception
 
-`POST /gateway/harness` accepts an `oida/host-perception/v0.2` observation from
+`POST /gateway/harness` accepts an `oida/host-perception/v0.3` observation from
 an audio-capable host. Host observations remain model evidence; they are never
 relabeled as measured DSP. A host preflights the Covenant before direct
 perception and may declare the `LISTENING.md` revision that oriented its
 hearing. Both paths produce the same listening-event shape.
+
+The event separates covenant (what may happen), position (the listener's
+relation to the object), apparatus (what could be sensed), apertures (what was
+actually available), claims (what the evidence supports), and authority (what
+may be done next). These boundaries survive the explicit Remember operation as
+an Earworm auditum. Re-listening creates a new attributable record or revision;
+it never silently overwrites the earlier hearing.
 
 ## Evidence and reasoning
 

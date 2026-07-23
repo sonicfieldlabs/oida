@@ -358,24 +358,84 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
             reversible=False,
             provenance_id=provenance_id,
         ),
+    ]
+    listening_id = f"listening_{event_id}"
+    events.append(
         _earworm_event(
             session_id,
-            "agent.action.proposed" if trace.get("retentionPolicy") == "session" else "agent.action.applied",
+            "listening.report.created",
             created_at,
             "agent",
             {
-                "action_id": f"remember_{trace_id}",
-                "action": "akousmata.remember.available" if trace.get("retentionPolicy") == "session" else "akousmata.remember",
-                "trace_id": None if trace.get("retentionPolicy") == "session" else trace_id,
+                "listening_id": listening_id,
                 "listening_event_id": event_id,
-                "retention_policy": trace.get("retentionPolicy"),
-                "audio_policy": trace.get("audioPolicy"),
+                "contract": event.get("contract") or "oida/listening-event/v0.2",
+                "asset_ref": asset_id,
+                "listening_context": (
+                    event.get("listening_context")
+                    if isinstance(event.get("listening_context"), dict)
+                    else {}
+                ),
+                "apparatus": event.get("apparatus") if isinstance(event.get("apparatus"), dict) else {},
+                "claim_summary": _claim_summary_from_event(event),
+                "routes": event.get("routes") if isinstance(event.get("routes"), list) else [],
+                "listener": "oida",
             },
-            reversible=trace.get("retentionPolicy") != "session",
+            reversible=False,
             parent_event_ids=[f"analysis_{event_id}"],
             provenance_id=provenance_id,
-        ),
-    ]
+        )
+    )
+    disagreements = event.get("disagreements") if isinstance(event.get("disagreements"), list) else []
+    for index, disagreement in enumerate(disagreements):
+        if not isinstance(disagreement, dict):
+            continue
+        events.append(
+            _earworm_event(
+                session_id,
+                "listening.disagreement.recorded",
+                created_at,
+                "agent",
+                {
+                    "disagreement_id": str(disagreement.get("id") or f"disagreement_{event_id}_{index}"),
+                    "listening_event_id": event_id,
+                    **disagreement,
+                },
+                reversible=False,
+                parent_event_ids=[listening_id],
+                provenance_id=provenance_id,
+            )
+        )
+    durable = trace.get("retentionPolicy") != "session"
+    listening_context = event.get("listening_context") if isinstance(event.get("listening_context"), dict) else {}
+    authority = listening_context.get("action_authority") if isinstance(listening_context.get("action_authority"), dict) else {}
+    action_payload: dict[str, Any] = {
+        "action_id": f"remember_{trace_id}",
+        "action": "akousmata.remember" if durable else "akousmata.remember.available",
+        "trace_id": trace_id if durable else None,
+        "listening_event_id": event_id,
+        "retention_policy": trace.get("retentionPolicy"),
+        "audio_policy": trace.get("audioPolicy"),
+        "authority": authority,
+    }
+    if durable:
+        action_payload["receipt"] = {
+            "status": "stored",
+            "trace_id": trace_id,
+            "reversible_by": "memory.forget",
+        }
+    events.append(
+        _earworm_event(
+            session_id,
+            "listening.action.executed" if durable else "listening.action.proposed",
+            created_at,
+            "agent",
+            action_payload,
+            reversible=durable,
+            parent_event_ids=[listening_id],
+            provenance_id=provenance_id,
+        )
+    )
     session = {
         "session_id": session_id,
         "app_id": "oida.akousmata",
@@ -412,7 +472,7 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
     }
     return {
         "protocol": "earworm",
-        "version": "0.2.2",
+        "version": "0.5.0",
         "akousmata_surface": ["remember", "list", "search", "similarity", "export", "forget"],
         "session": session,
         "context_bundle": context_bundle,
@@ -430,7 +490,14 @@ def _earworm_event(
     parent_event_ids: list[str] | None = None,
     provenance_id: str | None = None,
 ) -> dict[str, Any]:
-    event_id = str(payload.get("frame_id") or payload.get("packet_id") or payload.get("action_id") or new_id("ew"))
+    event_id = str(
+        payload.get("frame_id")
+        or payload.get("packet_id")
+        or payload.get("listening_id")
+        or payload.get("disagreement_id")
+        or payload.get("action_id")
+        or new_id("ew")
+    )
     event = {
         "event_id": event_id,
         "session_id": session_id,

@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from harness.akouo.command import build_harness_output
+from oida.accountable import listening_context_for_report
 from oida.akouo_skills import akouo_manifest, route_preset
 from oida.contracts import (
     AudioDataRef,
@@ -35,8 +36,8 @@ from oida.listening_identity import (
 )
 from oida.memory import earworm_context_for_event
 
-GATEWAY_CONTRACT = "oida/gateway/v0.3"
-HOST_PERCEPTION_CONTRACT = "oida/host-perception/v0.2"
+GATEWAY_CONTRACT = "oida/gateway/v0.4"
+HOST_PERCEPTION_CONTRACT = "oida/host-perception/v0.3"
 SUPPORTED_HOSTS = ("hermes", "codex", "claude", "openclaw", "opencode", "generic")
 CLAIM_CATEGORIES = ("heard", "measured", "inferred", "interpreted", "speculative", "undetermined")
 
@@ -57,8 +58,8 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
                 "contract": f"akouo/{akouo['akouo_contract_version']}",
                 "host_profile_version": akouo["version"],
             },
-            "earworm": {"role": "event/provenance and context protocol", "contract": "earworm/v0.4"},
-            "akousmata": {"role": "local sonic-memory store and navigator", "contract": "akousmata/v0.4"},
+            "earworm": {"role": "auditum, event, provenance, and context protocol", "contract": "earworm/v0.5"},
+            "akousmata": {"role": "local accountable-memory store and navigator", "contract": "akousmata/v0.5"},
         },
         "perception_paths": {
             "oida_owned": {
@@ -87,6 +88,11 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
             "remote_ear": "/remote",
             "listening_identity": "/listening",
             "covenant": "/covenant",
+        },
+        "schemas": {
+            "host_perception": "/gateway/schema/host-perception",
+            "listening_event": "/gateway/schema/listening-event",
+            "listening_context": "/gateway/schema/listening-context",
         },
         "privacy": {
             "local_first": True,
@@ -128,8 +134,8 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
     uncertainty = _string_list(payload.get("uncertainty"))
     uncertainty.extend(_string_list(apparatus.get("known_blind_spots")))
     source_uri = str(source.get("uri") or source.get("path") or f"host://{host_id}/{host.get('session_id') or 'session'}")
-    return {
-        "version": "0.2",
+    normalized = {
+        "version": "0.3",
         "contract": HOST_PERCEPTION_CONTRACT,
         "source": {
             "path": source_uri,
@@ -159,6 +165,10 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
             "audio_input_capable": bool(host.get("audio_input_capable", True)),
         },
         "listening_identity": _dict(payload.get("listening_identity")) or None,
+        # Host declarations are retained as attributed input. The gateway
+        # computes the effective context below and never accepts a host's
+        # capability declaration as operational authority.
+        "host_declared_listening_context": _dict(payload.get("listening_context")) or None,
         "apparatus": apparatus,
         "host_observations": observations,
         "dsp": dsp,
@@ -172,6 +182,14 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
         "forbidden_topics_triggered": [],
         "raw_host_report": payload.get("raw_report"),
     }
+    normalized["listening_context"] = listening_context_for_report(
+        normalized,
+        apparatus=apparatus,
+        raw_audio_policy="not_stored",
+        privacy_mode="session",
+        action_mode="observe_only",
+    )
+    return normalized
 
 
 def harness_host_perception(

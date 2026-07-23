@@ -68,7 +68,8 @@ def _origin_to_source_type(origin: str) -> str:
     }.get(origin, "unknown")
 
 
-AKOUO_CONTRACT = "akouo/v0.7"
+AKOUO_CONTRACT = "akouo/v0.8"
+OIDA_LISTENING_CONTRACT = "oida/listening-event/v0.2"
 
 
 def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
@@ -86,6 +87,8 @@ def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
         }
         if namespace.startswith("akouo."):
             entry["contract"] = AKOUO_CONTRACT
+        elif namespace == "oida.listen":
+            entry["contract"] = OIDA_LISTENING_CONTRACT
         if isinstance(value, dict):
             for key in ("summary", "caption", "brief", "main_reading"):
                 text = value.get(key)
@@ -94,6 +97,156 @@ def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
                     break
         wrapped[namespace] = entry
     return wrapped
+
+
+def _pointer_token(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _auditum_from_listening(
+    listening: dict[str, Any],
+    *,
+    covenant: dict[str, Any] | None = None,
+    disagreements: list[dict[str, Any]] | None = None,
+    actions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Derive one attributable auditum without inventing an ear swarm.
+
+    Route reports remain distinct, but they share the single ``oida`` listener
+    identity. A namespace is a report boundary, not a new agent.
+    """
+    if not listening:
+        return None
+    listenings: list[dict[str, Any]] = []
+    namespace_ids: dict[str, str] = {}
+    honest_absences: list[dict[str, Any]] = []
+    seen_absences: set[tuple[str, str, str, str | None]] = set()
+    for index, (namespace, entry) in enumerate(listening.items()):
+        if not isinstance(entry, dict):
+            continue
+        payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+        listening_id = f"lst_{index + 1}_{re.sub(r'[^a-z0-9]+', '_', namespace.lower()).strip('_') or 'report'}"
+        namespace_ids[namespace] = listening_id
+        token = _pointer_token(namespace)
+        contract = str(entry.get("contract") or payload.get("contract") or OIDA_LISTENING_CONTRACT)
+        report: dict[str, Any] = {
+            "listening_id": listening_id,
+            "listener_id": "oida",
+            "listener_type": "agent",
+            "created_at": str(entry.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+            "report_namespace": namespace,
+            "contract": contract,
+        }
+        if isinstance(payload.get("listening_context"), dict):
+            report["context_ref"] = f"#/listening/{token}/payload/listening_context"
+        if isinstance(payload.get("apparatus"), dict):
+            report["apparatus_ref"] = f"#/listening/{token}/payload/apparatus"
+        if isinstance(payload.get("claim_summary"), dict):
+            report["claim_set_ref"] = f"#/listening/{token}/payload/claim_summary"
+        elif isinstance(payload.get("listening_claims"), dict):
+            report["claim_set_ref"] = f"#/listening/{token}/payload/listening_claims"
+        if covenant:
+            report["covenant_ref"] = "#/covenant"
+        route_ids: list[str] = []
+        if isinstance(payload.get("route_id"), str):
+            route_ids.append(payload["route_id"])
+        if isinstance(payload.get("routes"), list):
+            route_ids.extend(
+                str(route.get("route_id"))
+                for route in payload["routes"]
+                if isinstance(route, dict) and route.get("route_id")
+            )
+        if namespace.startswith("akouo."):
+            route_ids.append(namespace.removeprefix("akouo."))
+        if route_ids:
+            report["route"] = list(dict.fromkeys(route_ids))
+        listenings.append(report)
+
+        context = payload.get("listening_context") if isinstance(payload.get("listening_context"), dict) else {}
+        for absence in context.get("honest_absences", []):
+            if not isinstance(absence, dict):
+                continue
+            kind = str(absence.get("kind") or "undetermined")
+            subject = str(absence.get("subject") or "").strip()
+            attributed_to = str(absence.get("attributed_to") or "").strip()
+            key = (kind, subject, attributed_to, listening_id)
+            if not subject or not attributed_to or key in seen_absences:
+                continue
+            seen_absences.add(key)
+            item: dict[str, Any] = {
+                "id": f"abs_{len(honest_absences) + 1}",
+                "kind": kind,
+                "subject": subject,
+                "attributed_to": attributed_to,
+                "listening_id": listening_id,
+            }
+            for field in ("count", "note"):
+                if field in absence:
+                    item[field] = absence[field]
+            honest_absences.append(item)
+
+    if not listenings:
+        return None
+
+    covenant_id = str((covenant or {}).get("id") or "covenant")
+    for withheld in (covenant or {}).get("withheld", []):
+        if not isinstance(withheld, dict):
+            continue
+        subject = str(withheld.get("subject") or "").strip()
+        rule = str(withheld.get("rule") or "withheld").strip()
+        attributed_to = f"{covenant_id}:{rule}"
+        key = ("withheld", subject, attributed_to, None)
+        if not subject or key in seen_absences:
+            continue
+        seen_absences.add(key)
+        honest_absences.append({
+            "id": f"abs_{len(honest_absences) + 1}",
+            "kind": "withheld",
+            "subject": subject,
+            "attributed_to": attributed_to,
+            "rule": rule,
+            "count": withheld.get("count") if isinstance(withheld.get("count"), int) else 1,
+        })
+
+    checked_disagreements: list[dict[str, Any]] = []
+    known_ids = {item["listening_id"] for item in listenings}
+    for index, disagreement in enumerate(disagreements or []):
+        if not isinstance(disagreement, dict):
+            continue
+        raw_ids = disagreement.get("listening_ids") if isinstance(disagreement.get("listening_ids"), list) else []
+        ids = [namespace_ids.get(str(value), str(value)) for value in raw_ids]
+        ids = list(dict.fromkeys(value for value in ids if value in known_ids))
+        positions: list[dict[str, Any]] = []
+        for position in disagreement.get("positions", []):
+            if not isinstance(position, dict):
+                continue
+            position_id = namespace_ids.get(str(position.get("listening_id")), str(position.get("listening_id") or ""))
+            statement = str(position.get("statement") or "").strip()
+            if position_id not in ids or not statement:
+                continue
+            item = {"listening_id": position_id, "statement": statement}
+            category = position.get("claim_category")
+            if category in {"heard", "measured", "inferred", "interpreted", "speculative", "undetermined"}:
+                item["claim_category"] = category
+            positions.append(item)
+        subject = str(disagreement.get("subject") or "").strip()
+        if len(ids) < 2 or len(positions) < 2 or not subject:
+            continue
+        checked_disagreements.append({
+            "id": str(disagreement.get("id") or f"dis_{index + 1}"),
+            "subject": subject,
+            "listening_ids": ids,
+            "positions": positions,
+            "status": disagreement.get("status") if disagreement.get("status") in {"preserved", "resolved", "undetermined"} else "preserved",
+            "resolution_note": disagreement.get("resolution_note"),
+        })
+
+    return akousma.auditum(
+        listenings=listenings,
+        disagreements=checked_disagreements,
+        honest_absences=honest_absences,
+        actions=actions or [],
+    )
 
 
 def _derive_summary(listening: dict[str, Any]) -> str | None:
@@ -199,13 +352,16 @@ def build_akousma_from_listen(
     capture: dict[str, Any] | None = None,
     covenant: dict[str, Any] | None = None,
     listening_identity: dict[str, Any] | None = None,
+    disagreements: list[dict[str, Any]] | None = None,
+    actions: list[dict[str, Any]] | None = None,
+    auditum: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a valid akousma record from an oída listen result.
 
     ``audio`` needs at least ``asset_id`` (and ideally ``uri``/``content_hash``/duration).
     ``listening`` is namespaced per producer, e.g. ``{"oida.signal": {...}, "akouo.describe": {...}}``;
     entries are wrapped in the spec v1.1 envelope with akouo.* entries pinned to the
-    ``akouo/v0.7`` contract. ``location`` (where it was heard — consent-scoped) and
+    ``akouo/v0.8`` contract. ``location`` (where it was heard — consent-scoped) and
     ``capture`` (past/future direction + window seconds) are spec v1.2 blocks.
     """
     origin = _normalize_origin(origin)
@@ -225,6 +381,12 @@ def build_akousma_from_listen(
         location=_checked_location(location),
         capture=_checked_capture(capture),
         covenant=_checked_covenant(covenant),
+        auditum=auditum or _auditum_from_listening(
+            enveloped,
+            covenant=covenant,
+            disagreements=disagreements,
+            actions=actions,
+        ),
         extensions=extensions,
     )
     if device:

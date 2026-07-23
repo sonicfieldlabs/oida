@@ -25,6 +25,9 @@ REQUIRED_ENDPOINTS = {
     "/generation/history",
     "/generation/{generation_id}",
     "/generation/relisten",
+    "/gateway/schema/host-perception",
+    "/gateway/schema/listening-event",
+    "/gateway/schema/listening-context",
     "/native/system-audio/routes",
     "/native/system-audio/temp",
 }

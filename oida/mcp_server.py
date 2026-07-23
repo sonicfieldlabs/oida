@@ -143,7 +143,9 @@ async def oida_harness(
 ) -> dict[str, Any]:
     """Route, audit, trace, and optionally remember host audio perception.
 
-    Use the ``oida/host-perception/v0.2`` schema. Before perception, inspect
+    Use the ``oida/host-perception/v0.3`` schema. Declare position, actual
+    apertures, auditory scale, participants, honest absences, and uncertainty;
+    capability never grants OÍDA action authority. Before perception, inspect
     the Covenant and read LISTENING.md. When the identity actually oriented
     the host hearing, include ``listening_identity`` with its contract,
     ``sha256``, and ``applied: true`` so the event can attribute that revision.

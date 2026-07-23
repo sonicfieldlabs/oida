@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from harness.akouo.command import build_apparatus
+from oida.accountable import attributable_disagreements, listening_context_for_report
 from oida.akouo_skills import RoutePreset, resolve_route_skill_ids, route_preset, skill_manifest
 from oida.contracts import (
     AkousmataLinks,
@@ -74,6 +76,14 @@ def listening_event_from_report(
     aggregate = _aggregate(report, command_output or {}, preset.id)
     features = _features(report)
     tags = _tags(report, aggregate.primary_tags)
+    apparatus = build_apparatus(report)
+    listening_context = listening_context_for_report(
+        report,
+        apparatus=apparatus,
+        segment=audio_segment,
+        raw_audio_policy=raw_audio_policy,
+        privacy_mode=privacy_mode,
+    )
     artifacts = []
     if path:
         artifacts.append(ListeningArtifact(kind="perception_report", label="PerceptionReport source", ref=path))
@@ -85,6 +95,9 @@ def listening_event_from_report(
         routes=routes,
         aggregate=aggregate,
         features=features,
+        listening_context=listening_context,
+        apparatus=apparatus,
+        disagreements=attributable_disagreements(command_output or {}),
         listening_identity=dict(
             listening_identity or ListeningIdentitySnapshot.empty().event_block()
         ),

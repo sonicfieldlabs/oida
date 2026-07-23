@@ -38,6 +38,9 @@ still performs deterministic DSP; it does not invent a semantic caption.
   remember, or deep listening.
 - Inspect heard, measured, inferred, interpreted, speculative, and
   undetermined claims separately.
+- Inspect the listening position, actual apertures, auditory scale, evidence
+  sources, participants, honest absences, and action authority that situate
+  every result.
 - Discuss a listening event with a deterministic local reasoner or an
   explicitly enabled model provider while keeping the original event fixed.
 - Remember, compare, export, or forget selected events, then hand sound,
@@ -89,11 +92,13 @@ name **oída**.
 
 ## What Is Implemented
 
-- **Unified gateway contract** (`oida/gateway/v0.3`) with two honest perception
+- **Unified gateway contract** (`oida/gateway/v0.4`) with two honest perception
   paths: Oída-owned audio through `POST /gateway/listen`, and host-owned model
   perception through `POST /gateway/harness`. `GET /gateway` advertises the
   installed AKOÚŌ, Earworm, and Akousmata contracts; `GET
-  /gateway/schema/host-perception` publishes the host envelope.
+  /gateway/schema/host-perception`, `/gateway/schema/listening-event`, and
+  `/gateway/schema/listening-context` publish the integration boundaries while
+  leaving AKOÚŌ as the semantic owner of listening context.
 - **One lifecycle**: `oida start` ensures a singleton background gateway,
   `oida agent` starts it and opens the listening agent, and every stdio MCP
   adapter can ensure/reuse that gateway itself. The same process serves the
@@ -128,7 +133,7 @@ name **oída**.
   pass), Signal (DSP-only, instant), Field, Music, Voice, Recall (read-only
   memory comparison), Remember (memory comparison + registration into the
   shared akousmata, AKOÚŌ `/remember`), and Deep (the full report). Preset ids follow
-  AKOÚŌ v0.7's portable preset vocabulary (pre-v0.6 ids `environment`/`speech`/
+  AKOÚŌ v0.8's portable preset vocabulary (pre-v0.6 ids `environment`/`speech`/
   `memory` still resolve as aliases). Presets come from the AKOÚŌ skill
   registry (`/akouo/skills`) and the dashboard skill manager can deviate per
   listen.
@@ -136,7 +141,10 @@ name **oída**.
   JSON traces with deterministic DSP similarity — and every Remember also
   files the listen as an **akousma** in the shared store, so the dashboard's
   Memory rail navigates one library (rename and forget there never delete the
-  referenced audio).
+  referenced audio). New records include an Earworm `auditum`: attributable
+  report namespaces, preserved disagreement, honest absence, scoped actions,
+  and receipts. Here “tokenized” means structured and addressable, never a
+  financial token.
 - **Listening sessions**: results group into daemon-owned sessions shared by
   every surface — dashboard, floating listener, hotkeys, MCP, and agents file
   into the same active session. `/sessions` covers create/activate/rename/
@@ -167,7 +175,7 @@ name **oída**.
   evidence, privacy, AKOÚŌ routes, and Covenants; DSP and exact transcription
   stay literal. Every event carries a content-free identity revision and
   application state; hosted ears declare the revision they actually used
-  through `oida/host-perception/v0.2`. See [the harness
+  through `oida/host-perception/v0.3`. See [the harness
   contract](docs/listening-identity.md).
 - **Model roles and conversation profiles** in the shared dashboard: assign
   separate providers/models to fast perception, deep perception, transcription,
@@ -209,17 +217,17 @@ name **oída**.
 
 ## Stack compatibility
 
-**Oída hears. GERM cultivates. Akousmata remembers. AKOÚŌ structures. Earworm
-routes.** The five projects form [The Listening Stack](https://sonicfield.org/stack),
+**Oída hears. GERM cultivates. Akousmata renders memory. AKOÚŌ structures and
+routes. Earworm addresses and traces.** The five projects form [The Listening Stack](https://sonicfield.org/stack),
 an open research infrastructure for listening, re-listening, sonic memory,
 and cultivation.
 
 | Component | Version / contract | Role in OÍDA |
 | --- | --- | --- |
-| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.7.0` / `akouo/v0.7` | 15 listening modes, router, reference layer, 18 commands, presets, evidence permissions, and covenants. |
-| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.4.0` / spec v1.3 | Session provenance, lineage, kinship, location/capture, and covenant-aware memory records. |
-| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.4.0` | Embedded library at `/library/` and the shared durable sonic-memory store. |
-| OÍDA gateway | `sonicfield-oida 0.7.0` / `oida/gateway/v0.3` | Unified REST, MCP, agent, dashboard, local perception, and host-perception surface. |
+| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.8.0` / `akouo/v0.8` | Listening vocabulary, claim schema, accountable context, routes, covenants, and sovereign mode. |
+| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.5.0` / spec v1.4 | Addressable auditums, event provenance, lineage, disagreement, absence, action authority, and revision. |
+| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.5.0` | Embedded library at `/library/`, accountable-memory audit, and the shared durable store. |
+| OÍDA gateway | `sonicfield-oida 0.8.0` / `oida/gateway/v0.4` | Unified REST, MCP, agent, dashboard, local perception, and host-perception surface. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | 0.2.0 integration | Optional sound, prompt, and lineage handoff after listening. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.0 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.0 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |

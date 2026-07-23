@@ -317,9 +317,12 @@ class OidaFoundationTests(unittest.TestCase):
         self.assertEqual(exported["trace_count"], 1)
         self.assertEqual(trace["audioPolicy"]["rawAudioPolicy"], "external_ref")
         self.assertEqual(forgotten["forgotten"], trace["id"])
-        self.assertEqual(trace["earworm"]["version"], "0.2.2")
+        self.assertEqual(trace["earworm"]["version"], "0.5.0")
         self.assertEqual(trace["earworm"]["session"]["app_id"], "oida.akousmata")
         self.assertEqual(trace["earworm"]["context_bundle"]["assets"][0]["asset_id"], trace["earworm"]["session"]["assets"][0]["asset_id"])
+        event_types = [event["type"] for event in trace["earworm"]["session"]["events"]]
+        self.assertIn("listening.report.created", event_types)
+        self.assertIn("listening.action.executed", event_types)
 
     def test_akousmata_memory_enriches_events_with_similarity_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
