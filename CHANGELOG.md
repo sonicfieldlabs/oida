@@ -20,6 +20,9 @@
 - **Stack contract refresh**: AKOÚŌ advances to v0.8, Akousma to spec v1.4,
   Earworm and Akousmata integrations to 0.5, and all bundled host skills teach
   the same context, authority, disagreement, and explicit-memory rules.
+- **Reproducible release harness**: CI and distribution builds resolve AKOÚŌ,
+  Earworm, and Akousmata from their exact v0.8/v0.5 release tags so package
+  verification cannot silently fall back to an older default branch.
 
 ## 0.7.0 - 2026-07-17
 
