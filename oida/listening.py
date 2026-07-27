@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from harness.akouo.command import build_apparatus
-from oida.accountable import attributable_disagreements, listening_context_for_report
+from oida.accountable import (
+    attributable_disagreements,
+    listening_context_for_report,
+    listening_provenance_for_report,
+)
 from oida.akouo_skills import RoutePreset, resolve_route_skill_ids, route_preset, skill_manifest
 from oida.contracts import (
     AkousmataLinks,
@@ -77,25 +81,40 @@ def listening_event_from_report(
     features = _features(report)
     tags = _tags(report, aggregate.primary_tags)
     apparatus = build_apparatus(report)
+    event_id = new_id("evt")
+    event_created_at = now_iso()
+    route_ids = [route.route_id for route in routes]
     listening_context = listening_context_for_report(
         report,
         apparatus=apparatus,
         segment=audio_segment,
         raw_audio_policy=raw_audio_policy,
         privacy_mode=privacy_mode,
+        route_ids=route_ids,
+        started_at=audio_segment.created_at,
+        completed_at=event_created_at,
+    )
+    listening_provenance = listening_provenance_for_report(
+        report,
+        apparatus=apparatus,
+        segment=audio_segment,
+        route_ids=route_ids,
     )
     artifacts = []
     if path:
         artifacts.append(ListeningArtifact(kind="perception_report", label="PerceptionReport source", ref=path))
     return ListeningEvent(
-        id=new_id("evt"),
-        created_at=now_iso(),
+        id=event_id,
+        created_at=event_created_at,
         source=audio_segment.source,
         segment=audio_segment,
         routes=routes,
         aggregate=aggregate,
         features=features,
         listening_context=listening_context,
+        listening_provenance=listening_provenance,
+        listening_passes=list(listening_context["listening_passes"]),
+        route_decisions=list(listening_context["route_decisions"]),
         apparatus=apparatus,
         disagreements=attributable_disagreements(command_output or {}),
         listening_identity=dict(

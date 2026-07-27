@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import akousma
 import soundfile as sf
 from fastapi.testclient import TestClient
 
@@ -223,6 +224,41 @@ class CovenantEndpointTests(unittest.TestCase):
             self.assertEqual(response.status_code, 423, response.text)
             self.assertIn("already be bounded to 0.1 seconds", response.json()["detail"])
             report.assert_not_called()
+
+    def test_gateway_refusal_returns_and_optionally_retains_a_decision_only_record(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, self._client_env(tmp), clear=False):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            client.put("/covenant", json={"name": "river", "text": RIVER_COVENANT, "activate": True})
+            path = _write_tone(Path(tmp) / "tone.wav")
+
+            ephemeral = client.post(
+                "/gateway/listen",
+                json={"path": str(path), "source_type": "system_output", "remember": False},
+            )
+            self.assertEqual(ephemeral.status_code, 200, ephemeral.text)
+            first = ephemeral.json()
+            self.assertEqual(first["status"], "complete")
+            self.assertEqual(first["outcome"], "refused")
+            self.assertIsNone(first["listening_event"])
+            self.assertIsNone(first["perception_report"])
+            self.assertEqual(first["route_outcome"]["memory"]["status"], "not_requested")
+            self.assertNotIn("audio", first["decision_record"])
+            self.assertEqual(akousma.validation_errors(first["decision_record"]), [])
+
+            retained = client.post(
+                "/gateway/listen",
+                json={"path": str(path), "source_type": "system_output", "remember": True},
+            )
+            self.assertEqual(retained.status_code, 200, retained.text)
+            second = retained.json()
+            self.assertEqual(second["route_outcome"]["memory"]["status"], "retained")
+            akousma_id = second["route_outcome"]["memory"]["akousma_id"]
+            self.assertEqual(akousma_id, second["decision_record"]["akousma_id"])
+            store = akousma.AkousmataStore(Path(tmp) / "akousmata")
+            try:
+                self.assertEqual(store.get(akousma_id)["auditum"]["contract"], "earworm/auditum/v2")
+            finally:
+                store.close()
 
     def test_gateway_listen_memory_retention_gate(self):
         memory_covenant = "# quiet house\n## rules\n- do not retain: memory\n"

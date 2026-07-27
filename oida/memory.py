@@ -349,6 +349,21 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
                 "features": features,
                 "claim_summary": _claim_summary_from_event(event),
                 "routes": event.get("routes") if isinstance(event.get("routes"), list) else [],
+                "listening_provenance": (
+                    event.get("listening_provenance")
+                    if isinstance(event.get("listening_provenance"), dict)
+                    else {}
+                ),
+                "listening_passes": (
+                    event.get("listening_passes")
+                    if isinstance(event.get("listening_passes"), list)
+                    else []
+                ),
+                "route_decisions": (
+                    event.get("route_decisions")
+                    if isinstance(event.get("route_decisions"), list)
+                    else []
+                ),
                 "listening_identity": (
                     event.get("listening_identity")
                     if isinstance(event.get("listening_identity"), dict)
@@ -369,7 +384,7 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
             {
                 "listening_id": listening_id,
                 "listening_event_id": event_id,
-                "contract": event.get("contract") or "oida/listening-event/v0.2",
+                "contract": event.get("contract") or "oida/listening-event/v0.3",
                 "asset_ref": asset_id,
                 "listening_context": (
                     event.get("listening_context")
@@ -379,6 +394,21 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
                 "apparatus": event.get("apparatus") if isinstance(event.get("apparatus"), dict) else {},
                 "claim_summary": _claim_summary_from_event(event),
                 "routes": event.get("routes") if isinstance(event.get("routes"), list) else [],
+                "listening_provenance": (
+                    event.get("listening_provenance")
+                    if isinstance(event.get("listening_provenance"), dict)
+                    else {}
+                ),
+                "listening_passes": (
+                    event.get("listening_passes")
+                    if isinstance(event.get("listening_passes"), list)
+                    else []
+                ),
+                "route_decisions": (
+                    event.get("route_decisions")
+                    if isinstance(event.get("route_decisions"), list)
+                    else []
+                ),
                 "listener": "oida",
             },
             reversible=False,
@@ -472,7 +502,7 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
     }
     return {
         "protocol": "earworm",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "akousmata_surface": ["remember", "list", "search", "similarity", "export", "forget"],
         "session": session,
         "context_bundle": context_bundle,

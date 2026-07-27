@@ -28,6 +28,7 @@ REQUIRED_ENDPOINTS = {
     "/gateway/schema/host-perception",
     "/gateway/schema/listening-event",
     "/gateway/schema/listening-context",
+    "/gateway/schema/route-outcome",
     "/native/system-audio/routes",
     "/native/system-audio/temp",
 }
@@ -78,6 +79,7 @@ def main() -> int:
     )
     parser.add_argument("--app", type=Path, default=repo_root / "apps/macos/dist/oida.app")
     parser.add_argument("--archive", type=Path, default=repo_root / "apps/macos/dist/oida-macos-unsigned.zip")
+    parser.add_argument("--expect-profile", help="Fail if the daemon reports a different runtime profile.")
     parser.add_argument("--mutating", action="store_true", help="Create and clean up one prompt record through /generation/prompt.")
     args = parser.parse_args()
 
@@ -89,7 +91,7 @@ def main() -> int:
     except ValueError as exc:
         result.fail(str(exc))
     else:
-        check_daemon(server, repo_root, args.mutating, result)
+        check_daemon(server, repo_root, args.mutating, args.expect_profile, result)
     check_app_bundle(app_path, result)
     check_archive(args.archive, result)
 
@@ -119,7 +121,13 @@ def normalize_server_url(server: str) -> str:
     return normalized
 
 
-def check_daemon(server: str, repo_root: Path, mutating: bool, result: CheckResult) -> None:
+def check_daemon(
+    server: str,
+    repo_root: Path,
+    mutating: bool,
+    expected_profile: str | None,
+    result: CheckResult,
+) -> None:
     try:
         health = get_json(server, "/health")
         api = get_json(server, "/api")
@@ -130,8 +138,15 @@ def check_daemon(server: str, repo_root: Path, mutating: bool, result: CheckResu
         result.fail(f"daemon is not reachable at {server}: {exc}")
         return
 
+    profile = str(health.get("profile") or "")
     if health.get("ok") is True and health.get("name") == "oida":
-        result.ok(f"daemon health {health.get('profile') or 'profile'} at {server}")
+        if expected_profile and profile != expected_profile:
+            result.fail(
+                f"daemon profile is {profile or '<missing>'}, expected {expected_profile}; "
+                "the smoke port may already belong to another Oída process"
+            )
+        else:
+            result.ok(f"daemon health {profile or 'profile'} at {server}")
     else:
         result.fail(f"unexpected health payload: {health}")
 

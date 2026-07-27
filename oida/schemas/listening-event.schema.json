@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oida.local/schemas/listening-event.schema.json",
   "title": "OÍDA accountable listening event",
-  "description": "The stable cross-surface result emitted by OÍDA v0.8. Extension fields such as covenant, location, capture, and session remain additive; the accountable core is required.",
+  "description": "The stable cross-surface result emitted by Oída v0.9. It preserves AKOÚŌ v0.9 provenance, temporal passes, and route decisions alongside the listening report. Extension fields such as covenant, location, capture, and session remain additive.",
   "type": "object",
   "additionalProperties": true,
   "required": [
@@ -15,6 +15,9 @@
     "aggregate",
     "features",
     "listening_context",
+    "listening_provenance",
+    "listening_passes",
+    "route_decisions",
     "apparatus",
     "disagreements",
     "listening_identity",
@@ -27,7 +30,7 @@
   "properties": {
     "id": {"type": "string", "minLength": 1},
     "created_at": {"type": "string", "minLength": 1},
-    "contract": {"const": "oida/listening-event/v0.2"},
+    "contract": {"const": "oida/listening-event/v0.3"},
     "source": {
       "type": "object",
       "required": ["type", "label"],
@@ -83,6 +86,17 @@
     "aggregate": {"type": "object"},
     "features": {"type": "object"},
     "listening_context": {"$ref": "https://akouo.dev/schemas/listening-context.schema.json"},
+    "listening_provenance": {"$ref": "https://akouo.dev/schemas/listening-provenance.schema.json"},
+    "listening_passes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "https://akouo.dev/schemas/listening-pass.schema.json"}
+    },
+    "route_decisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "https://akouo.dev/schemas/route-decision.schema.json"}
+    },
     "apparatus": {"type": "object"},
     "disagreements": {
       "type": "array",

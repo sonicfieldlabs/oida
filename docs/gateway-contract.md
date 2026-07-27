@@ -5,7 +5,8 @@ Installing Oída installs and exposes the complete stack: AKOÚŌ routing and
 claim discipline, Earworm event/provenance envelopes, and the Akousmata store
 and navigator.
 
-The stable gateway contract is `oida/gateway/v0.4`. It supports two paths:
+The stable gateway contract is `oida/gateway/v0.5`. It supports two paths and
+one decision-only outcome:
 
 1. **Oída-owned perception** — pass Oída a local audio path. Its configured
    engine (MOSS-Audio when available, DSP-only stub otherwise) performs the
@@ -13,9 +14,14 @@ The stable gateway contract is `oida/gateway/v0.4`. It supports two paths:
    normalized listening event, and an optional memory trace.
 2. **Host-supplied perception** — an audio-capable Hermes, Codex, Claude, or
    generic host describes what its active model heard using
-   `oida/host-perception/v0.3`. Oída does not run MOSS again. It applies the
+   `oida/host-perception/v0.4`. Oída does not run MOSS again. It applies the
    same router, evidence permissions, claim taxonomy, Earworm provenance, and
    Akousmata memory flow.
+3. **Pre-listening route outcome** — when an input or covenant gate refuses
+   before perception, Oída emits `oida/route-outcome/v0.1`. It contains the
+   route decision, attributed absence, and receipt, but no listening event,
+   acoustic claim, or invented audio asset. A decision-only record is retained
+   only when the request explicitly sets `remember=true` and policy permits it.
 
 Host perception must declare its apparatus when known. Sample rate, channel
 count, bandwidth, calibration, preprocessing, and blind spots determine which
@@ -24,14 +30,23 @@ marked undetermined. Model output can never become a `measured` claim merely
 because the model used a number; measurements need DSP, metadata, a measuring
 tool, or a declared human measurement.
 
-Both paths emit `oida/listening-event/v0.2` with an
-`akouo/listening-context/v1` block. The context answers different questions
+Prompts, transcripts, captions, and contextual notes are attributable inputs,
+not auditory evidence. They may ground inference or interpretation when their
+source is named, but they are never promoted to `heard` merely because they
+describe a sound.
+
+Both perception paths emit `oida/listening-event/v0.3` with an
+`akouo/listening-context/v2` block. The context answers different questions
 than the apparatus: position says where the listener stands in relation to the
 object; apertures say which evidence openings were actually available;
 auditory scales say at what temporal or infrastructural resolution it listened;
 participants keep plural hearing attributable; honest absences say what was
 unavailable, withheld, refused, or not retained; action authority says what the
-runtime may do. A capable host may declare `execute_scoped`, but that declaration
+runtime may do. Temporal listening passes say who listened, when, by which
+route, with which sources and decisions, and whether an earlier pass influenced
+a later one. Listening provenance names sources, declared cuts, and known or
+unknown corpus lineage without reconstructing unavailable training data. A
+capable host may declare `execute_scoped`, but that declaration
 is only attributed input—the OÍDA hearing boundary remains `observe_only` until
 a separate explicit action, such as Remember, grants a narrow scope and yields
 a receipt.
@@ -64,7 +79,7 @@ deployment must provide its own authenticated HTTPS boundary.
 
 ```json
 {
-  "contract": "oida/host-perception/v0.3",
+  "contract": "oida/host-perception/v0.4",
   "host": {
     "id": "codex",
     "model": "audio-capable-model",
@@ -90,7 +105,7 @@ deployment must provide its own authenticated HTTPS boundary.
     "known_blind_spots": ["The host does not expose its resampling path."]
   },
   "listening_context": {
-    "contract": "akouo/listening-context/v1",
+    "contract": "akouo/listening-context/v2",
     "position": {
       "relation_to_object": "host model inspecting an attached recording",
       "limitations": ["The gateway does not receive the raw audio."]
@@ -115,7 +130,33 @@ deployment must provide its own authenticated HTTPS boundary.
       "requires_confirmation": true,
       "reversible": true
     },
-    "honest_absences": []
+    "honest_absences": [],
+    "listening_passes": [{
+      "id": "pass-host-1",
+      "listener_id": "codex",
+      "route": ["/listen", "acoulogical-object-listening"],
+      "started_at": "2026-07-27T12:00:00Z",
+      "completed_at": "2026-07-27T12:00:18Z",
+      "moment": {"relation": "past_capture", "scales": ["event", "scene"]},
+      "source_refs": ["#/source", "#/observations"],
+      "claim_refs": ["#/observations/0"],
+      "decision_refs": ["decision-input-1"],
+      "influenced_by": []
+    }],
+    "route_decisions": [{
+      "id": "decision-input-1",
+      "gate": "input",
+      "outcome": "proceed",
+      "subject": "attached field recording",
+      "reason": "The bounded host input was available under the active covenant.",
+      "decided_at": "2026-07-27T12:00:00Z",
+      "authority": {
+        "mode": "observe_only",
+        "actor": "codex",
+        "requires_confirmation": true,
+        "reversible": true
+      }
+    }]
   },
   "observations": [
     {
@@ -131,7 +172,8 @@ deployment must provide its own authenticated HTTPS boundary.
 ```
 
 See `oida/schemas/host-perception.schema.json` for the complete input schema
-and `oida/schemas/listening-event.schema.json` for the output boundary. A
+and `oida/schemas/listening-event.schema.json` for the listening boundary;
+pre-listening decisions use `oida/schemas/route-outcome.schema.json`. A
 running gateway publishes those schemas plus AKOÚŌ's canonical context schema
 under `/gateway/schema/*`; OÍDA references the AKOÚŌ schema instead of forking
 its semantic owner.

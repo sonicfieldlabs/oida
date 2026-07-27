@@ -20,7 +20,7 @@ ListeningMode = Literal[
 ]
 
 
-AKOUO_CONTRACT_VERSION = "v0.8"
+AKOUO_CONTRACT_VERSION = "v0.9"
 AKOUO_PUBLIC_COMMANDS = [
     "/listen",
     "/full-ear",
@@ -40,6 +40,7 @@ AKOUO_PUBLIC_COMMANDS = [
     "/route",
     "/remember",
     "/covenant",
+    "/corpus",
 ]
 
 
@@ -450,7 +451,7 @@ def validate_akouo_manifest() -> list[str]:
 def akouo_manifest() -> dict[str, Any]:
     errors = validate_akouo_manifest()
     return {
-        "version": "0.8-oida.1",
+        "version": "0.9-oida.1",
         "akouo_contract_version": AKOUO_CONTRACT_VERSION,
         "schema_version": "0.1",
         "public_commands": AKOUO_PUBLIC_COMMANDS,

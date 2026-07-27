@@ -11,7 +11,7 @@ embedded Akousmata library.
 audio file / live capture / declared host perception
                         |
                         v
-                OÍDA gateway v0.4
+                OÍDA gateway v0.5
                         |
           +-------------+--------------+
           |                            |
@@ -25,7 +25,7 @@ audio file / live capture / declared host perception
                         |
                         v
         accountable immutable listening event
-       (position · apertures · claims · authority)
+ (position · passes · provenance · decisions · claims)
           +-------------+--------------+
           |             |              |
           v             v              v
@@ -58,7 +58,7 @@ apparatus, evidence level, and blind spots.
 
 ### Host-owned perception
 
-`POST /gateway/harness` accepts an `oida/host-perception/v0.3` observation from
+`POST /gateway/harness` accepts an `oida/host-perception/v0.4` observation from
 an audio-capable host. Host observations remain model evidence; they are never
 relabeled as measured DSP. A host preflights the Covenant before direct
 perception and may declare the `LISTENING.md` revision that oriented its
@@ -66,10 +66,17 @@ hearing. Both paths produce the same listening-event shape.
 
 The event separates covenant (what may happen), position (the listener's
 relation to the object), apparatus (what could be sensed), apertures (what was
-actually available), claims (what the evidence supports), and authority (what
-may be done next). These boundaries survive the explicit Remember operation as
-an Earworm auditum. Re-listening creates a new attributable record or revision;
-it never silently overwrites the earlier hearing.
+actually available), temporal passes (who listened when), provenance and cuts
+(what conditioned the hearing), route decisions (which gates proceeded or
+closed), claims (what the evidence supports), and authority (what may be done
+next). These boundaries survive the explicit Remember operation as an Earworm
+auditum. Re-listening creates a new attributable record or revision; it never
+silently overwrites the earlier hearing.
+
+A refusal before perception follows a separate path: the gateway returns a
+complete `oida/route-outcome/v0.1`, not an empty listening event. It may create
+a content-free, decision-only Akousma for explicit retention, but it never
+claims that audio was heard or captured.
 
 ## Evidence and reasoning
 
@@ -130,8 +137,8 @@ and keep OÍDA's host/origin and bearer-token guards enabled.
   interfaces; do not let adapters alter claim categories.
 - Add host integrations under `integrations/`; pin the active Python runtime
   so adapters do not depend on shell state.
-- Extend the gateway additively and publish the schema from
-  `/gateway/schema/host-perception`.
+- Extend the gateway additively and publish the relevant schema under
+  `/gateway/schema/*`.
 - Extend the Akousmata store upstream in Earworm rather than duplicating store
   logic in OÍDA.
 - Add UI state through daemon endpoints and the SSE stream so web, native,

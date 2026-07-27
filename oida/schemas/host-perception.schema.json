@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["host", "source", "observations"],
   "properties": {
-    "contract": {"const": "oida/host-perception/v0.3"},
+    "contract": {"enum": ["oida/host-perception/v0.3", "oida/host-perception/v0.4"]},
     "host": {
       "type": "object",
       "required": ["id", "model"],
@@ -64,94 +64,25 @@
       "additionalProperties": false
     },
     "listening_context": {
-      "description": "Host-declared situated listening context. OÍDA preserves this as attributed input but computes effective action authority at the gateway boundary; perceptual capability never grants retention, disclosure, or execution rights.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["contract", "position", "apertures", "auditory_scales", "sources_of_listening", "participants", "action_authority", "honest_absences"],
-      "properties": {
-        "contract": {"const": "akouo/listening-context/v1"},
-        "position": {
+      "description": "Host-declared situated listening context. Current hosts use AKOÚŌ context v2; the v1 branch remains a permissive read-compatibility boundary. Oída preserves either as attributed input but computes its own effective context and authority.",
+      "oneOf": [
+        {
           "type": "object",
-          "additionalProperties": false,
-          "required": ["relation_to_object", "limitations"],
+          "required": ["contract", "position", "apertures", "auditory_scales", "sources_of_listening", "participants", "action_authority", "honest_absences", "listening_passes", "route_decisions"],
           "properties": {
-            "relation_to_object": {"type": "string", "minLength": 1},
-            "situation": {"type": ["string", "null"]},
-            "listening_identity_ref": {"type": ["string", "null"]},
-            "limitations": {"$ref": "#/$defs/text_list"}
-          }
+            "contract": {"const": "akouo/listening-context/v2"},
+            "listening_passes": {"type": "array"},
+            "route_decisions": {"type": "array"}
+          },
+          "additionalProperties": true
         },
-        "apertures": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["id", "kind", "status"],
-            "properties": {
-              "id": {"type": "string", "minLength": 1},
-              "kind": {"enum": ["direct_audio", "signal_measurement", "metadata", "transcript", "contextual_note", "human_report", "model_observation", "memory", "audiovisual", "haptic", "other"]},
-              "status": {"enum": ["available", "unavailable", "withheld", "degraded"]},
-              "description": {"type": "string"},
-              "limits": {"$ref": "#/$defs/text_list"}
-            }
-          }
-        },
-        "auditory_scales": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {"enum": ["sample", "frame", "gesture", "event", "scene", "session", "archive", "lineage", "infrastructural", "planetary", "unknown"]}
-        },
-        "sources_of_listening": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {"enum": ["audio", "dsp", "metadata", "transcript", "context", "human", "model", "memory", "audiovisual", "haptic", "none", "other"]}
-        },
-        "participants": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["id", "type", "role"],
-            "properties": {
-              "id": {"type": "string", "minLength": 1},
-              "type": {"enum": ["human", "agent", "hybrid"]},
-              "role": {"type": "string", "minLength": 1},
-              "report_ref": {"type": ["string", "null"]}
-            }
-          }
-        },
-        "action_authority": {
+        {
           "type": "object",
-          "additionalProperties": false,
-          "required": ["mode", "scopes", "requires_confirmation"],
-          "properties": {
-            "mode": {"enum": ["observe_only", "recommend", "request", "execute_scoped"]},
-            "scopes": {"$ref": "#/$defs/text_list"},
-            "granted_by": {"type": ["string", "null"]},
-            "expires_at": {"type": ["string", "null"]},
-            "requires_confirmation": {"type": "boolean"},
-            "reversible": {"type": ["boolean", "null"]}
-          }
-        },
-        "honest_absences": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["kind", "subject", "attributed_to"],
-            "properties": {
-              "kind": {"enum": ["unavailable", "withheld", "refused", "not_retained", "forgotten", "undetermined"]},
-              "subject": {"type": "string", "minLength": 1},
-              "attributed_to": {"type": "string", "minLength": 1},
-              "count": {"type": ["integer", "null"], "minimum": 0},
-              "note": {"type": ["string", "null"]}
-            }
-          }
+          "required": ["contract"],
+          "properties": {"contract": {"const": "akouo/listening-context/v1"}},
+          "additionalProperties": true
         }
-      }
+      ]
     },
     "observations": {
       "type": "array",
@@ -188,12 +119,5 @@
     "music": {"type": "object"},
     "uncertainty": {"type": "array", "items": {"type": "string"}},
     "raw_report": {}
-  },
-  "$defs": {
-    "text_list": {
-      "type": "array",
-      "items": {"type": "string", "minLength": 1},
-      "default": []
-    }
   }
 }

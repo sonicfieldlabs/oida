@@ -55,7 +55,12 @@ from oida.dsp import audio_info
 from oida.engine import build_engine
 from oida.engine_base import EngineUnavailable
 from oida.generation import GenerationStore
-from oida.gateway import GATEWAY_CONTRACT, gateway_manifest, harness_host_perception
+from oida.gateway import (
+    GATEWAY_CONTRACT,
+    decision_first_refusal,
+    gateway_manifest,
+    harness_host_perception,
+)
 from oida.listening import listening_event_dict
 from oida.listening_identity import (
     MAX_LISTENING_IDENTITY_CHARS,
@@ -1155,12 +1160,15 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             event_tags = event.get("tags") if isinstance(event.get("tags"), list) else []
             listening: dict[str, Any] = {
                 "oida.listen": {
-                    "contract": event.get("contract") or "oida/listening-event/v0.2",
+                    "contract": event.get("contract") or "oida/listening-event/v0.3",
                     "summary": aggregate.get("short_summary") or aggregate.get("title"),
                     "title": aggregate.get("title"),
                     "event_id": event.get("id"),
                     "features": event.get("features") or {},
                     "listening_context": event.get("listening_context") or {},
+                    "listening_provenance": event.get("listening_provenance") or {},
+                    "listening_passes": event.get("listening_passes") or [],
+                    "route_decisions": event.get("route_decisions") or [],
                     "apparatus": event.get("apparatus") or {},
                     "disagreements": event.get("disagreements") or [],
                     "routes": [
@@ -1726,6 +1734,12 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
     @app.get("/gateway/capabilities")
     def gateway_capabilities_endpoint() -> dict[str, object]:
         manifest = gateway_manifest(version=__version__)
+        optional_components = copy.deepcopy(manifest.get("optional_components") or {})
+        germ = optional_components.get("germ") if isinstance(optional_components.get("germ"), dict) else {}
+        germ["bridge_available"] = any(
+            getattr(route, "path", None) == "/germ/handoff" for route in app.routes
+        )
+        optional_components["germ"] = germ
         try:
             identity_status = listening_identity_store.status()
             listening_identity: dict[str, object] = {
@@ -1746,6 +1760,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             "akouo": akouo_manifest(),
             "listening_identity": listening_identity,
             "memory": {"available": True, "trace_count": len(memory.list(limit=None))},
+            "optional_components": optional_components,
             "host_perception_schema": "/gateway/schema/host-perception",
         }
 
@@ -1764,6 +1779,11 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         from akouo_contract import schema_path
 
         path = schema_path("listening-context")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @app.get("/gateway/schema/route-outcome")
+    def gateway_route_outcome_schema_endpoint() -> dict[str, object]:
+        path = REPO_ROOT / "oida" / "schemas" / "route-outcome.schema.json"
         return json.loads(path.read_text(encoding="utf-8"))
 
     @app.post("/gateway/route")
@@ -2236,7 +2256,32 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
 
     @app.post("/gateway/listen")
     def gateway_listen_endpoint(req: GatewayListenRequest) -> dict[str, object]:
-        result = listen_event_endpoint(req)
+        try:
+            result = listen_event_endpoint(req)
+        except HTTPException as exc:
+            if exc.status_code != 423:
+                raise
+            checker = covenant_store.engine(override_name=req.covenant)
+            if checker is None:
+                raise
+            source_type = _audio_source_type(req.source_type)
+            detail = str(exc.detail)
+            decision = decision_first_refusal(
+                perception_path="oida_owned",
+                source_type=source_type,
+                refusal=detail.split(": ", 1)[-1],
+                covenant_engine=checker,
+                remember=req.remember,
+                gate="capture" if "bounded" in detail or "window" in detail else "input",
+            )
+            broadcaster.publish(
+                "listen_decided",
+                {
+                    "route_outcome": decision["route_outcome"],
+                    "source": source_type,
+                },
+            )
+            return {**decision, "background": background.status()}
         event = result["listening_event"]
         trace = None
         memory_retention_rule = None
@@ -2256,6 +2301,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         return {
             "contract": GATEWAY_CONTRACT,
             "perception_path": "oida_owned",
+            "status": "complete",
+            "outcome": "listened",
             **result,
             "earworm": earworm,
             "trace": trace,
@@ -2364,13 +2411,16 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 if isinstance(signal, dict) and signal:
                     listening["oida.signal"] = signal
                 listening["oida.remote"] = {
-                    "contract": event.get("contract") or "oida/listening-event/v0.2",
+                    "contract": event.get("contract") or "oida/listening-event/v0.3",
                     "summary": aggregate.get("short_summary") or aggregate.get("title"),
                     "aggregate": aggregate,
                     "claim_summary": command_output.get("claim_summary"),
                     "route_preset": route_preset_name,
                     "event_id": event.get("id"),
                     "listening_context": event.get("listening_context") or {},
+                    "listening_provenance": event.get("listening_provenance") or {},
+                    "listening_passes": event.get("listening_passes") or [],
+                    "route_decisions": event.get("route_decisions") or [],
                     "apparatus": event.get("apparatus") or {},
                     "disagreements": event.get("disagreements") or [],
                     "routes": event.get("routes") or [],
@@ -2439,6 +2489,13 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
         try:
             schema = json.loads(schema_path.read_text(encoding="utf-8"))
             jsonschema.Draft202012Validator(schema).validate(req.perception)
+            declared_context = (
+                req.perception.get("listening_context")
+                if isinstance(req.perception.get("listening_context"), dict)
+                else None
+            )
+            if declared_context and declared_context.get("contract") == "akouo/listening-context/v2":
+                AkouoLoader().validate("listening-context", declared_context)
             result = harness_host_perception(
                 req.perception,
                 route_preset_id=req.route_preset,
@@ -2453,15 +2510,26 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 covenant_engine=covenant_store.engine(),
                 listening_identity_snapshot=current_listening_identity_snapshot(),
             )
-            background.finish_action(result["listening_event"])
-            broadcaster.publish(
-                "host_listen_completed",
-                {
-                    "listening_event": result["listening_event"],
-                    "host": req.perception.get("host"),
-                    "route_preset": req.route_preset,
-                },
-            )
+            listening_event = result.get("listening_event")
+            if isinstance(listening_event, dict):
+                background.finish_action(listening_event)
+                broadcaster.publish(
+                    "host_listen_completed",
+                    {
+                        "listening_event": listening_event,
+                        "host": req.perception.get("host"),
+                        "route_preset": req.route_preset,
+                    },
+                )
+            else:
+                broadcaster.publish(
+                    "host_listen_decided",
+                    {
+                        "route_outcome": result.get("route_outcome"),
+                        "host": req.perception.get("host"),
+                        "route_preset": req.route_preset,
+                    },
+                )
             return result
         except jsonschema.ValidationError as exc:
             raise HTTPException(status_code=422, detail=f"host perception failed schema validation: {exc.message}") from exc

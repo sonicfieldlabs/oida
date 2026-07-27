@@ -38,4 +38,4 @@ while time.monotonic() < deadline:
 raise SystemExit(f"daemon did not become healthy: {url}")
 PY
 
-scripts/release_smoke.py --server "$SERVER"
+scripts/release_smoke.py --server "$SERVER" --expect-profile stub

@@ -1,6 +1,6 @@
 # AKOUO Skill Manifests
 
-`oida` exposes AKOUO listening skills as explicit manifests. A skill is not a
+`oida` exposes AKOÚŌ listening skills as explicit manifests. A skill is not a
 model by itself. It is a routed listening position that tells the daemon,
 dashboard, memory layer, and future desktop shell how to frame one audio segment.
 
@@ -36,11 +36,12 @@ Each `ListeningSkillManifest` has:
 A `RoutePreset` names a reusable chain of skills:
 
 - `basic`: first pass with general listening, spectral facts, and signal health.
-- `environment`: field/soundscape route.
+- `field`: field/soundscape route.
 - `signal`: technical diagnostics.
 - `music`: musicological route.
-- `speech`: speech route without making speech the product center.
-- `memory`: local Akousmata comparison.
+- `voice`: speech route without making speech the product center.
+- `recall`: read-only local Akousmata comparison.
+- `remember`: comparison plus an explicit durable memory request.
 - `extended-spectrum`: DSP-first caution route for high/low-frequency claims.
 - `generative`: future bridge from listening observations to transformation
   prompts. It does not generate audio.
@@ -64,7 +65,10 @@ The daemon rejects unknown skills and rejects an empty active skill chain.
 3. Keep claims grounded in MOSS and DSP limits. MOSS-Audio receives 16 kHz mono
    input; do not claim unsupported stereo image, ultrasonic content, or absolute
    physical level without capture-chain or DSP evidence.
-4. Run:
+4. Emit one attributable listening pass per hearing and preserve route
+   decisions, source/cut/corpus provenance, disagreements, and unknowns. Prompt,
+   transcript, caption, and contextual-note inputs are not `heard` evidence.
+5. Run:
 
 ```bash
 uv run python -m unittest discover -s tests

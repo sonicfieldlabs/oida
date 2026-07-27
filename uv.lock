@@ -173,12 +173,12 @@ wheels = [
 
 [[package]]
 name = "akouo-contract"
-version = "0.8.0"
+version = "0.9.0"
 source = { editable = "../akouo" }
 
 [[package]]
 name = "akousma"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "../earworm/packages/py-akousma" }
 dependencies = [
     { name = "jsonschema" },
@@ -193,7 +193,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "akousmata"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "../akousmata" }
 dependencies = [
     { name = "akousma" },
@@ -2286,7 +2286,7 @@ wheels = [
 
 [[package]]
 name = "sonicfield-oida"
-version = "0.8.0"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "akouo-contract" },

@@ -8,7 +8,7 @@ from harness.types import LISTENING_MODES, empty_mediations, empty_risks
 from oida.accountable import listening_context_for_report
 
 
-AKOUO_OUTPUT_VERSION = "0.8"
+AKOUO_OUTPUT_VERSION = "0.9"
 
 
 def build_apparatus(report: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -35,6 +35,7 @@ const state = {
   abortController: null,
   wikiToken: 0,
   sonicfieldAvailable: false,
+  germEnabled: false,
   micDevices: [],
   monitor: null, // {stream, ctx, analyser, raf, peak}
   diagnostics: [],
@@ -409,6 +410,7 @@ async function refreshHealth() {
     ui.engineAddress.textContent = `${health.host || "127.0.0.1"}:${health.port}`;
     state.audioDir = health.audio_dir || "";
     state.sonicfieldAvailable = Boolean(health.sonicfield && health.sonicfield.available);
+    state.germEnabled = health.optional_components?.germ?.enabled === true;
     ui.audioDirNote.textContent = state.audioDir;
     ui.engineAudioDir.textContent = state.audioDir;
     if (!ui.audioPath.value && state.audioDir) ui.audioPath.placeholder = `${state.audioDir}/…`;
@@ -1846,9 +1848,10 @@ function resultActions(event, session) {
     ["remember", event.memory?.saved_trace_id ? "Remembered" : "Remember"],
     ["wiki", "Expand on Wiki"],
     ["json", "Export JSON"],
-    ["sound", "Generate derived sound"],
-    ["prompt", "Convert listening to prompt"],
   ];
+  if (state.germEnabled) {
+    items.push(["sound", "Generate derived sound"], ["prompt", "Convert listening to prompt"]);
+  }
   for (const [action, label] of items) {
     const item = document.createElement("button");
     item.className = "drop-item";
@@ -2317,6 +2320,12 @@ function germPayload(mode, event, sessionId = null) {
       title: event.aggregate?.title || "",
       short_summary: event.aggregate?.short_summary || "",
       route_preset: state.preset,
+      listening_context: event.listening_context || {},
+      listening_provenance: event.listening_provenance || {},
+      listening_passes: event.listening_passes || [],
+      route_decisions: event.route_decisions || [],
+      apparatus: event.apparatus || {},
+      routes: event.routes || [],
     },
   };
   const structured = event.routes?.[0]?.structured;
@@ -2549,9 +2558,10 @@ function sessionMenu(session, archived) {
       ["remember", "Remember session"],
       ["wiki", "Expand session on Wiki"],
       ["json", "Export session JSON"],
-      ["sound", "Generate derived sounds"],
-      ["prompt", "Convert session to prompts"],
     );
+    if (state.germEnabled) {
+      actions.push(["sound", "Generate derived sounds"], ["prompt", "Convert session to prompts"]);
+    }
   }
   actions.push(archived ? ["restore", "Restore session"] : ["archive", "Archive session"]);
   actions.push(["delete", "Delete session"]);
@@ -2602,10 +2612,11 @@ function listeningMenu(event, session) {
     ["remember", event.memory?.saved_trace_id ? "Remembered" : "Remember sound"],
     ["wiki", "Expand listening on Wiki"],
     ["json", "Export listening JSON"],
-    ["sound", "Generate derived sound"],
-    ["prompt", "Convert listening to prompt"],
     ["delete", "Delete listening"],
   );
+  if (state.germEnabled) {
+    actions.splice(-1, 0, ["sound", "Generate derived sound"], ["prompt", "Convert listening to prompt"]);
+  }
   for (const [action, label] of actions) {
     const item = document.createElement("button");
     item.className = `drop-item${action === "delete" ? " destructive" : ""}`;
@@ -2793,10 +2804,11 @@ function memoryMenu(record) {
     ["remember", "Remembered"],
     ["wiki", "Expand listening on Wiki"],
     ["json", "Export memory JSON"],
-    ["sound", "Generate derived sound"],
-    ["prompt", "Convert listening to prompt"],
     ["delete", "Delete memory"],
   ];
+  if (state.germEnabled) {
+    actions.splice(-1, 0, ["sound", "Generate derived sound"], ["prompt", "Convert listening to prompt"]);
+  }
   for (const [action, label] of actions) {
     const item = document.createElement("button");
     item.className = `drop-item${action === "delete" ? " destructive" : ""}`;
@@ -2909,11 +2921,13 @@ async function openAkousma(akousmaId) {
       rows.push(`<section class="memory-block"><div class="memory-kicker">Kinship</div><div class="memory-links">${data.related.map((item) => `<span>${escapeHtml((item.type || "").replaceAll("_", " "))} ${item.direction === "incoming" ? "←" : "→"} ${link(item)}</span>`).join("")}</div></section>`);
     }
     if ((record.tags || []).length) rows.push(`<section class="memory-block"><div class="memory-kicker">Tags</div><p>${record.tags.map((tag) => `#${escapeHtml(tag)}`).join(" · ")}</p></section>`);
-    rows.push(
-      `<div class="memory-actions">` +
-      ["sound", "prompt", "lineage"].map((mode) => `<button class="pill-button small" data-germ-mode="${mode}" data-germ-id="${escapeHtml(akousmaId)}">germ: ${mode}</button>`).join("") +
-      `</div>`,
-    );
+    if (state.germEnabled) {
+      rows.push(
+        `<div class="memory-actions">` +
+        ["sound", "prompt", "lineage"].map((mode) => `<button class="pill-button small" data-germ-mode="${mode}" data-germ-id="${escapeHtml(akousmaId)}">germ: ${mode}</button>`).join("") +
+        `</div>`,
+      );
+    }
     akousmataUi.detail.innerHTML = rows.join("");
     akousmataUi.detail.querySelectorAll("a[data-akousma]").forEach((anchor) => {
       anchor.addEventListener("click", (event) => {

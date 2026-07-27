@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.0 - 2026-07-27
+
+- **Decision-first gateway**: `oida/gateway/v0.5` and
+  `oida/route-outcome/v0.1` make a pre-listening refusal a complete result with
+  an attributable route decision and receipt. No empty listening event,
+  acoustic claim, or audio asset is fabricated; its decision-only Akousma is
+  durable only after an explicit permitted Remember request.
+- **Accountable listening event v0.3**: every completed hearing now carries
+  AKOÚŌ context v2, temporal listening passes, source/cut/corpus provenance,
+  and route decisions. Host perception advances to v0.4 while v0.3/context-v1
+  inputs remain readable for compatibility.
+- **Stack contract refresh**: Oída now targets AKOÚŌ 0.9, Earworm/Akousma 0.6
+  and spec 1.5, and Akousmata 0.6. The harness adds corpus listening and no
+  longer treats prompts, transcripts, captions, or contextual notes as heard
+  evidence. `undetermined` remains a claim category, never an honest absence.
+- **Plural listening without false consensus**: listening passes keep
+  participants, influences, disagreements, permissions, and revisions
+  attributable. Multiple routes from one host are not presented as an ear
+  swarm without an explicit ensemble contract.
+- **GERM as an optional capability**: discovery reports configuration and
+  enablement without probing the network, and host skills require an explicit
+  enabled handoff. There is no implicit localhost target; unconfigured
+  endpoints return `409` and dashboard handoff controls remain absent. Core
+  listening, memory, and release validation do not depend on a GERM
+  installation.
+
 ## 0.8.0 - 2026-07-22
 
 - **Accountable listening events**: every local and host-supplied result now
