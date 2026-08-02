@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oida.local/schemas/route-outcome.schema.json",
+  "title": "Oída route outcome",
+  "description": "A complete gateway decision made before a listening pass. It records coded silence without fabricating audio, perception, or claims.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "contract",
+    "completed_at",
+    "status",
+    "perception_path",
+    "subject",
+    "route_decision",
+    "honest_absences",
+    "receipt",
+    "memory"
+  ],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "contract": {"const": "oida/route-outcome/v0.1"},
+    "completed_at": {"type": "string", "minLength": 1},
+    "status": {"const": "complete"},
+    "perception_path": {"enum": ["oida_owned", "host_supplied"]},
+    "subject": {"type": "string", "minLength": 1},
+    "route_decision": {"$ref": "https://akouo.dev/schemas/route-decision.schema.json"},
+    "honest_absences": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "subject", "attributed_to"],
+        "properties": {
+          "kind": {"enum": ["unavailable", "withheld", "refused", "not_retained", "forgotten"]},
+          "subject": {"type": "string", "minLength": 1},
+          "attributed_to": {"type": "string", "minLength": 1},
+          "count": {"type": ["integer", "null"], "minimum": 0},
+          "note": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "created_at", "actor", "result", "recovery"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "minLength": 1},
+        "actor": {"type": "string", "minLength": 1},
+        "result": {"type": "string", "minLength": 1},
+        "recovery": {"type": "string", "minLength": 1}
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "status", "akousma_id"],
+      "properties": {
+        "requested": {"type": "boolean"},
+        "status": {"enum": ["not_requested", "pending", "retained", "withheld", "unavailable"]},
+        "akousma_id": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "covenant": {"type": "object"}
+  }
+}

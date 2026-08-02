@@ -5,9 +5,10 @@ from typing import Any
 from harness.akouo.routing import evidence_level_for_report, route_for_command, routing_plan
 from harness.claim_mapper import map_report_to_claims
 from harness.types import LISTENING_MODES, empty_mediations, empty_risks
+from oida.accountable import listening_context_for_report
 
 
-AKOUO_OUTPUT_VERSION = "0.6"
+AKOUO_OUTPUT_VERSION = "0.9"
 
 
 def build_apparatus(report: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -78,6 +79,7 @@ def build_listening_output(
         "akouo_version": AKOUO_OUTPUT_VERSION,
         "apparatus": apparatus,
         "listener": {"type": "agent", "process": "agent_automated"},
+        "listening_context": listening_context_for_report(report or {}, apparatus=apparatus),
         "listening_claims": claims,
         "what_appears": summarize_visible_claims(claims),
         "what_remains_hidden": [claim["statement"] for claim in claims.get("undetermined", [])[:8]],

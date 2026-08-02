@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from harness.akouo.command import build_harness_output
+from oida.accountable import listening_context_for_report, refusal_outcome
 from oida.akouo_skills import akouo_manifest, route_preset
 from oida.contracts import (
     AudioDataRef,
@@ -35,8 +36,8 @@ from oida.listening_identity import (
 )
 from oida.memory import earworm_context_for_event
 
-GATEWAY_CONTRACT = "oida/gateway/v0.3"
-HOST_PERCEPTION_CONTRACT = "oida/host-perception/v0.2"
+GATEWAY_CONTRACT = "oida/gateway/v0.5"
+HOST_PERCEPTION_CONTRACT = "oida/host-perception/v0.4"
 SUPPORTED_HOSTS = ("hermes", "codex", "claude", "openclaw", "opencode", "generic")
 CLAIM_CATEGORIES = ("heard", "measured", "inferred", "interpreted", "speculative", "undetermined")
 
@@ -57,8 +58,8 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
                 "contract": f"akouo/{akouo['akouo_contract_version']}",
                 "host_profile_version": akouo["version"],
             },
-            "earworm": {"role": "event/provenance and context protocol", "contract": "earworm/v0.4"},
-            "akousmata": {"role": "local sonic-memory store and navigator", "contract": "akousmata/v0.4"},
+            "earworm": {"role": "auditum, event, provenance, and context protocol", "contract": "earworm/v0.6"},
+            "akousmata": {"role": "local accountable-memory store and navigator", "contract": "akousmata/v0.6"},
         },
         "perception_paths": {
             "oida_owned": {
@@ -88,6 +89,12 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
             "listening_identity": "/listening",
             "covenant": "/covenant",
         },
+        "schemas": {
+            "host_perception": "/gateway/schema/host-perception",
+            "listening_event": "/gateway/schema/listening-event",
+            "listening_context": "/gateway/schema/listening-context",
+            "route_outcome": "/gateway/schema/route-outcome",
+        },
         "privacy": {
             "local_first": True,
             "memory_is_explicit": True,
@@ -95,6 +102,125 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
             "remote_access": "operator-configured private network only",
         },
         "route_presets": [preset["id"] for preset in akouo["route_presets"]],
+        "optional_components": {
+            "germ": _germ_capability(),
+        },
+    }
+
+
+def _germ_capability() -> dict[str, Any]:
+    try:
+        from oida.akousma_bridge import germ_capability
+
+        return germ_capability()
+    except ImportError:
+        return {
+            "optional": True,
+            "configured": False,
+            "enabled": False,
+            "base_url": None,
+            "reachable": None,
+            "modes": [],
+            "handoff_requires_explicit_action": True,
+            "reason": "The optional akousma bridge is not installed.",
+        }
+
+
+def decision_first_refusal(
+    *,
+    perception_path: str,
+    source_type: str,
+    refusal: str,
+    covenant_engine: Any,
+    remember: bool,
+    gate: str = "input",
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Complete and optionally retain a refusal without inventing perception."""
+
+    subject = f"{source_type.replace('_', ' ')} listening input"
+    covenant = covenant_engine.event_block(
+        rules_applied=[str(refusal)],
+        withheld=[{"rule": str(refusal), "subject": subject, "count": 1}],
+    )
+    outcome = refusal_outcome(
+        perception_path=perception_path,
+        subject=subject,
+        reason=(
+            f"The adopted covenant {covenant_engine.covenant.id} refused this input before listening: "
+            f"{refusal}"
+        ),
+        gate=gate,
+        covenant=covenant,
+        remember_requested=remember,
+    )
+    memory_refusal = covenant_engine.forbids_retention("memory")
+    if remember and memory_refusal:
+        outcome["memory"] = {
+            "requested": True,
+            "status": "withheld",
+            "akousma_id": None,
+            "reason": str(memory_refusal),
+        }
+        outcome["honest_absences"].append({
+            "kind": "withheld",
+            "subject": "decision-record retention",
+            "attributed_to": str(covenant_engine.covenant.id),
+            "count": 1,
+            "note": "The refusal was returned to the caller but not written to durable memory.",
+        })
+
+    from oida.akousma_bridge import build_decision_akousma, persist_akousma
+
+    provenance_type = {
+        "file": "imported",
+        "external_stream": "imported",
+        "generated": "generated",
+    }.get(source_type, "recorded" if source_type in {"live_input", "system_output", "buffer"} else "unknown")
+    origin = {
+        "live_input": "live-input",
+        "buffer": "live-input",
+        "system_output": "system-output",
+        "external_stream": "system-output",
+        "generated": "generated",
+    }.get(source_type, "file")
+    record = build_decision_akousma(
+        outcome,
+        source_type=provenance_type,
+        origin=origin,
+        session_id=session_id,
+    )
+    if remember and not memory_refusal:
+        try:
+            akousma_id = persist_akousma(record)
+            outcome["memory"] = {
+                "requested": True,
+                "status": "retained",
+                "akousma_id": akousma_id,
+            }
+        except (OSError, RuntimeError, ValueError):
+            outcome["memory"] = {
+                "requested": True,
+                "status": "unavailable",
+                "akousma_id": None,
+                "reason": "The shared accountable-memory store was unavailable; the refusal remains in this response.",
+            }
+    return {
+        "contract": GATEWAY_CONTRACT,
+        "perception_path": perception_path,
+        "status": "complete",
+        "outcome": "refused",
+        "route_outcome": outcome,
+        "decision_record": record,
+        "listening_event": None,
+        "perception_report": None,
+        "command_output": None,
+        "earworm": {
+            "protocol": "earworm",
+            "version": "0.6.0",
+            "auditum": record["auditum"],
+        },
+        "trace": None,
     }
 
 
@@ -128,8 +254,8 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
     uncertainty = _string_list(payload.get("uncertainty"))
     uncertainty.extend(_string_list(apparatus.get("known_blind_spots")))
     source_uri = str(source.get("uri") or source.get("path") or f"host://{host_id}/{host.get('session_id') or 'session'}")
-    return {
-        "version": "0.2",
+    normalized = {
+        "version": "0.4",
         "contract": HOST_PERCEPTION_CONTRACT,
         "source": {
             "path": source_uri,
@@ -159,6 +285,10 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
             "audio_input_capable": bool(host.get("audio_input_capable", True)),
         },
         "listening_identity": _dict(payload.get("listening_identity")) or None,
+        # Host declarations are retained as attributed input. The gateway
+        # computes the effective context below and never accepts a host's
+        # capability declaration as operational authority.
+        "host_declared_listening_context": _dict(payload.get("listening_context")) or None,
         "apparatus": apparatus,
         "host_observations": observations,
         "dsp": dsp,
@@ -172,6 +302,14 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
         "forbidden_topics_triggered": [],
         "raw_host_report": payload.get("raw_report"),
     }
+    normalized["listening_context"] = listening_context_for_report(
+        normalized,
+        apparatus=apparatus,
+        raw_audio_policy="not_stored",
+        privacy_mode="session",
+        action_mode="observe_only",
+    )
+    return normalized
 
 
 def harness_host_perception(
@@ -198,7 +336,15 @@ def harness_host_perception(
         source_type = str(source.get("type") or "external_stream")
         refusal = covenant_engine.refuse_source(source_type) or covenant_engine.refuse_quiet_hours()
         if refusal:
-            raise PermissionError(refusal)
+            host = _dict(payload.get("host"))
+            return decision_first_refusal(
+                perception_path="host_supplied",
+                source_type=source_type,
+                refusal=str(refusal),
+                covenant_engine=covenant_engine,
+                remember=remember,
+                session_id=str(host.get("session_id") or "") or None,
+            )
         if covenant_engine.forbids_retention("raw-audio"):
             raw_audio_policy = "not_stored"
             rules_applied.append("do_not_retain:raw-audio")
@@ -251,6 +397,8 @@ def harness_host_perception(
     return {
         "contract": GATEWAY_CONTRACT,
         "perception_path": "host_supplied",
+        "status": "complete",
+        "outcome": "listened",
         "listening_event": event,
         "perception_report": perception,
         "command_output": command_output,

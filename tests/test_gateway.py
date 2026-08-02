@@ -8,9 +8,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import jsonschema
+import akousma
 from fastapi.testclient import TestClient
 
 from harness.akouo.command import build_apparatus
+from harness.akouo.loader import AkouoLoader
 from harness.claim_mapper import map_report_to_claims
 from oida.covenant import CovenantEngine, parse_covenant
 from oida.gateway import GATEWAY_CONTRACT, HOST_PERCEPTION_CONTRACT, harness_host_perception, normalize_host_perception
@@ -43,6 +45,60 @@ def host_payload() -> dict[str, object]:
             "bandwidth_limit_hz": 24000,
             "known_blind_spots": ["The host does not expose its resampler."],
         },
+        "listening_context": {
+            "contract": "akouo/listening-context/v2",
+            "position": {
+                "relation_to_object": "host model inspecting an attached recording",
+                "limitations": ["The gateway does not receive the raw audio."],
+            },
+            "apertures": [{
+                "id": "host-audio",
+                "kind": "direct_audio",
+                "status": "available",
+                "limits": ["Host preprocessing is opaque."],
+            }],
+            "auditory_scales": ["event", "scene"],
+            "sources_of_listening": ["audio", "model"],
+            "participants": [{
+                "id": "codex",
+                "type": "agent",
+                "role": "host perceptual listener",
+                "report_ref": "#/observations",
+            }],
+            "action_authority": {
+                "mode": "execute_scoped",
+                "scopes": ["memory.remember"],
+                "requires_confirmation": False,
+                "reversible": True,
+            },
+            "honest_absences": [],
+            "listening_passes": [{
+                "id": "pass-host-fixture",
+                "listener_id": "codex",
+                "route": ["/listen", "acoulogical-object-listening"],
+                "started_at": "2026-07-27T00:00:00Z",
+                "completed_at": "2026-07-27T00:00:01Z",
+                "moment": {"relation": "past_capture", "scales": ["event", "scene"]},
+                "source_refs": ["#/source", "#/observations"],
+                "claim_refs": ["#/observations/0", "#/observations/1"],
+                "decision_refs": ["decision-host-input"],
+                "influenced_by": [],
+            }],
+            "route_decisions": [{
+                "id": "decision-host-input",
+                "gate": "input",
+                "outcome": "proceed",
+                "subject": "attached harbor recording",
+                "reason": "The host declared an audio-capable input and a bounded report.",
+                "decided_at": "2026-07-27T00:00:00Z",
+                "authority": {
+                    "mode": "execute_scoped",
+                    "actor": "codex",
+                    "requires_confirmation": False,
+                    "reversible": True,
+                },
+            }],
+        },
         "observations": [
             {
                 "statement": "A repeating metallic impact is audible in a wide stereo field.",
@@ -66,6 +122,13 @@ class GatewayContractTests(unittest.TestCase):
     def test_fixture_validates_against_host_schema(self) -> None:
         schema_path = Path(__file__).resolve().parents[1] / "oida" / "schemas" / "host-perception.schema.json"
         jsonschema.Draft202012Validator(json.loads(schema_path.read_text(encoding="utf-8"))).validate(host_payload())
+        AkouoLoader().validate("listening-context", host_payload()["listening_context"])
+
+    def test_legacy_v1_host_context_remains_readable(self) -> None:
+        payload = host_payload()
+        payload["listening_context"] = {"contract": "akouo/listening-context/v1"}
+        schema_path = Path(__file__).resolve().parents[1] / "oida" / "schemas" / "host-perception.schema.json"
+        jsonschema.Draft202012Validator(json.loads(schema_path.read_text(encoding="utf-8"))).validate(payload)
 
     def test_host_apparatus_replaces_moss_assumptions(self) -> None:
         report = normalize_host_perception(host_payload())
@@ -91,7 +154,19 @@ class GatewayContractTests(unittest.TestCase):
         self.assertEqual(event["source"]["platform"], "codex")
         self.assertIsNotNone(result["trace"])
         self.assertEqual(result["trace"]["earworm"]["session"]["app_id"], "oida.akousmata")
-        self.assertEqual(result["earworm"]["version"], "0.2.2")
+        self.assertEqual(result["earworm"]["version"], "0.6.0")
+        context = event["listening_context"]
+        self.assertEqual(context["contract"], "akouo/listening-context/v2")
+        self.assertEqual(context["action_authority"]["mode"], "observe_only")
+        self.assertTrue(context["action_authority"]["requires_confirmation"])
+        self.assertIn("raw audio at the OÍDA gateway", {item["subject"] for item in context["honest_absences"]})
+        self.assertEqual(event["contract"], "oida/listening-event/v0.3")
+        self.assertEqual(event["listening_passes"], context["listening_passes"])
+        self.assertEqual(event["route_decisions"], context["route_decisions"])
+        self.assertTrue(event["listening_provenance"]["listening_sources"])
+        event_types = [item["type"] for item in result["earworm"]["session"]["events"]]
+        self.assertIn("listening.report.created", event_types)
+        self.assertIn("listening.action.executed", event_types)
 
     def test_host_harness_attributes_only_a_matching_declared_identity_revision(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,6 +219,24 @@ class GatewayContractTests(unittest.TestCase):
         subjects = {item["subject"] for item in result["listening_event"]["covenant"]["withheld"]}
         self.assertIn("speech", subjects)
 
+    def test_host_refusal_is_a_decision_not_a_listening_event(self) -> None:
+        payload = host_payload()
+        payload["source"]["type"] = "system_output"
+        covenant = CovenantEngine(parse_covenant("## rules\n- do not listen: system output\n"))
+
+        result = harness_host_perception(payload, covenant_engine=covenant)
+
+        self.assertEqual(result["outcome"], "refused")
+        self.assertIsNone(result["listening_event"])
+        self.assertIsNone(result["perception_report"])
+        self.assertNotIn("audio", result["decision_record"])
+        self.assertEqual(akousma.validation_errors(result["decision_record"]), [])
+        schema_path = Path(__file__).resolve().parents[1] / "oida" / "schemas" / "route-outcome.schema.json"
+        jsonschema.Draft202012Validator(
+            json.loads(schema_path.read_text(encoding="utf-8")),
+            registry=AkouoLoader().schema_registry(),
+        ).validate(result["route_outcome"])
+
     def test_gateway_endpoint_accepts_host_perception(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             os.environ,
@@ -161,13 +254,26 @@ class GatewayContractTests(unittest.TestCase):
         self.assertEqual(response.json()["listening_event"]["source"]["platform"], "codex")
         self.assertEqual(response.json()["earworm"]["protocol"], "earworm")
 
+    def test_listening_event_validates_against_published_schemas(self) -> None:
+        result = harness_host_perception(host_payload())
+        root = Path(__file__).resolve().parents[1]
+        event_schema = json.loads((root / "oida" / "schemas" / "listening-event.schema.json").read_text())
+        jsonschema.Draft202012Validator(
+            event_schema,
+            registry=AkouoLoader().schema_registry(),
+        ).validate(result["listening_event"])
+
     def test_gateway_manifest_exposes_both_perception_paths(self) -> None:
         client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
         response = client.get("/gateway")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["contract"], GATEWAY_CONTRACT)
-        self.assertEqual(response.json()["components"]["akouo"]["contract"], "akouo/v0.7")
+        self.assertEqual(response.json()["components"]["akouo"]["contract"], "akouo/v0.9")
         self.assertEqual(set(response.json()["perception_paths"]), {"oida_owned", "host_supplied"})
+        self.assertEqual(
+            set(response.json()["schemas"]),
+            {"host_perception", "listening_event", "listening_context", "route_outcome"},
+        )
 
 
 if __name__ == "__main__":

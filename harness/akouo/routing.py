@@ -24,6 +24,7 @@ COMMAND_ROUTES: dict[str, CommandRoute] = {
     "/litany": CommandRoute("/litany", ["critical-political-listening", "transductive-media-listening", "acoulogical-object-listening", "musical-aesthetic-listening"], "critical-political-listening", "Critique simplistic sound-versus-vision claims through grounded listening."),
     "/fiction": CommandRoute("/fiction", ["symbolic-fictional-listening", "embodied-affective-listening", "ecological-posthuman-listening"], "embodied-affective-listening", "Declared speculative sonic-world route with evidence boundaries intact."),
     "/transduce": CommandRoute("/transduce", ["transductive-media-listening", "signal-inspection-listening", "critical-political-listening"], "signal-inspection-listening", "Mediation-chain route for sensors, codecs, AI audio, and model outputs."),
+    "/corpus": CommandRoute("/corpus", ["corpus-listening", "transductive-media-listening", "critical-political-listening"], "critical-political-listening", "Inheritance route for model, dataset, codec, taxonomy, and fine-tune disclosures."),
     "/voice": CommandRoute("/voice", ["voice-speech-listening", "transductive-media-listening", "accessibility-normative-listening", "critical-political-listening"], "accessibility-normative-listening", "Voice/speech pass with identity and consent cautions."),
     "/audiovision": CommandRoute("/audiovision", ["audiovisual-scenic-listening", "acoulogical-object-listening", "voice-speech-listening", "critical-political-listening"], "acoulogical-object-listening", "Sound-image-text-scene route for audiovisual material."),
     "/access": CommandRoute("/access", ["accessibility-normative-listening", "voice-speech-listening", "embodied-affective-listening", "critical-political-listening"], "accessibility-normative-listening", "Accessibility and hearing-norm review route."),
@@ -61,12 +62,12 @@ def claim_permissions_for(evidence_level: str, command: str = "/listen") -> dict
     speculative = False
     table = {
         "none": (False, False, False, False),
-        "prompt_only": (True, False, True, True),
+        "prompt_only": (False, False, True, True),
         "metadata_only": (False, True, True, True),
         "decoded_audio_metadata": (True, True, True, True),
         "measured_signal": (True, True, True, True),
-        "transcript_or_caption": (True, False, True, True),
-        "contextual_note": (True, False, True, True),
+        "transcript_or_caption": (False, False, True, True),
+        "contextual_note": (False, False, True, True),
         "mixed": (True, True, True, True),
     }
     heard, measured, inferred, interpreted = table.get(evidence_level, table["mixed"])

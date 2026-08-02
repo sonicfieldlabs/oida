@@ -18,7 +18,8 @@ can install its agent adapters:
 curl -fsSL https://raw.githubusercontent.com/sonicfieldlabs/listening-stack/main/install.sh | bash
 ```
 
-Choose **Oída only** or **Oída + GERM**. The recommended Oída selection is
+Choose the **core stack** and add **GERM** only if you want the optional
+cultivation handoff. The recommended Oída selection is
 MOSS-Audio 4B Instruct plus 4B Thinking.
 
 ## Manual Installation

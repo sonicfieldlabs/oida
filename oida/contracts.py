@@ -119,6 +119,13 @@ class ListeningEvent:
     routes: list[ListeningRouteResult]
     aggregate: ListeningAggregate
     features: dict[str, Any]
+    contract: str = "oida/listening-event/v0.3"
+    listening_context: dict[str, Any] = field(default_factory=dict)
+    listening_provenance: dict[str, Any] = field(default_factory=dict)
+    listening_passes: list[dict[str, Any]] = field(default_factory=list)
+    route_decisions: list[dict[str, Any]] = field(default_factory=list)
+    apparatus: dict[str, Any] = field(default_factory=dict)
+    disagreements: list[dict[str, Any]] = field(default_factory=list)
     listening_identity: dict[str, Any] = field(default_factory=dict)
     memory: AkousmataLinks = field(default_factory=AkousmataLinks)
     artifacts: list[ListeningArtifact] = field(default_factory=list)

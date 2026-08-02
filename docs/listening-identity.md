@@ -166,7 +166,7 @@ Identity never repairs or relaxes that limitation.
 
 ## Hosted Ears And Revision Handshake
 
-The host-perception contract `oida/host-perception/v0.2` accepts an optional
+The host-perception contract `oida/host-perception/v0.4` accepts an optional
 declaration alongside the host's observations:
 
 ```json

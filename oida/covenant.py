@@ -65,7 +65,7 @@ from typing import Any
 
 from oida.config import load_config
 
-CONTRACT = "akouo/v0.7"
+CONTRACT = "akouo/v0.9"
 
 _SLUG_RE = re.compile(r"[^a-z0-9/]+")
 

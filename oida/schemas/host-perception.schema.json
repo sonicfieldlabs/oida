@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["host", "source", "observations"],
   "properties": {
-    "contract": {"const": "oida/host-perception/v0.2"},
+    "contract": {"enum": ["oida/host-perception/v0.3", "oida/host-perception/v0.4"]},
     "host": {
       "type": "object",
       "required": ["id", "model"],
@@ -62,6 +62,27 @@
         "known_blind_spots": {"type": "array", "items": {"type": "string"}}
       },
       "additionalProperties": false
+    },
+    "listening_context": {
+      "description": "Host-declared situated listening context. Current hosts use AKOÚŌ context v2; the v1 branch remains a permissive read-compatibility boundary. Oída preserves either as attributed input but computes its own effective context and authority.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["contract", "position", "apertures", "auditory_scales", "sources_of_listening", "participants", "action_authority", "honest_absences", "listening_passes", "route_decisions"],
+          "properties": {
+            "contract": {"const": "akouo/listening-context/v2"},
+            "listening_passes": {"type": "array"},
+            "route_decisions": {"type": "array"}
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": ["contract"],
+          "properties": {"contract": {"const": "akouo/listening-context/v1"}},
+          "additionalProperties": true
+        }
+      ]
     },
     "observations": {
       "type": "array",

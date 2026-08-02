@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.9.0 - 2026-07-27
+
+- **Decision-first gateway**: `oida/gateway/v0.5` and
+  `oida/route-outcome/v0.1` make a pre-listening refusal a complete result with
+  an attributable route decision and receipt. No empty listening event,
+  acoustic claim, or audio asset is fabricated; its decision-only Akousma is
+  durable only after an explicit permitted Remember request.
+- **Accountable listening event v0.3**: every completed hearing now carries
+  AKOÚŌ context v2, temporal listening passes, source/cut/corpus provenance,
+  and route decisions. Host perception advances to v0.4 while v0.3/context-v1
+  inputs remain readable for compatibility.
+- **Stack contract refresh**: Oída now targets AKOÚŌ 0.9, Earworm/Akousma 0.6
+  and spec 1.5, and Akousmata 0.6. The harness adds corpus listening and no
+  longer treats prompts, transcripts, captions, or contextual notes as heard
+  evidence. `undetermined` remains a claim category, never an honest absence.
+- **Plural listening without false consensus**: listening passes keep
+  participants, influences, disagreements, permissions, and revisions
+  attributable. Multiple routes from one host are not presented as an ear
+  swarm without an explicit ensemble contract.
+- **GERM as an optional capability**: discovery reports configuration and
+  enablement without probing the network, and host skills require an explicit
+  enabled handoff. There is no implicit localhost target; unconfigured
+  endpoints return `409` and dashboard handoff controls remain absent. Core
+  listening, memory, and release validation do not depend on a GERM
+  installation.
+
+## 0.8.0 - 2026-07-22
+
+- **Accountable listening events**: every local and host-supplied result now
+  declares `oida/listening-event/v0.2` plus the shared
+  `akouo/listening-context/v1` block: position, actual apertures, auditory
+  scales, sources of listening, participants, honest absences, and a distinct
+  action-authority boundary. Capture metadata no longer opens a measurement
+  aperture by itself, and host model observations remain separate from DSP.
+- **Gateway v0.4 / host perception v0.3**: hosts may submit their situated
+  listening declaration, which OÍDA retains as attributed input. OÍDA still
+  computes the effective runtime context and clamps listening to observe-only;
+  capability declarations cannot grant retention, revelation, or execution.
+- **Earworm 0.5 auditums**: explicit memory writes preserve every route report
+  under one honest OÍDA listener identity, carry context and apparatus refs,
+  retain attributable disagreement and honest absence, and record scoped
+  action receipts. Earworm traces add listening-report and listening-action
+  events rather than reducing listening to a generic analysis frame.
+- **Stack contract refresh**: AKOÚŌ advances to v0.8, Akousma to spec v1.4,
+  Earworm and Akousmata integrations to 0.5, and all bundled host skills teach
+  the same context, authority, disagreement, and explicit-memory rules.
+- **Reproducible release harness**: CI and distribution builds resolve AKOÚŌ,
+  Earworm, and Akousmata from their exact v0.8/v0.5 release tags so package
+  verification cannot silently fall back to an older default branch.
+
 ## 0.7.0 - 2026-07-17
 
 - **Explicit listening identity**: Oída now creates an empty, local

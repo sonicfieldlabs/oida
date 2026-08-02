@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oida.local/schemas/listening-event.schema.json",
+  "title": "OÍDA accountable listening event",
+  "description": "The stable cross-surface result emitted by Oída v0.9. It preserves AKOÚŌ v0.9 provenance, temporal passes, and route decisions alongside the listening report. Extension fields such as covenant, location, capture, and session remain additive.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "id",
+    "created_at",
+    "contract",
+    "source",
+    "segment",
+    "routes",
+    "aggregate",
+    "features",
+    "listening_context",
+    "listening_provenance",
+    "listening_passes",
+    "route_decisions",
+    "apparatus",
+    "disagreements",
+    "listening_identity",
+    "memory",
+    "artifacts",
+    "tags",
+    "privacy_mode",
+    "raw_audio_policy"
+  ],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "contract": {"const": "oida/listening-event/v0.3"},
+    "source": {
+      "type": "object",
+      "required": ["type", "label"],
+      "properties": {
+        "type": {"enum": ["live_input", "system_output", "file", "buffer", "generated", "external_stream"]},
+        "label": {"type": "string", "minLength": 1},
+        "supported": {"type": "boolean"},
+        "status": {"type": "string"},
+        "details": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "segment": {
+      "type": "object",
+      "required": ["id", "source", "created_at", "duration_ms", "sample_rate", "channels", "format", "data_ref"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "source": {"type": "object"},
+        "created_at": {"type": "string", "minLength": 1},
+        "duration_ms": {"type": "integer", "minimum": 0},
+        "sample_rate": {"type": "integer", "minimum": 0},
+        "channels": {"type": "integer", "minimum": 0},
+        "format": {"enum": ["pcm_f32", "pcm_i16", "wav", "flac", "mp3", "other"]},
+        "data_ref": {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["path", "memory", "external", "none"]},
+            "uri": {"type": ["string", "null"]},
+            "sha256": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "routes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["route_id", "route_name", "skill_ids", "summary", "structured"],
+        "properties": {
+          "route_id": {"type": "string", "minLength": 1},
+          "route_name": {"type": "string", "minLength": 1},
+          "skill_ids": {"type": "array", "items": {"type": "string"}},
+          "summary": {"type": "string"},
+          "structured": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "aggregate": {"type": "object"},
+    "features": {"type": "object"},
+    "listening_context": {"$ref": "https://akouo.dev/schemas/listening-context.schema.json"},
+    "listening_provenance": {"$ref": "https://akouo.dev/schemas/listening-provenance.schema.json"},
+    "listening_passes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "https://akouo.dev/schemas/listening-pass.schema.json"}
+    },
+    "route_decisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "https://akouo.dev/schemas/route-decision.schema.json"}
+    },
+    "apparatus": {"type": "object"},
+    "disagreements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["positions"],
+        "properties": {"positions": {"type": "array", "minItems": 2}},
+        "additionalProperties": true
+      }
+    },
+    "listening_identity": {"type": "object"},
+    "memory": {"type": "object"},
+    "artifacts": {"type": "array"},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "privacy_mode": {"enum": ["ephemeral", "session", "saved", "incognito"]},
+    "raw_audio_policy": {"enum": ["not_stored", "temp", "saved", "external_ref"]}
+  }
+}

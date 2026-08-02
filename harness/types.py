@@ -7,6 +7,7 @@ LISTENING_MODES = [
     "acoulogical-object-listening",
     "embodied-affective-listening",
     "transductive-media-listening",
+    "corpus-listening",
     "forensic-archival-listening",
     "ecological-posthuman-listening",
     "critical-political-listening",

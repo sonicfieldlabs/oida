@@ -57,11 +57,12 @@ class AkouoLoader:
 
     def validate(self, schema_name: str, instance: dict[str, Any]) -> None:
         schema = self.load_schema(schema_name)
-        registry = self._schema_registry()
+        registry = self.schema_registry()
         validator = jsonschema.Draft202012Validator(schema, registry=registry)
         validator.validate(instance)
 
-    def _schema_registry(self) -> Registry:
+    def schema_registry(self) -> Registry:
+        """Return the local canonical registry without resolving network refs."""
         resources: list[tuple[str, Resource]] = []
         for path in self.schemas_dir.glob("*.json"):
             schema = json.loads(path.read_text(encoding="utf-8"))
@@ -69,3 +70,7 @@ class AkouoLoader:
             if "$id" in schema:
                 resources.append((str(schema["$id"]), Resource.from_contents(schema, default_specification=DRAFT202012)))
         return Registry().with_resources(resources)
+
+    def _schema_registry(self) -> Registry:
+        """Compatibility alias for callers written before the public registry."""
+        return self.schema_registry()

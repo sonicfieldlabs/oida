@@ -1,17 +1,53 @@
 """oída→germ bridge + cross-app akousma round-trip (Phase 4 acceptance)."""
+import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import akousma
 from oida import akousma_bridge
 
 
 class TestGermDeepLinks(unittest.TestCase):
+    def test_capability_is_optional_and_does_not_claim_reachability(self):
+        with patch.dict(os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False):
+            capability = akousma_bridge.germ_capability()
+        self.assertTrue(capability["optional"])
+        self.assertFalse(capability["configured"])
+        self.assertFalse(capability["enabled"])
+        self.assertIsNone(capability["reachable"])
+        self.assertTrue(capability["handoff_requires_explicit_action"])
+
+    def test_configured_capability_normalizes_url_without_network_probe(self):
+        with patch.dict(
+            os.environ,
+            {"OIDA_GERM_URL": "http://127.0.0.1:5178/", "OIDA_GERM_ENABLED": "1"},
+            clear=False,
+        ):
+            capability = akousma_bridge.germ_capability()
+        self.assertTrue(capability["configured"])
+        self.assertTrue(capability["enabled"])
+        self.assertEqual(capability["base_url"], "http://127.0.0.1:5178")
+        self.assertIsNone(capability["reachable"])
+
+    def test_enable_flag_without_url_does_not_invent_a_target(self):
+        with patch.dict(os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": "1"}, clear=False):
+            capability = akousma_bridge.germ_capability()
+        self.assertFalse(capability["configured"])
+        self.assertFalse(capability["enabled"])
+        self.assertIsNone(capability["base_url"])
+
     def test_deep_link_format(self):
-        url = akousma_bridge.germ_deep_link("akm_1", "prompt")
+        with patch.dict(os.environ, {"OIDA_GERM_URL": "http://127.0.0.1:5178", "OIDA_GERM_ENABLED": "1"}):
+            url = akousma_bridge.germ_deep_link("akm_1", "prompt")
         self.assertIn("/import?", url)
         self.assertIn("akousma=akm_1", url)
         self.assertIn("mode=prompt", url)
+
+    def test_unconfigured_handoff_has_no_implicit_local_target(self):
+        with patch.dict(os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False):
+            with self.assertRaises(akousma_bridge.GermNotConfiguredError):
+                akousma_bridge.germ_deep_link("akm_1", "prompt")
 
     def test_rejects_unknown_mode(self):
         with self.assertRaises(ValueError):
@@ -79,6 +115,16 @@ class TestCrossAppRoundTrip(unittest.TestCase):
         self.store.close()
         self.tmp.cleanup()
 
+    def test_unconfigured_handoff_does_not_persist_a_record(self):
+        record = akousma_bridge.build_akousma_from_listen(
+            audio={"asset_id": "file-unconfigured"},
+            origin="file",
+        )
+        with patch.dict(os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False):
+            with self.assertRaises(akousma_bridge.GermNotConfiguredError):
+                akousma_bridge.handoff_to_germ(record, "prompt", store=self.store)
+        self.assertEqual(self.store.query(), [])
+
     def test_listen_to_generate_to_lineage(self):
         # 1) oída listens to a file → akousma A, "open as prompt" hands it to germ.
         a = akousma_bridge.build_akousma_from_listen(
@@ -86,7 +132,8 @@ class TestCrossAppRoundTrip(unittest.TestCase):
             origin="file",
             listening={"oida.signal": {"class": "tonal"}, "akouo.describe": {"summary": "struck bell"}},
         )
-        handoff = akousma_bridge.handoff_to_germ(a, "prompt", store=self.store)
+        with patch.dict(os.environ, {"OIDA_GERM_URL": "http://127.0.0.1:5178", "OIDA_GERM_ENABLED": "1"}):
+            handoff = akousma_bridge.handoff_to_germ(a, "prompt", store=self.store)
         A = handoff["akousma_id"]
         self.assertIn("mode=prompt", handoff["germ_url"])
 

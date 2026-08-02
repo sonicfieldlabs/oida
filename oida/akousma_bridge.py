@@ -1,7 +1,7 @@
 """Oída → GERM bridge over the shared akousma protocol.
 
-Oída hears; GERM cultivates. After a listen, Oída persists an **akousma** (the
-sound's memory record) into the shared **Akousmata** store and hands GERM an
+Oída hears; GERM may cultivate. After an explicit handoff, Oída persists an
+**akousma** (the sound's memory record) into the shared **Akousmata** store and hands GERM an
 ``akousma_id`` via a deep link. The three UI buttons map to three modes:
 
 - ``sound``   — "open as sound":    load the listened fragment as an audio source in GERM.
@@ -29,9 +29,38 @@ from oida.listening_identity import (
 MODES = ("sound", "prompt", "lineage")
 
 
+class GermNotConfiguredError(RuntimeError):
+    """Raised when a caller requests an optional GERM handoff without opting in."""
+
+
+def germ_capability() -> dict[str, Any]:
+    """Describe GERM as an optional handoff target without probing the network."""
+
+    configured_url = str(os.getenv("OIDA_GERM_URL") or "").strip()
+    enabled_value = str(os.getenv("OIDA_GERM_ENABLED") or "").strip().lower()
+    enabled = bool(configured_url) and (
+        enabled_value in {"1", "true", "yes", "on"} if enabled_value else True
+    )
+    return {
+        "optional": True,
+        "configured": bool(configured_url),
+        "enabled": enabled,
+        "base_url": configured_url.rstrip("/") if enabled and configured_url else None,
+        "reachable": None,
+        "reachability_note": "Oída does not contact an optional GERM service during capability discovery.",
+        "modes": list(MODES),
+        "handoff_requires_explicit_action": True,
+    }
+
+
 def germ_base_url() -> str:
-    """Germ's base URL for deep links (``OIDA_GERM_URL``, default local dashboard)."""
-    return os.getenv("OIDA_GERM_URL", "http://127.0.0.1:5178").rstrip("/")
+    """Return the explicitly enabled GERM URL; never invent an installation."""
+    capability = germ_capability()
+    if not capability["enabled"] or not capability["base_url"]:
+        raise GermNotConfiguredError(
+            "GERM is optional and is not configured; set OIDA_GERM_URL before a handoff"
+        )
+    return str(capability["base_url"])
 
 
 def germ_deep_link(akousma_id: str, mode: str) -> str:
@@ -68,7 +97,8 @@ def _origin_to_source_type(origin: str) -> str:
     }.get(origin, "unknown")
 
 
-AKOUO_CONTRACT = "akouo/v0.7"
+AKOUO_CONTRACT = "akouo/v0.9"
+OIDA_LISTENING_CONTRACT = "oida/listening-event/v0.3"
 
 
 def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
@@ -86,6 +116,8 @@ def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
         }
         if namespace.startswith("akouo."):
             entry["contract"] = AKOUO_CONTRACT
+        elif namespace == "oida.listen":
+            entry["contract"] = OIDA_LISTENING_CONTRACT
         if isinstance(value, dict):
             for key in ("summary", "caption", "brief", "main_reading"):
                 text = value.get(key)
@@ -94,6 +126,215 @@ def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
                     break
         wrapped[namespace] = entry
     return wrapped
+
+
+def _pointer_token(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _auditum_from_listening(
+    listening: dict[str, Any],
+    *,
+    covenant: dict[str, Any] | None = None,
+    disagreements: list[dict[str, Any]] | None = None,
+    actions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Derive one attributable auditum without inventing an ear swarm.
+
+    Route reports remain distinct, but they share the single ``oida`` listener
+    identity. A namespace is a report boundary, not a new agent.
+    """
+    if not listening:
+        return None
+    listenings: list[dict[str, Any]] = []
+    namespace_ids: dict[str, str] = {}
+    honest_absences: list[dict[str, Any]] = []
+    seen_absences: set[tuple[str, str, str, str | None]] = set()
+    route_decisions: list[dict[str, Any]] = []
+    seen_decisions: set[str] = set()
+    for index, (namespace, entry) in enumerate(listening.items()):
+        if not isinstance(entry, dict):
+            continue
+        payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+        listening_id = f"lst_{index + 1}_{re.sub(r'[^a-z0-9]+', '_', namespace.lower()).strip('_') or 'report'}"
+        namespace_ids[namespace] = listening_id
+        token = _pointer_token(namespace)
+        contract = str(entry.get("contract") or payload.get("contract") or OIDA_LISTENING_CONTRACT)
+        report: dict[str, Any] = {
+            "listening_id": listening_id,
+            "listener_id": "oida",
+            "listener_type": "agent",
+            "created_at": str(entry.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+            "report_namespace": namespace,
+            "contract": contract,
+        }
+        if isinstance(payload.get("listening_context"), dict):
+            report["context_ref"] = f"#/listening/{token}/payload/listening_context"
+        if isinstance(payload.get("listening_provenance"), dict):
+            report["listening_provenance_ref"] = f"#/listening/{token}/payload/listening_provenance"
+        if isinstance(payload.get("apparatus"), dict):
+            report["apparatus_ref"] = f"#/listening/{token}/payload/apparatus"
+        if isinstance(payload.get("claim_summary"), dict):
+            report["claim_set_ref"] = f"#/listening/{token}/payload/claim_summary"
+        elif isinstance(payload.get("listening_claims"), dict):
+            report["claim_set_ref"] = f"#/listening/{token}/payload/listening_claims"
+        if covenant:
+            report["covenant_ref"] = "#/covenant"
+        route_ids: list[str] = []
+        if isinstance(payload.get("route_id"), str):
+            route_ids.append(payload["route_id"])
+        if isinstance(payload.get("routes"), list):
+            route_ids.extend(
+                str(route.get("route_id"))
+                for route in payload["routes"]
+                if isinstance(route, dict) and route.get("route_id")
+            )
+        if namespace.startswith("akouo."):
+            route_ids.append(namespace.removeprefix("akouo."))
+        if route_ids:
+            report["route"] = list(dict.fromkeys(route_ids))
+        listenings.append(report)
+
+        context = payload.get("listening_context") if isinstance(payload.get("listening_context"), dict) else {}
+        passes = context.get("listening_passes") if isinstance(context.get("listening_passes"), list) else []
+        first_pass = next((item for item in passes if isinstance(item, dict) and item.get("id")), None)
+        if first_pass:
+            report["listening_pass_ref"] = str(first_pass["id"])
+        producer_decisions = context.get("route_decisions") if isinstance(context.get("route_decisions"), list) else []
+        decision_refs: list[str] = []
+        for producer in producer_decisions:
+            if not isinstance(producer, dict):
+                continue
+            producer_id = str(producer.get("id") or "").strip()
+            if not producer_id:
+                continue
+            decision_refs.append(producer_id)
+            if producer_id in seen_decisions:
+                continue
+            authority = producer.get("authority") if isinstance(producer.get("authority"), dict) else {}
+            route_decisions.append(akousma.route_decision(
+                producer_id,
+                gate=str(producer.get("gate") or "input"),
+                outcome=str(producer.get("outcome") or "proceed"),
+                subject=str(producer.get("subject") or "listening request"),
+                reason=str(producer.get("reason") or "The accountable route recorded this decision."),
+                actor=str(authority.get("actor") or "oida-gateway"),
+                decided_at=str(producer.get("decided_at") or entry.get("created_at") or "unknown"),
+                producer_contract=AKOUO_CONTRACT,
+                producer_decision_ref=producer_id,
+                covenant_ref=str(authority.get("covenant_ref") or "") or None,
+                granted_by=str(authority.get("granted_by") or "") or None,
+                requires_confirmation=bool(authority.get("requires_confirmation", False)),
+                reversible=bool(authority.get("reversible", True)),
+                note=str(producer.get("note") or "") or None,
+            ))
+            seen_decisions.add(producer_id)
+        if decision_refs:
+            report["route_decision_refs"] = list(dict.fromkeys(decision_refs))
+        for absence in context.get("honest_absences", []):
+            if not isinstance(absence, dict):
+                continue
+            kind = str(absence.get("kind") or "unavailable")
+            if kind not in {"unavailable", "withheld", "refused", "not_retained", "forgotten"}:
+                continue
+            subject = str(absence.get("subject") or "").strip()
+            attributed_to = str(absence.get("attributed_to") or "").strip()
+            key = (kind, subject, attributed_to, listening_id)
+            if not subject or not attributed_to or key in seen_absences:
+                continue
+            seen_absences.add(key)
+            item: dict[str, Any] = {
+                "id": f"abs_{len(honest_absences) + 1}",
+                "kind": kind,
+                "subject": subject,
+                "attributed_to": attributed_to,
+                "listening_id": listening_id,
+            }
+            for field in ("count", "note"):
+                if field in absence:
+                    item[field] = absence[field]
+            honest_absences.append(item)
+
+    if not listenings:
+        return None
+    if not route_decisions:
+        fallback = akousma.route_decision(
+            "decision_akousma_registration",
+            gate="memory",
+            outcome="proceed",
+            subject="akousma registration",
+            reason="An explicit memory or handoff request opened the accountable-memory route.",
+            actor="oida",
+            producer_contract=AKOUO_CONTRACT,
+            producer_decision_ref="decision_akousma_registration",
+            granted_by="explicit memory or handoff request",
+            requires_confirmation=False,
+            reversible=True,
+        )
+        route_decisions.append(fallback)
+        for report in listenings:
+            report["route_decision_refs"] = [fallback["decision_id"]]
+
+    covenant_id = str((covenant or {}).get("id") or "covenant")
+    for withheld in (covenant or {}).get("withheld", []):
+        if not isinstance(withheld, dict):
+            continue
+        subject = str(withheld.get("subject") or "").strip()
+        rule = str(withheld.get("rule") or "withheld").strip()
+        attributed_to = f"{covenant_id}:{rule}"
+        key = ("withheld", subject, attributed_to, None)
+        if not subject or key in seen_absences:
+            continue
+        seen_absences.add(key)
+        honest_absences.append({
+            "id": f"abs_{len(honest_absences) + 1}",
+            "kind": "withheld",
+            "subject": subject,
+            "attributed_to": attributed_to,
+            "rule": rule,
+            "count": withheld.get("count") if isinstance(withheld.get("count"), int) else 1,
+        })
+
+    checked_disagreements: list[dict[str, Any]] = []
+    known_ids = {item["listening_id"] for item in listenings}
+    for index, disagreement in enumerate(disagreements or []):
+        if not isinstance(disagreement, dict):
+            continue
+        raw_ids = disagreement.get("listening_ids") if isinstance(disagreement.get("listening_ids"), list) else []
+        ids = [namespace_ids.get(str(value), str(value)) for value in raw_ids]
+        ids = list(dict.fromkeys(value for value in ids if value in known_ids))
+        positions: list[dict[str, Any]] = []
+        for position in disagreement.get("positions", []):
+            if not isinstance(position, dict):
+                continue
+            position_id = namespace_ids.get(str(position.get("listening_id")), str(position.get("listening_id") or ""))
+            statement = str(position.get("statement") or "").strip()
+            if position_id not in ids or not statement:
+                continue
+            item = {"listening_id": position_id, "statement": statement}
+            category = position.get("claim_category")
+            if category in {"heard", "measured", "inferred", "interpreted", "speculative", "undetermined"}:
+                item["claim_category"] = category
+            positions.append(item)
+        subject = str(disagreement.get("subject") or "").strip()
+        if len(ids) < 2 or len(positions) < 2 or not subject:
+            continue
+        checked_disagreements.append({
+            "id": str(disagreement.get("id") or f"dis_{index + 1}"),
+            "subject": subject,
+            "listening_ids": ids,
+            "positions": positions,
+            "status": disagreement.get("status") if disagreement.get("status") in {"preserved", "resolved", "undetermined"} else "preserved",
+            "resolution_note": disagreement.get("resolution_note"),
+        })
+
+    return akousma.auditum(
+        listenings=listenings,
+        disagreements=checked_disagreements,
+        honest_absences=honest_absences,
+        actions=actions or [],
+        route_decisions=route_decisions,
+    )
 
 
 def _derive_summary(listening: dict[str, Any]) -> str | None:
@@ -186,6 +427,89 @@ def _checked_listening_identity(value: dict[str, Any] | None) -> dict[str, Any] 
     return block
 
 
+def build_decision_akousma(
+    outcome: dict[str, Any],
+    *,
+    source_type: str = "unknown",
+    origin: str = "file",
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Build a content-free Earworm v0.6 record for a pre-listening decision."""
+
+    producer = outcome.get("route_decision") if isinstance(outcome.get("route_decision"), dict) else {}
+    authority = producer.get("authority") if isinstance(producer.get("authority"), dict) else {}
+    receipt = outcome.get("receipt") if isinstance(outcome.get("receipt"), dict) else {}
+    decision = akousma.route_decision(
+        str(producer.get("id") or f"decision_{outcome.get('id') or 'oida'}"),
+        gate=str(producer.get("gate") or "input"),
+        outcome=str(producer.get("outcome") or "refuse"),
+        subject=str(producer.get("subject") or outcome.get("subject") or "listening request"),
+        reason=str(producer.get("reason") or "The listening request was refused before perception."),
+        actor=str(authority.get("actor") or "oida-covenant-gate"),
+        decided_at=str(producer.get("decided_at") or outcome.get("completed_at") or "unknown"),
+        producer_contract=AKOUO_CONTRACT,
+        producer_decision_ref=str(producer.get("id") or "") or None,
+        covenant_ref=str(authority.get("covenant_ref") or "") or None,
+        granted_by=str(authority.get("granted_by") or "") or None,
+        requires_confirmation=bool(authority.get("requires_confirmation", False)),
+        reversible=bool(authority.get("reversible", True)),
+        note=str(producer.get("note") or "") or None,
+    )
+    if receipt:
+        decision["receipt"] = {
+            "created_at": str(receipt.get("created_at") or outcome.get("completed_at") or "unknown"),
+            "actor": str(receipt.get("actor") or "oida-covenant-gate"),
+            "result": str(receipt.get("result") or "listening did not begin"),
+            "recovery": str(receipt.get("recovery") or "") or None,
+        }
+    absences: list[dict[str, Any]] = []
+    for index, absence in enumerate(outcome.get("honest_absences") or []):
+        if not isinstance(absence, dict):
+            continue
+        absences.append({
+            "id": f"absence_{index + 1}",
+            "kind": str(absence.get("kind") or "refused"),
+            "subject": str(absence.get("subject") or outcome.get("subject") or "listening request"),
+            "attributed_to": str(absence.get("attributed_to") or "oida-gateway"),
+            "listening_id": None,
+            "count": int(absence.get("count") or 1),
+            "note": str(absence.get("note") or "") or None,
+        })
+    auditum = akousma.auditum(
+        listenings=[],
+        disagreements=[],
+        honest_absences=absences,
+        actions=[],
+        route_decisions=[decision],
+    )
+    record = akousma.new_akousma(
+        audio=None,
+        subject=str(outcome.get("subject") or "listening request"),
+        originating_app="oida",
+        source_type=source_type,
+        origin=_normalize_origin(origin),
+        operation="route-decision",
+        tags=["decision-only", "pre-listening-refusal"],
+        session_id=session_id,
+        summary="Listening was refused before an acoustic listening pass began.",
+        covenant=_checked_covenant(
+            outcome.get("covenant") if isinstance(outcome.get("covenant"), dict) else None
+        ),
+        auditum=auditum,
+        extensions={
+            "oida.route_outcome": {
+                "contract": str(outcome.get("contract") or "oida/route-outcome/v0.1"),
+                "outcome_id": str(outcome.get("id") or ""),
+                "content_included": False,
+            }
+        },
+    )
+    record["provenance"]["consent_status"] = "restricted"
+    record["provenance"]["capture_conditions"] = "Listening was refused before an audio asset was captured or referenced."
+    record["provenance"]["rights_note"] = "Decision metadata only; no audio content is included."
+    return record
+
+
 def build_akousma_from_listen(
     *,
     audio: dict[str, Any],
@@ -199,13 +523,16 @@ def build_akousma_from_listen(
     capture: dict[str, Any] | None = None,
     covenant: dict[str, Any] | None = None,
     listening_identity: dict[str, Any] | None = None,
+    disagreements: list[dict[str, Any]] | None = None,
+    actions: list[dict[str, Any]] | None = None,
+    auditum: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a valid akousma record from an oída listen result.
 
     ``audio`` needs at least ``asset_id`` (and ideally ``uri``/``content_hash``/duration).
     ``listening`` is namespaced per producer, e.g. ``{"oida.signal": {...}, "akouo.describe": {...}}``;
-    entries are wrapped in the spec v1.1 envelope with akouo.* entries pinned to the
-    ``akouo/v0.7`` contract. ``location`` (where it was heard — consent-scoped) and
+    entries are wrapped in the current envelope with akouo.* entries pinned to the
+    ``akouo/v0.9`` contract. ``location`` (where it was heard — consent-scoped) and
     ``capture`` (past/future direction + window seconds) are spec v1.2 blocks.
     """
     origin = _normalize_origin(origin)
@@ -225,6 +552,12 @@ def build_akousma_from_listen(
         location=_checked_location(location),
         capture=_checked_capture(capture),
         covenant=_checked_covenant(covenant),
+        auditum=auditum or _auditum_from_listening(
+            enveloped,
+            covenant=covenant,
+            disagreements=disagreements,
+            actions=actions,
+        ),
         extensions=extensions,
     )
     if device:
@@ -300,8 +633,9 @@ def handoff_to_germ(
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    germ_url = germ_deep_link(str(record.get("akousma_id") or ""), mode)
     akousma_id = persist_akousma(record, store=store)
-    return {"akousma_id": akousma_id, "mode": mode, "germ_url": germ_deep_link(akousma_id, mode)}
+    return {"akousma_id": akousma_id, "mode": mode, "germ_url": germ_url}
 
 
 def build_germ_router():
@@ -351,6 +685,8 @@ def build_germ_router():
             )
             _maybe_enrich_songid(record, req.audio)
             return handoff_to_germ(record, req.mode)
+        except GermNotConfiguredError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -362,6 +698,8 @@ def build_germ_router():
                 "mode": mode,
                 "germ_url": germ_deep_link(akousma_id, mode),
             }
+        except GermNotConfiguredError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
