@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Documented a dated exception for two PyTorch findings limited to local APIs
+  Oída does not call, while retaining the validated MOSS-Audio 2.10 runtime.
+- Corrected dependency-audit comments to distinguish the unpatched `.pt2`
+  loader finding from the TorchScript finding fixed only in unvalidated 2.13.
+
 ## 0.9.0 - 2026-07-27
 
 - **Decision-first gateway**: `oida/gateway/v0.5` and
