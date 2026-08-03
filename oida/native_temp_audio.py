@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from oida.config import uploads_dir
+
+
+LOGGER = logging.getLogger(__name__)
 
 NATIVE_SYSTEM_AUDIO_TEMP_PATTERN = "*-oida-native-system-output-*s.wav"
 NATIVE_TEMP_RETENTION_POLICIES = {"keep", "delete_after_session", "delete_after_days"}
@@ -145,8 +149,9 @@ def cleanup_native_system_audio_temp_files(
         try:
             path.unlink()
             deleted.append(public_item)
-        except OSError as exc:
-            errors.append({"path": str(path), "error": str(exc)})
+        except OSError:
+            LOGGER.exception("native temporary audio deletion failed for %s", path)
+            errors.append({"path": str(path), "error": "deletion failed"})
 
     status = native_system_audio_temp_status(policy, directory=root)
     return {

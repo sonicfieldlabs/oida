@@ -143,7 +143,11 @@ class ProviderSettings(StrictModel):
 
 
 class RoleAssignment(StrictModel):
-    provider_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9._-]+$")
+    provider_id: str = Field(
+        min_length=1,
+        max_length=120,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
     model_id: str | None = Field(default=None, max_length=255)
 
 
@@ -485,7 +489,7 @@ def reasoning_response_schema() -> dict[str, Any]:
 
 
 _SECRET_FIELD_PARTS = ("api_key", "apikey", "token", "secret", "password", "authorization", "credential_value")
-_PROVIDER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+_PROVIDER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
 
 
 def _assert_no_secret_fields(value: Any, *, path: str = "options") -> None:

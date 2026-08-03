@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from oida.config import REPO_ROOT, uploads_dir
+
+
+LOGGER = logging.getLogger(__name__)
 
 UPLOAD_AUDIO_RETENTION_POLICIES = {"keep", "delete_after_session", "delete_after_days"}
 
@@ -169,8 +173,9 @@ def cleanup_upload_audio_files(
         try:
             path.unlink()
             deleted.append(public_item)
-        except OSError as exc:
-            errors.append({"path": str(path), "error": str(exc)})
+        except OSError:
+            LOGGER.exception("raw upload deletion failed for %s", path)
+            errors.append({"path": str(path), "error": "deletion failed"})
 
     status = upload_audio_status(policy, directory=root if directory is not None else None)
     return {

@@ -1252,7 +1252,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             # Compatibility memory is already durable at this point. A missing
             # or malformed optional shared-Akousmata installation must not turn
             # Remember into a failed request or lose the local trace.
-            shared_error = str(exc)
+            shared_error = "shared Akousmata memory write failed"
             LOGGER.warning("shared Akousmata memory write failed: %s", exc)
         return {"trace": trace, "event": event, "akousma_id": akousma_id, "shared_error": shared_error}
 
@@ -1453,15 +1453,17 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 continue
             try:
                 engine.set_model(model_kind, resolved)
-            except ValueError as exc:
-                notes.append(f"{role.value}: {exc}")
+            except ValueError:
+                LOGGER.exception("reasoning role assignment failed for %s", role.value)
+                notes.append(f"{role.value}: local model assignment failed")
         return notes
 
     def record_perception_roles(settings) -> list[str]:
         try:
             notes = apply_perception_roles(settings)
-        except Exception as exc:
-            notes = [f"perception roles: {exc}"]
+        except Exception:
+            LOGGER.exception("reasoning perception role application failed")
+            notes = ["perception roles: assignment unavailable"]
         with engine_monitor_lock:
             perception_role_notes[:] = notes
         for note in notes:
@@ -1566,7 +1568,8 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 raise HTTPException(status_code=501, detail="revealing files is unavailable on this platform")
             subprocess.run([str(open_executable), "-R", str(target)], check=False, timeout=5)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise HTTPException(status_code=500, detail=f"could not reveal path: {exc}") from exc
+            LOGGER.warning("Sonic Field reveal failed: %s", exc)
+            raise HTTPException(status_code=500, detail="could not reveal the selected path") from exc
         return {"revealed": str(target)}
 
     @app.get("/", response_class=HTMLResponse)
@@ -1747,11 +1750,12 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 for key, value in identity_status.items()
                 if key not in {"text", "path"}
             }
-        except ValueError as exc:
+        except ValueError:
+            LOGGER.exception("listening identity status failed")
             listening_identity = {
                 "filename": "LISTENING.md",
                 "active": False,
-                "error": str(exc),
+                "error": "listening identity unavailable",
             }
         return {
             "contract": GATEWAY_CONTRACT,
@@ -2480,7 +2484,7 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
             raise
         except Exception as exc:  # noqa: BLE001 — the listen already succeeded; report the store miss honestly
             LOGGER.warning("remote listen: akousma write failed: %s", exc)
-            remote_info["akousma_error"] = str(exc)
+            remote_info["akousma_error"] = "shared Akousmata memory write failed"
         return {**result, "remote": remote_info}
 
     @app.post("/gateway/harness")
@@ -3201,9 +3205,10 @@ def create_app(profile: str | None = None, host: str | None = None, port: int | 
                 yield "event: completed\ndata: " + json.dumps(
                     {"type": "completed", "response": result}, ensure_ascii=False
                 ) + "\n\n"
-            except Exception as exc:
+            except Exception:
+                LOGGER.exception("reasoning conversation stream failed")
                 yield "event: error\ndata: " + json.dumps(
-                    {"type": "error", "detail": str(exc)[:1000]}, ensure_ascii=False
+                    {"type": "error", "detail": "reasoning request failed"}, ensure_ascii=False
                 ) + "\n\n"
 
         return StreamingResponse(

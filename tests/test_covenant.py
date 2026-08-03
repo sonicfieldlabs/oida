@@ -78,6 +78,10 @@ class CovenantParserTests(unittest.TestCase):
         self.assertEqual(cov.rules, [])
         self.assertEqual(len(cov.commitments), 2)
 
+    def test_numeric_rules_reject_unbounded_numbers(self):
+        cov = parse_covenant("## rules\n- coarsen: location to " + ("0" * 100_000) + " km\n")
+        self.assertEqual(cov.rules, [])
+
     def test_reference_carries_identity_not_content(self):
         cov = parse_covenant(RIVER_COVENANT)
         ref = cov.reference()

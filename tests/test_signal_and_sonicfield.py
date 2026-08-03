@@ -176,6 +176,14 @@ class SonicFieldBridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.explore(["drone"])
 
+    def test_index_failure_does_not_expose_exception_details(self) -> None:
+        self.bridge._load_aliases = lambda: (_ for _ in ()).throw(  # type: ignore[method-assign]
+            RuntimeError("private path: /Users/listener/secret")
+        )
+        self.bridge.ensure_index()
+        self.assertEqual(self.bridge.status()["error"], "Sonic Field index unavailable")
+        self.assertNotIn("secret", json.dumps(self.bridge.status()))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,7 +22,11 @@ from oida.reasoning import (
     ResponseValidationError,
     ResponseValidator,
 )
-from oida.reasoning.secrets import EnvironmentSecretStore, MacOSKeychainSecretStore
+from oida.reasoning.secrets import (
+    EnvironmentSecretStore,
+    MacOSKeychainSecretStore,
+    SecretPersistenceUnavailable,
+)
 from oida.reasoning.prompts import trusted_route_instructions
 
 
@@ -148,6 +152,11 @@ def test_environment_and_keychain_secret_boundaries_do_not_put_values_in_argv() 
     assert "keychain-secret" not in argv
     assert run.call_args.kwargs["input"] == "keychain-secret\n"
     assert argv[-1] == "-w"
+
+    with pytest.raises(ValueError, match="must start with a letter or number"):
+        keychain.set("-malicious-option", "keychain-secret")
+    with pytest.raises(SecretPersistenceUnavailable, match="unavailable"):
+        MacOSKeychainSecretStore(executable="/tmp/untrusted-security")
 
 
 def test_evidence_packet_is_whitelisted_and_transcript_requires_opt_in() -> None:

@@ -21,6 +21,22 @@ from scripts.release_smoke import normalize_server_url
 
 
 class CompletedFeatureTests(unittest.TestCase):
+    def test_release_metadata_is_consistent(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(__version__, "0.9.1")
+        self.assertIn(
+            'version = "0.9.1"',
+            (root / "pyproject.toml").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "version: 0.9.1",
+            (root / "CITATION.cff").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "sonicfield-oida 0.9.1",
+            (root / "README.md").read_text(encoding="utf-8"),
+        )
+
     def test_release_smoke_rejects_non_http_daemon_urls(self) -> None:
         self.assertEqual(normalize_server_url("http://127.0.0.1:8765/"), "http://127.0.0.1:8765")
         for value in ("file:///tmp/oida.sock", "ftp://example.test/oida", "localhost:8765"):
