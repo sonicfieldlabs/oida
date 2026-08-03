@@ -9,8 +9,9 @@ uv run --extra dev pytest -q
 uv run --extra dev ruff check .
 uv run python -m compileall -q oida harness bench_adapter scripts tests
 
-# PyTorch has no patched release for two local-only advisories in APIs Oída
-# never calls: torch.export.load(.pt2) and torch.jit.script.
+# The validated MOSS runtime uses PyTorch 2.10. PYSEC-2026-139 has no patched
+# release; CVE-2025-3000 is fixed in unvalidated 2.13. Oída calls neither API.
+# Both exceptions have a review deadline in SECURITY.md.
 uv export --all-extras --no-emit-project --no-emit-local |
   uvx --from pip-audit==2.10.1 pip-audit \
     --requirement /dev/stdin \
