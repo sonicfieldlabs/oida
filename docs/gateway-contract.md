@@ -13,7 +13,7 @@ one decision-only outcome:
    perceptual passes. Oída returns the perception report, AKOÚŌ command output,
    normalized listening event, and an optional memory trace.
 2. **Host-supplied perception** — an audio-capable Hermes, Codex, Claude, or
-   generic host describes what its active model heard using
+   generic host submits what its active model inferred from audio using
    `oida/host-perception/v0.4`. Oída does not run MOSS again. It applies the
    same router, evidence permissions, claim taxonomy, Earworm provenance, and
    Akousmata memory flow.
@@ -26,9 +26,11 @@ one decision-only outcome:
 Host perception must declare its apparatus when known. Sample rate, channel
 count, bandwidth, calibration, preprocessing, and blind spots determine which
 claims can be supported. An undeclared apparatus is accepted but explicitly
-marked undetermined. Model output can never become a `measured` claim merely
-because the model used a number; measurements need DSP, metadata, a measuring
-tool, or a declared human measurement.
+marked undetermined. Model output can never become a `heard` or `measured`
+claim merely because the model processed audio or used a number. It remains
+inferred or interpreted; measurements need DSP, metadata, a measuring tool,
+or a declared human measurement. A `heard` claim requires `source: "human"`
+and a separately attributable `listening_pass_id`.
 
 Prompts, transcripts, captions, and contextual notes are attributable inputs,
 not auditory evidence. They may ground inference or interpretation when their
@@ -160,8 +162,8 @@ deployment must provide its own authenticated HTTPS boundary.
   },
   "observations": [
     {
-      "statement": "A repeating metallic impact is audible.",
-      "category": "heard",
+      "statement": "The model reports a repeating metallic impact.",
+      "category": "inferred",
       "confidence": "medium",
       "source": "model",
       "time_range": {"start_s": 2.1, "end_s": 7.8}

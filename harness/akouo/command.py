@@ -47,7 +47,7 @@ def build_apparatus(report: dict[str, Any] | None = None) -> dict[str, Any]:
         "known_blind_spots": [
             "MOSS-Audio receives 16 kHz mono audio: no stereo-image claims and no content claims above roughly 8 kHz.",
             "No absolute playback or capture level is known to the model.",
-            "Model perception is machine-heard evidence, not measurement; measured claims come from DSP only.",
+            "Model perception is attributable inference, not embodied hearing or measurement; measured claims come from DSP only.",
         ],
     }
     model = engine.get("model")
@@ -121,7 +121,7 @@ def build_command_output(report: dict[str, Any], command: str = "/listen", quest
         "synthesis": synthesize_claims(claims, command),
         "claim_summary": claims,
         "risks": [
-            "Model captions and paralinguistics are machine-heard evidence, not measurements.",
+            "Model captions and paralinguistics are attributable inferences or interpretations, not embodied hearings or measurements.",
             "Contradictions between declared measurements and model perception remain undetermined.",
         ],
         "recommended_next_mode": route.recommended_next_mode,

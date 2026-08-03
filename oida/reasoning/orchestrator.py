@@ -776,7 +776,7 @@ def _packet_with_relisten(packet: EvidencePacket, sidecar: dict[str, Any]) -> Ev
             "time_range": sidecar.get("time_range"),
         },
         event_id=packet.primary_event_id,
-        category="heard",
+        category="inferred",
         source="local_moss_targeted_relisten",
     )
     return packet.model_copy(update={"items": [*packet.items, item]})

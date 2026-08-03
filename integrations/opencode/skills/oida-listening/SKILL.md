@@ -30,7 +30,7 @@ Call `oida_capabilities` when engine, route, schema, or memory availability is u
   the listener relates to the object; apparatus says what could be sensed;
   apertures say what evidence was actually available; claims say what that
   evidence supports; action authority says what may be done next.
-- Model observations are machine-heard evidence, not measurements.
+- Model observations are attributable inferences, not embodied hearings or measurements.
 - Prompt text, transcripts, captions, and contextual notes are attributable
   inputs, not sounds the host heard. Place their content in inferred or
   interpreted claims and name the textual source.
@@ -81,4 +81,4 @@ are local-first.
 
 ## Result
 
-Lead with the useful listening result. Then distinguish measured facts, machine-heard observations, interpretations, and unresolved points in proportion to the task. Include the route/preset and saved trace id when they matter.
+Lead with the useful listening result. Then distinguish measured facts, model inferences, human heard reports, interpretations, and unresolved points in proportion to the task. Include the route/preset and saved trace id when they matter.

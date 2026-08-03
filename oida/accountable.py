@@ -166,7 +166,7 @@ def listening_context_for_report(
             "description": (
                 "OÍDA could read the local audio source."
                 if direct_audio_to_oida
-                else "The host heard the audio; OÍDA received derived observations only."
+                else "The host model processed the audio; OÍDA received derived observations only."
             ),
             "limits": _string_list(apparatus.get("known_blind_spots"))[:8],
         },
@@ -226,7 +226,7 @@ def listening_context_for_report(
         participants.append({
             "id": str(host.get("id") or "generic-host"),
             "type": "agent",
-            "role": "host perceptual listener",
+            "role": "host model observer",
             "standing": "listener",
             "report_ref": "#/host_observations",
         })
@@ -241,7 +241,7 @@ def listening_context_for_report(
         participants.append({
             "id": "oida-local-listener",
             "type": "agent",
-            "role": "local DSP and configured model listener",
+            "role": "local DSP and configured model observer",
             "standing": "listener",
             "report_ref": "#/",
         })

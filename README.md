@@ -39,6 +39,9 @@ still performs deterministic DSP; it does not invent a semantic caption.
   remember, or deep listening.
 - Inspect heard, measured, inferred, interpreted, speculative, and
   undetermined claims separately.
+- Treat `heard` as an attributable human listening-pass report; model
+  transcripts, events, and captions remain inferred or interpreted, while DSP
+  output remains measured.
 - Inspect the listening position, actual apertures, auditory scale, evidence
   sources, participants, temporal listening passes, provenance and cuts, route
   decisions, honest absences, and action authority that situate every result.
@@ -234,12 +237,12 @@ component for explicit cultivation handoffs.
 
 | Component | Version / contract | Role in OÍDA |
 | --- | --- | --- |
-| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.0` / `akouo/v0.9` | Listening vocabulary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
-| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.6.0` / spec v1.5 | Addressable auditums, decision-only records, provenance, lineage, disagreement, attributed absence, forgetting receipts, and revision. |
-| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.6.0` | Embedded library at `/library/`, accountable-memory audit, decision and forgetting views, and the shared durable store. |
-| OÍDA gateway | `sonicfield-oida 0.9.1` / `oida/gateway/v0.5` | Unified REST, MCP, agent, dashboard, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
-| [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.2 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
-| [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.1 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
+| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.1` / `akouo/v0.9` | Listening vocabulary, embodied heard boundary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
+| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.6.1` / spec v1.5 | Addressable auditums, decision-only records, provenance, lineage, attributable disagreement resolution, attributed absence, forgetting receipts, and additive revision. |
+| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.6.1` | Embedded library at `/library/`, accountable-memory audit, decision and forgetting views, and the shared durable store. |
+| OÍDA gateway | `sonicfield-oida 0.9.2` / `oida/gateway/v0.5` | Unified REST, MCP, agent, dashboard, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
+| [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.3 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
+| [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
 
 ## Quick Start

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oida.local/schemas/host-perception.schema.json",
   "title": "Oída host perception input",
-  "description": "Structured audio perception supplied by Hermes, Codex, Claude, OpenClaw, OpenCode, or another audio-capable host.",
+  "description": "Structured model perception or separately attributable human observation supplied through Hermes, Codex, Claude, OpenClaw, OpenCode, or another audio-capable host.",
   "type": "object",
   "additionalProperties": false,
   "required": ["host", "source", "observations"],
@@ -94,11 +94,12 @@
             "required": ["statement"],
             "properties": {
               "statement": {"type": "string", "minLength": 1},
-              "category": {"enum": ["heard", "measured", "inferred", "interpreted", "speculative", "undetermined"]},
+              "category": {"enum": ["heard", "measured", "inferred", "interpreted", "speculative", "undetermined"], "description": "heard is accepted only with source=human; machine observations are normalized to inferred."},
               "confidence": {"enum": ["high", "medium", "low", "undetermined"]},
               "basis": {"type": "string"},
               "source": {"enum": ["audio", "dsp", "metadata", "model", "transcript", "context", "memory", "human"]},
               "speech_content": {"type": "boolean"},
+              "listening_pass_id": {"type": "string", "minLength": 1, "description": "Required by Oída normalization when category=heard and source=human."},
               "time_range": {
                 "type": ["object", "null"],
                 "properties": {"start_s": {"type": "number"}, "end_s": {"type": "number"}},
