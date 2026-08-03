@@ -75,10 +75,10 @@ class MacOSKeychainSecretStore(SecretStore):
         service: str = "dev.sonicfieldlabs.oida.reasoning",
         timeout_seconds: float = 30.0,
     ) -> None:
-        if not executable:
+        if executable != "/usr/bin/security":
             raise SecretPersistenceUnavailable("macOS Keychain command is unavailable")
         self.executable = executable
-        self.service = service
+        self.service = _identifier(service)
         self.timeout_seconds = timeout_seconds
 
     def get(self, provider_id: str, name: str = "api_key") -> str | None:
@@ -208,9 +208,13 @@ def _account(provider_id: str, name: str) -> str:
 
 def _identifier(value: str) -> str:
     normalized = str(value or "").strip()
-    if not normalized or not re.fullmatch(r"[A-Za-z0-9._-]+", normalized):
-        raise ValueError("secret provider/name must use letters, numbers, dot, underscore, or hyphen")
-    return normalized
+    matched = re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", normalized)
+    if matched is None:
+        raise ValueError(
+            "secret provider/name must start with a letter or number and use at most "
+            "128 letters, numbers, dots, underscores, or hyphens"
+        )
+    return matched.group(0)
 
 
 def _environment_part(value: str) -> str:

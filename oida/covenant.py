@@ -225,7 +225,12 @@ def _parse_rule(line: str) -> dict[str, Any] | None:
         rule["subjects"] = subjects
     elif verb == "coarsen":
         match = re.search(r"location|lugar|ubicaci[oó]n", rest, re.IGNORECASE)
-        km = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(km|kilometers?|kil[oó]metros?)", rest, re.IGNORECASE)
+        km = re.search(
+            r"(?<![0-9.])([0-9]{1,7}(?:\.[0-9]{1,6})?)(?![0-9.])"
+            r"\s*(km|kilometers?|kil[oó]metros?)",
+            rest,
+            re.IGNORECASE,
+        )
         if not match or not km:
             return None
         rule["subjects"] = ["location"]
@@ -236,7 +241,10 @@ def _parse_rule(line: str) -> dict[str, Any] | None:
             return None
         rule["args"] = {"start": match.group(1), "end": match.group(2)}
     elif verb == "max_window":
-        match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*s?", rest)
+        match = re.search(
+            r"(?<![0-9.])([0-9]{1,7}(?:\.[0-9]{1,6})?)(?![0-9.])\s*s?",
+            rest,
+        )
         if not match:
             return None
         rule["args"] = {"seconds": float(match.group(1))}

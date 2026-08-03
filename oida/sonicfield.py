@@ -14,12 +14,16 @@ Query terms are normalized through config/taxonomy/topic-aliases.json.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+LOGGER = logging.getLogger(__name__)
 
 CORE_SURFACES = {
     "topics": ("content/topics", "/topics"),
@@ -121,10 +125,11 @@ class SonicFieldBridge:
                 self._entries = entries
                 self._archive_slugs = self._index_archive_slugs()
                 self._error = None
-            except Exception as exc:  # keep the daemon alive; report via status
+            except Exception:
+                LOGGER.exception("Sonic Field index build failed")
                 self._entries = []
                 self._archive_slugs = []
-                self._error = str(exc)
+                self._error = "Sonic Field index unavailable"
             self._build_ms = round((time.perf_counter() - started) * 1000)
 
     def _load_aliases(self) -> dict[str, str]:
