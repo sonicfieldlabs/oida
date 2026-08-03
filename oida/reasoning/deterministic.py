@@ -193,13 +193,13 @@ class DeterministicLocalProvider:
             facts = [
                 item
                 for item in by_kind.get("claim", [])
-                if item.category in {"heard", "measured"}
+                if item.category in {"heard", "measured", "inferred"}
             ][:fact_limit]
             if facts:
                 blocks.append(
                     AnswerBlock(
                         kind="fact",
-                        text="Grounded details: " + "; ".join(str(item.value) for item in facts) + ".",
+                        text="Attributed details: " + "; ".join(str(item.value) for item in facts) + ".",
                         evidence_refs=[item.ref for item in facts],
                     )
                 )

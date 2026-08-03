@@ -67,7 +67,7 @@ _KHZ_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*k\s*hz")
 
 
 DEFAULT_CLAIM_PERMISSIONS = {
-    "heard_allowed": True,
+    "heard_allowed": False,
     "measured_allowed": True,
     "inferred_allowed": True,
     "interpreted_allowed": True,
@@ -83,6 +83,18 @@ def map_report_to_claims(
     question: str | None = None,
 ) -> dict[str, list[dict[str, str]]]:
     permissions = {**DEFAULT_CLAIM_PERMISSIONS, **(claim_permissions or {})}
+    observations = report.get("host_observations")
+    if isinstance(observations, list) and any(
+        isinstance(item, dict)
+        and item.get("category") == "heard"
+        and item.get("source") == "human"
+        and isinstance(item.get("listening_pass_id"), str)
+        and bool(item["listening_pass_id"].strip())
+        for item in observations
+    ):
+        # A host may carry a separately attributable embodied report. This
+        # exception never applies to model, transcript, audio, or sensor output.
+        permissions["heard_allowed"] = True
     claims = empty_claim_taxonomy()
     model_name = str(report.get("engine", {}).get("model") or "MOSS-Audio")
 
@@ -122,12 +134,20 @@ def _map_host_observations(report: dict[str, Any], claims: dict[str, list[dict[s
     for item in observations:
         if not isinstance(item, dict) or not item.get("statement"):
             continue
-        category = str(item.get("category") or "heard")
+        category = str(item.get("category") or "inferred")
         source = str(item.get("source") or "model")
         basis = str(item.get("basis") or "host audio perception")
         confidence = str(item.get("confidence") or "medium")
         time_range = item.get("time_range") if isinstance(item.get("time_range"), dict) else None
+        listening_pass_id = (
+            item["listening_pass_id"].strip()
+            if isinstance(item.get("listening_pass_id"), str) and item["listening_pass_id"].strip()
+            else None
+        )
         speech_content = bool(item.get("speech_content")) or source == "transcript"
+        if category == "heard" and (source != "human" or not listening_pass_id):
+            category = "inferred"
+            basis = f"{basis}; demoted because heard requires an attributable embodied listening pass"
         if category == "measured" and source not in {"dsp", "metadata", "human"}:
             _add(
                 claims,
@@ -160,6 +180,7 @@ def _map_host_observations(report: dict[str, Any], claims: dict[str, list[dict[s
             basis,
             source=source,
             time_range=time_range,
+            listening_pass_id=listening_pass_id,
             speech_content=speech_content,
         )
 
@@ -245,7 +266,7 @@ def _map_transcript(report: dict[str, Any], claims: dict[str, list[dict[str, str
         time_range = _range(segment.get("t0"), segment.get("t1"))
         statement = f"Transcript{time_range}: {segment['text']}"
         confidence = str(segment.get("confidence") or "medium")
-        add(claims, "heard", statement, confidence, f"{model_name} ASR, temp 0, timestamp anchored when available")
+        add(claims, "inferred", statement, confidence, f"{model_name} ASR, temp 0, timestamp anchored when available")
 
 
 def _map_events(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
@@ -278,7 +299,7 @@ def _map_events(report: dict[str, Any], claims: dict[str, list[dict[str, str]]],
                 time_range=time_range,
             )
             continue
-        add(claims, "heard", statement, confidence, basis, time_range=time_range)
+        add(claims, "inferred", statement, confidence, basis, time_range=time_range)
 
 
 def _map_caption(report: dict[str, Any], claims: dict[str, list[dict[str, str]]], model_name: str) -> None:
@@ -490,6 +511,7 @@ def _add(
     *,
     source: str | None = None,
     time_range: dict[str, float] | None = None,
+    listening_pass_id: str | None = None,
     speech_content: bool = False,
 ) -> None:
     if category not in CLAIM_CATEGORIES:
@@ -502,6 +524,8 @@ def _add(
         claim["source"] = source
     if time_range:
         claim["time_range"] = time_range
+    if listening_pass_id:
+        claim["listening_pass_id"] = listening_pass_id
     if speech_content:
         claim["speech_content"] = True
     claims[category].append(claim)

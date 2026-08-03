@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.2 - 2026-08-03
+
+- Reserved `heard` for separately attributable human reports. Local and host
+  model transcripts, events, captions, and observations now remain inferred
+  or interpreted, while DSP remains measured.
+- Demoted machine-supplied `heard` input at the gateway boundary and kept the
+  original basis visible for audit.
+- Aligned with AKOÚŌ 0.9.1 and Earworm/Akousma 0.6.1 revision integrity,
+  expanded environment-file ignore coverage, and added regression tests.
+
 ## 0.9.1 - 2026-08-03
 
 - Documented a dated exception for two PyTorch findings limited to local APIs

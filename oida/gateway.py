@@ -217,7 +217,7 @@ def decision_first_refusal(
         "command_output": None,
         "earworm": {
             "protocol": "earworm",
-            "version": "0.6.0",
+            "version": "0.6.1",
             "auditum": record["auditum"],
         },
         "trace": None,
@@ -459,7 +459,7 @@ def _normalize_apparatus(value: dict[str, Any], *, host_id: str, model: str) -> 
     if not blind_spots:
         blind_spots = [
             "The host did not declare its acoustic preprocessing, bandwidth, channel reduction, or calibration.",
-            "Host-model perceptions are machine-heard evidence, not signal measurements.",
+            "Host-model perceptions are attributable inferences, not embodied hearings or signal measurements.",
         ]
     return {
         "substrate": str(value.get("substrate") or "host_audio_model"),
@@ -482,21 +482,31 @@ def _normalize_observations(value: Any, *, model: str) -> list[dict[str, Any]]:
             item = {"statement": item}
         if not isinstance(item, dict) or not str(item.get("statement") or "").strip():
             continue
-        category = str(item.get("category") or "heard")
+        category = str(item.get("category") or "inferred")
         if category not in CLAIM_CATEGORIES:
             category = "undetermined"
         source = str(item.get("source") or "model")
         if source not in {"audio", "dsp", "metadata", "model", "transcript", "context", "memory", "human"}:
             source = "model"
+        basis = str(item.get("basis") or f"{model} host audio perception")
+        listening_pass_id = (
+            item["listening_pass_id"].strip()
+            if isinstance(item.get("listening_pass_id"), str) and item["listening_pass_id"].strip()
+            else None
+        )
+        if category == "heard" and (source != "human" or not listening_pass_id):
+            category = "inferred"
+            basis = f"{basis}; demoted because heard requires an attributable embodied listening pass"
         result.append(
             {
                 "statement": " ".join(str(item["statement"]).split()),
                 "category": category,
                 "confidence": str(item.get("confidence") or "medium"),
-                "basis": str(item.get("basis") or f"{model} host audio perception"),
+                "basis": basis,
                 "source": source,
                 "speech_content": bool(item.get("speech_content")) or source == "transcript",
                 "time_range": item.get("time_range") if isinstance(item.get("time_range"), dict) else None,
+                "listening_pass_id": listening_pass_id,
             }
         )
     return result

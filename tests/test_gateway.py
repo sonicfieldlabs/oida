@@ -139,7 +139,8 @@ class GatewayContractTests(unittest.TestCase):
         undetermined = " ".join(item["statement"] for item in claims["undetermined"])
 
         self.assertEqual(apparatus["channels"], 2)
-        self.assertIn("wide stereo field", heard)
+        self.assertEqual(heard, "")
+        self.assertIn("wide stereo field", inferred)
         self.assertIn("Spectral centroid", inferred)
         self.assertIn("Measurement status is unsupported", undetermined)
 
@@ -154,7 +155,7 @@ class GatewayContractTests(unittest.TestCase):
         self.assertEqual(event["source"]["platform"], "codex")
         self.assertIsNotNone(result["trace"])
         self.assertEqual(result["trace"]["earworm"]["session"]["app_id"], "oida.akousmata")
-        self.assertEqual(result["earworm"]["version"], "0.6.0")
+        self.assertEqual(result["earworm"]["version"], "0.6.1")
         context = event["listening_context"]
         self.assertEqual(context["contract"], "akouo/listening-context/v2")
         self.assertEqual(context["action_authority"]["mode"], "observe_only")

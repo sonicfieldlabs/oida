@@ -35,6 +35,41 @@ class ClaimMapperTests(unittest.TestCase):
         self.assertIn("emotion", interpreted)
         self.assertNotIn("emotion", heard)
         self.assertNotIn("emotion", measured)
+        self.assertEqual(claims["heard"], [])
+
+    def test_model_transcript_and_events_are_inferred_not_heard(self) -> None:
+        claims = map_report_to_claims(base_report())
+        inferred = " ".join(claim["statement"] for claim in claims["inferred"])
+        self.assertEqual(claims["heard"], [])
+        self.assertIn("Transcript", inferred)
+        self.assertIn("Sound event", inferred)
+
+    def test_explicit_human_report_may_remain_heard(self) -> None:
+        report = base_report()
+        report["host_observations"] = [{
+            "statement": "I heard a brief metallic impact.",
+            "category": "heard",
+            "source": "human",
+            "confidence": "medium",
+            "basis": "Attributable embodied report",
+            "listening_pass_id": "pass-human-1",
+        }]
+        claims = map_report_to_claims(report, claim_permissions={"heard_allowed": False})
+        self.assertEqual(claims["heard"][0]["source"], "human")
+        self.assertEqual(claims["heard"][0]["listening_pass_id"], "pass-human-1")
+
+    def test_machine_attempted_heard_claim_is_demoted(self) -> None:
+        report = base_report()
+        report["host_observations"] = [{
+            "statement": "A model reports a brief metallic impact.",
+            "category": "heard",
+            "source": "model",
+        }]
+        claims = map_report_to_claims(report)
+        self.assertEqual(claims["heard"], [])
+        demoted = [item for item in claims["inferred"] if "brief metallic impact" in item["statement"]]
+        self.assertTrue(demoted)
+        self.assertIn("attributable embodied listening pass", demoted[0]["basis"])
 
     def test_forbidden_high_frequency_question_is_undetermined(self) -> None:
         claims = map_report_to_claims(base_report(), question="What is happening above 8 kHz?")

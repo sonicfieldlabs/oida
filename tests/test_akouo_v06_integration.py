@@ -76,6 +76,9 @@ class TestAkouoV09Contract(unittest.TestCase):
         self.assertFalse(claim_permissions_for("prompt_only")["heard_allowed"])
         self.assertFalse(claim_permissions_for("transcript_or_caption")["heard_allowed"])
         self.assertFalse(claim_permissions_for("contextual_note")["heard_allowed"])
+        self.assertFalse(claim_permissions_for("decoded_audio_metadata")["heard_allowed"])
+        self.assertFalse(claim_permissions_for("measured_signal")["heard_allowed"])
+        self.assertFalse(claim_permissions_for("mixed")["heard_allowed"])
 
     def test_fiction_grants_speculative(self) -> None:
         permissions = claim_permissions_for("mixed", "/fiction")
@@ -108,10 +111,11 @@ class TestClaimInstrumentation(unittest.TestCase):
         claims = map_report_to_claims(_report())
         measured_sources = {claim.get("source") for claim in claims["measured"]}
         self.assertEqual(measured_sources, {"dsp"})
-        heard_events = [claim for claim in claims["heard"] if "Sound event" in claim["statement"]]
-        self.assertTrue(heard_events)
-        self.assertEqual(heard_events[0]["source"], "model")
-        self.assertEqual(heard_events[0]["time_range"], {"start_s": 0.0, "end_s": 4.2})
+        self.assertEqual(claims["heard"], [])
+        inferred_events = [claim for claim in claims["inferred"] if "Sound event" in claim["statement"]]
+        self.assertTrue(inferred_events)
+        self.assertEqual(inferred_events[0]["source"], "model")
+        self.assertEqual(inferred_events[0]["time_range"], {"start_s": 0.0, "end_s": 4.2})
         inferred_sources = {claim.get("source") for claim in claims["inferred"]}
         self.assertIn("model", inferred_sources)
 

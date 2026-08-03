@@ -4,7 +4,7 @@ message: "If you use Oída in research, please cite this software release."
 type: software
 authors:
   - name: "Sonic Field Labs"
-version: 0.9.1
+version: 0.9.2
 date-released: 2026-08-03
 license: Apache-2.0
 repository-code: "https://github.com/sonicfieldlabs/oida"

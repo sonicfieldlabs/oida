@@ -502,7 +502,7 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
     }
     return {
         "protocol": "earworm",
-        "version": "0.6.0",
+        "version": "0.6.1",
         "akousmata_surface": ["remember", "list", "search", "similarity", "export", "forget"],
         "session": session,
         "context_bundle": context_bundle,
