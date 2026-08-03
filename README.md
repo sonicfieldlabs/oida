@@ -237,10 +237,10 @@ component for explicit cultivation handoffs.
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.0` / `akouo/v0.9` | Listening vocabulary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
 | [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.6.0` / spec v1.5 | Addressable auditums, decision-only records, provenance, lineage, disagreement, attributed absence, forgetting receipts, and revision. |
 | [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.6.0` | Embedded library at `/library/`, accountable-memory audit, decision and forgetting views, and the shared durable store. |
-| OÍDA gateway | `sonicfield-oida 0.9.0` / `oida/gateway/v0.5` | Unified REST, MCP, agent, dashboard, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
-| [GERM](https://github.com/sonicfieldlabs/germ) | optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
-| [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.0 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
-| [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.0 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
+| OÍDA gateway | `sonicfield-oida 0.9.1` / `oida/gateway/v0.5` | Unified REST, MCP, agent, dashboard, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
+| [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.1 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
+| [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.1 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
+| [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
 
 ## Quick Start
 

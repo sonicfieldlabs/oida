@@ -1,11 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 - 2026-08-03
 
 - Documented a dated exception for two PyTorch findings limited to local APIs
   Oída does not call, while retaining the validated MOSS-Audio 2.10 runtime.
 - Corrected dependency-audit comments to distinguish the unpatched `.pt2`
   loader finding from the TorchScript finding fixed only in unvalidated 2.13.
+- Pinned and validated the macOS Keychain executable and account arguments,
+  bounded covenant numeric parsing, and removed backend exception details from
+  public status, retention, memory, and reasoning responses.
+- Documented the protected local-audio path boundary and aligned the public
+  stack table with GERM 0.3.1, Algophony 0.5.1, and ORAM 0.4.1.
 
 ## 0.9.0 - 2026-07-27
 
