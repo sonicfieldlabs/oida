@@ -10,6 +10,7 @@ Oída hears; GERM may cultivate. After an explicit handoff, Oída persists an
 
 Requires the ``akousma`` package (earworm/packages/py-akousma).
 """
+
 from __future__ import annotations
 
 import os
@@ -99,6 +100,7 @@ def _origin_to_source_type(origin: str) -> str:
 
 AKOUO_CONTRACT = "akouo/v0.9"
 OIDA_LISTENING_CONTRACT = "oida/listening-event/v0.3"
+OIDA_HUMAN_LISTENING_CONTRACT = "oida/human-listening/v0.1"
 
 
 def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
@@ -107,7 +109,11 @@ def _envelope_listening(listening: dict[str, Any]) -> dict[str, Any]:
     pass through untouched; akouo.* entries get the contract pin."""
     wrapped: dict[str, Any] = {}
     for namespace, value in (listening or {}).items():
-        if isinstance(value, dict) and "payload" in value and set(value) <= {"contract", "created_at", "summary", "payload"}:
+        if (
+            isinstance(value, dict)
+            and "payload" in value
+            and set(value) <= {"contract", "created_at", "summary", "payload"}
+        ):
             wrapped[namespace] = value
             continue
         entry: dict[str, Any] = {
@@ -159,19 +165,26 @@ def _auditum_from_listening(
         listening_id = f"lst_{index + 1}_{re.sub(r'[^a-z0-9]+', '_', namespace.lower()).strip('_') or 'report'}"
         namespace_ids[namespace] = listening_id
         token = _pointer_token(namespace)
-        contract = str(entry.get("contract") or payload.get("contract") or OIDA_LISTENING_CONTRACT)
+        contract = str(
+            entry.get("contract") or payload.get("contract") or OIDA_LISTENING_CONTRACT
+        )
         report: dict[str, Any] = {
             "listening_id": listening_id,
             "listener_id": "oida",
             "listener_type": "agent",
-            "created_at": str(entry.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+            "created_at": str(
+                entry.get("created_at")
+                or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            ),
             "report_namespace": namespace,
             "contract": contract,
         }
         if isinstance(payload.get("listening_context"), dict):
             report["context_ref"] = f"#/listening/{token}/payload/listening_context"
         if isinstance(payload.get("listening_provenance"), dict):
-            report["listening_provenance_ref"] = f"#/listening/{token}/payload/listening_provenance"
+            report["listening_provenance_ref"] = (
+                f"#/listening/{token}/payload/listening_provenance"
+            )
         if isinstance(payload.get("apparatus"), dict):
             report["apparatus_ref"] = f"#/listening/{token}/payload/apparatus"
         if isinstance(payload.get("claim_summary"), dict):
@@ -195,12 +208,26 @@ def _auditum_from_listening(
             report["route"] = list(dict.fromkeys(route_ids))
         listenings.append(report)
 
-        context = payload.get("listening_context") if isinstance(payload.get("listening_context"), dict) else {}
-        passes = context.get("listening_passes") if isinstance(context.get("listening_passes"), list) else []
-        first_pass = next((item for item in passes if isinstance(item, dict) and item.get("id")), None)
+        context = (
+            payload.get("listening_context")
+            if isinstance(payload.get("listening_context"), dict)
+            else {}
+        )
+        passes = (
+            context.get("listening_passes")
+            if isinstance(context.get("listening_passes"), list)
+            else []
+        )
+        first_pass = next(
+            (item for item in passes if isinstance(item, dict) and item.get("id")), None
+        )
         if first_pass:
             report["listening_pass_ref"] = str(first_pass["id"])
-        producer_decisions = context.get("route_decisions") if isinstance(context.get("route_decisions"), list) else []
+        producer_decisions = (
+            context.get("route_decisions")
+            if isinstance(context.get("route_decisions"), list)
+            else []
+        )
         decision_refs: list[str] = []
         for producer in producer_decisions:
             if not isinstance(producer, dict):
@@ -211,23 +238,38 @@ def _auditum_from_listening(
             decision_refs.append(producer_id)
             if producer_id in seen_decisions:
                 continue
-            authority = producer.get("authority") if isinstance(producer.get("authority"), dict) else {}
-            route_decisions.append(akousma.route_decision(
-                producer_id,
-                gate=str(producer.get("gate") or "input"),
-                outcome=str(producer.get("outcome") or "proceed"),
-                subject=str(producer.get("subject") or "listening request"),
-                reason=str(producer.get("reason") or "The accountable route recorded this decision."),
-                actor=str(authority.get("actor") or "oida-gateway"),
-                decided_at=str(producer.get("decided_at") or entry.get("created_at") or "unknown"),
-                producer_contract=AKOUO_CONTRACT,
-                producer_decision_ref=producer_id,
-                covenant_ref=str(authority.get("covenant_ref") or "") or None,
-                granted_by=str(authority.get("granted_by") or "") or None,
-                requires_confirmation=bool(authority.get("requires_confirmation", False)),
-                reversible=bool(authority.get("reversible", True)),
-                note=str(producer.get("note") or "") or None,
-            ))
+            authority = (
+                producer.get("authority")
+                if isinstance(producer.get("authority"), dict)
+                else {}
+            )
+            route_decisions.append(
+                akousma.route_decision(
+                    producer_id,
+                    gate=str(producer.get("gate") or "input"),
+                    outcome=str(producer.get("outcome") or "proceed"),
+                    subject=str(producer.get("subject") or "listening request"),
+                    reason=str(
+                        producer.get("reason")
+                        or "The accountable route recorded this decision."
+                    ),
+                    actor=str(authority.get("actor") or "oida-gateway"),
+                    decided_at=str(
+                        producer.get("decided_at")
+                        or entry.get("created_at")
+                        or "unknown"
+                    ),
+                    producer_contract=AKOUO_CONTRACT,
+                    producer_decision_ref=producer_id,
+                    covenant_ref=str(authority.get("covenant_ref") or "") or None,
+                    granted_by=str(authority.get("granted_by") or "") or None,
+                    requires_confirmation=bool(
+                        authority.get("requires_confirmation", False)
+                    ),
+                    reversible=bool(authority.get("reversible", True)),
+                    note=str(producer.get("note") or "") or None,
+                )
+            )
             seen_decisions.add(producer_id)
         if decision_refs:
             report["route_decision_refs"] = list(dict.fromkeys(decision_refs))
@@ -235,7 +277,13 @@ def _auditum_from_listening(
             if not isinstance(absence, dict):
                 continue
             kind = str(absence.get("kind") or "unavailable")
-            if kind not in {"unavailable", "withheld", "refused", "not_retained", "forgotten"}:
+            if kind not in {
+                "unavailable",
+                "withheld",
+                "refused",
+                "not_retained",
+                "forgotten",
+            }:
                 continue
             subject = str(absence.get("subject") or "").strip()
             attributed_to = str(absence.get("attributed_to") or "").strip()
@@ -286,47 +334,87 @@ def _auditum_from_listening(
         if not subject or key in seen_absences:
             continue
         seen_absences.add(key)
-        honest_absences.append({
-            "id": f"abs_{len(honest_absences) + 1}",
-            "kind": "withheld",
-            "subject": subject,
-            "attributed_to": attributed_to,
-            "rule": rule,
-            "count": withheld.get("count") if isinstance(withheld.get("count"), int) else 1,
-        })
+        honest_absences.append(
+            {
+                "id": f"abs_{len(honest_absences) + 1}",
+                "kind": "withheld",
+                "subject": subject,
+                "attributed_to": attributed_to,
+                "rule": rule,
+                "count": withheld.get("count")
+                if isinstance(withheld.get("count"), int)
+                else 1,
+            }
+        )
 
     checked_disagreements: list[dict[str, Any]] = []
     known_ids = {item["listening_id"] for item in listenings}
     for index, disagreement in enumerate(disagreements or []):
         if not isinstance(disagreement, dict):
             continue
-        raw_ids = disagreement.get("listening_ids") if isinstance(disagreement.get("listening_ids"), list) else []
+        raw_ids = (
+            disagreement.get("listening_ids")
+            if isinstance(disagreement.get("listening_ids"), list)
+            else []
+        )
         ids = [namespace_ids.get(str(value), str(value)) for value in raw_ids]
         ids = list(dict.fromkeys(value for value in ids if value in known_ids))
         positions: list[dict[str, Any]] = []
         for position in disagreement.get("positions", []):
             if not isinstance(position, dict):
                 continue
-            position_id = namespace_ids.get(str(position.get("listening_id")), str(position.get("listening_id") or ""))
+            position_id = namespace_ids.get(
+                str(position.get("listening_id")),
+                str(position.get("listening_id") or ""),
+            )
             statement = str(position.get("statement") or "").strip()
             if position_id not in ids or not statement:
                 continue
             item = {"listening_id": position_id, "statement": statement}
             category = position.get("claim_category")
-            if category in {"heard", "measured", "inferred", "interpreted", "speculative", "undetermined"}:
+            if category in {
+                "heard",
+                "measured",
+                "inferred",
+                "interpreted",
+                "speculative",
+                "undetermined",
+            }:
                 item["claim_category"] = category
             positions.append(item)
         subject = str(disagreement.get("subject") or "").strip()
         if len(ids) < 2 or len(positions) < 2 or not subject:
             continue
-        checked_disagreements.append({
-            "id": str(disagreement.get("id") or f"dis_{index + 1}"),
-            "subject": subject,
-            "listening_ids": ids,
-            "positions": positions,
-            "status": disagreement.get("status") if disagreement.get("status") in {"preserved", "resolved", "undetermined"} else "preserved",
-            "resolution_note": disagreement.get("resolution_note"),
-        })
+        checked_disagreements.append(
+            {
+                "id": str(disagreement.get("id") or f"dis_{index + 1}"),
+                "subject": subject,
+                "listening_ids": ids,
+                "positions": positions,
+                "status": disagreement.get("status")
+                if disagreement.get("status")
+                in {"preserved", "resolved", "undetermined"}
+                else "preserved",
+                "resolution_note": disagreement.get("resolution_note"),
+            }
+        )
+
+    if not route_decisions:
+        route_decisions.append(
+            akousma.route_decision(
+                "decision_oida_listening_record",
+                gate="memory",
+                outcome="proceed",
+                subject="Oída listening account",
+                reason="An explicit local action requested that this completed listening be retained.",
+                actor="oida",
+                decided_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                listening_id=listenings[0]["listening_id"] if listenings else None,
+                granted_by="explicit local remember action",
+                requires_confirmation=False,
+                reversible=True,
+            )
+        )
 
     return akousma.auditum(
         listenings=listenings,
@@ -344,7 +432,11 @@ def _derive_summary(listening: dict[str, Any]) -> str | None:
         if isinstance(entry, dict):
             if isinstance(entry.get("summary"), str) and entry["summary"].strip():
                 return entry["summary"].strip()
-            payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else entry
+            payload = (
+                entry.get("payload")
+                if isinstance(entry.get("payload"), dict)
+                else entry
+            )
             for key in ("caption", "brief", "summary", "main_reading"):
                 text = payload.get(key) if isinstance(payload, dict) else None
                 if isinstance(text, str) and text.strip():
@@ -418,7 +510,9 @@ def _checked_listening_identity(value: dict[str, Any] | None) -> dict[str, Any] 
             str(item)[:120]
             for item in value.get("applied_to", [])[:32]
             if isinstance(item, str) and item
-        ] if isinstance(value.get("applied_to"), list) else [],
+        ]
+        if isinstance(value.get("applied_to"), list)
+        else [],
         "content_included": False,
         "role": LISTENING_IDENTITY_ROLE,
     }
@@ -436,17 +530,30 @@ def build_decision_akousma(
 ) -> dict[str, Any]:
     """Build a content-free Earworm v0.6 record for a pre-listening decision."""
 
-    producer = outcome.get("route_decision") if isinstance(outcome.get("route_decision"), dict) else {}
-    authority = producer.get("authority") if isinstance(producer.get("authority"), dict) else {}
+    producer = (
+        outcome.get("route_decision")
+        if isinstance(outcome.get("route_decision"), dict)
+        else {}
+    )
+    authority = (
+        producer.get("authority") if isinstance(producer.get("authority"), dict) else {}
+    )
     receipt = outcome.get("receipt") if isinstance(outcome.get("receipt"), dict) else {}
     decision = akousma.route_decision(
         str(producer.get("id") or f"decision_{outcome.get('id') or 'oida'}"),
         gate=str(producer.get("gate") or "input"),
         outcome=str(producer.get("outcome") or "refuse"),
-        subject=str(producer.get("subject") or outcome.get("subject") or "listening request"),
-        reason=str(producer.get("reason") or "The listening request was refused before perception."),
+        subject=str(
+            producer.get("subject") or outcome.get("subject") or "listening request"
+        ),
+        reason=str(
+            producer.get("reason")
+            or "The listening request was refused before perception."
+        ),
         actor=str(authority.get("actor") or "oida-covenant-gate"),
-        decided_at=str(producer.get("decided_at") or outcome.get("completed_at") or "unknown"),
+        decided_at=str(
+            producer.get("decided_at") or outcome.get("completed_at") or "unknown"
+        ),
         producer_contract=AKOUO_CONTRACT,
         producer_decision_ref=str(producer.get("id") or "") or None,
         covenant_ref=str(authority.get("covenant_ref") or "") or None,
@@ -457,7 +564,9 @@ def build_decision_akousma(
     )
     if receipt:
         decision["receipt"] = {
-            "created_at": str(receipt.get("created_at") or outcome.get("completed_at") or "unknown"),
+            "created_at": str(
+                receipt.get("created_at") or outcome.get("completed_at") or "unknown"
+            ),
             "actor": str(receipt.get("actor") or "oida-covenant-gate"),
             "result": str(receipt.get("result") or "listening did not begin"),
             "recovery": str(receipt.get("recovery") or "") or None,
@@ -466,15 +575,21 @@ def build_decision_akousma(
     for index, absence in enumerate(outcome.get("honest_absences") or []):
         if not isinstance(absence, dict):
             continue
-        absences.append({
-            "id": f"absence_{index + 1}",
-            "kind": str(absence.get("kind") or "refused"),
-            "subject": str(absence.get("subject") or outcome.get("subject") or "listening request"),
-            "attributed_to": str(absence.get("attributed_to") or "oida-gateway"),
-            "listening_id": None,
-            "count": int(absence.get("count") or 1),
-            "note": str(absence.get("note") or "") or None,
-        })
+        absences.append(
+            {
+                "id": f"absence_{index + 1}",
+                "kind": str(absence.get("kind") or "refused"),
+                "subject": str(
+                    absence.get("subject")
+                    or outcome.get("subject")
+                    or "listening request"
+                ),
+                "attributed_to": str(absence.get("attributed_to") or "oida-gateway"),
+                "listening_id": None,
+                "count": int(absence.get("count") or 1),
+                "note": str(absence.get("note") or "") or None,
+            }
+        )
     auditum = akousma.auditum(
         listenings=[],
         disagreements=[],
@@ -493,7 +608,9 @@ def build_decision_akousma(
         session_id=session_id,
         summary="Listening was refused before an acoustic listening pass began.",
         covenant=_checked_covenant(
-            outcome.get("covenant") if isinstance(outcome.get("covenant"), dict) else None
+            outcome.get("covenant")
+            if isinstance(outcome.get("covenant"), dict)
+            else None
         ),
         auditum=auditum,
         extensions={
@@ -505,8 +622,12 @@ def build_decision_akousma(
         },
     )
     record["provenance"]["consent_status"] = "restricted"
-    record["provenance"]["capture_conditions"] = "Listening was refused before an audio asset was captured or referenced."
-    record["provenance"]["rights_note"] = "Decision metadata only; no audio content is included."
+    record["provenance"]["capture_conditions"] = (
+        "Listening was refused before an audio asset was captured or referenced."
+    )
+    record["provenance"]["rights_note"] = (
+        "Decision metadata only; no audio content is included."
+    )
     return record
 
 
@@ -538,7 +659,9 @@ def build_akousma_from_listen(
     origin = _normalize_origin(origin)
     enveloped = _envelope_listening(listening or {})
     identity_extension = _checked_listening_identity(listening_identity)
-    extensions = {"oida.listening_identity": identity_extension} if identity_extension else None
+    extensions = (
+        {"oida.listening_identity": identity_extension} if identity_extension else None
+    )
     record = akousma.new_akousma(
         audio=audio,
         originating_app="oida",
@@ -552,7 +675,8 @@ def build_akousma_from_listen(
         location=_checked_location(location),
         capture=_checked_capture(capture),
         covenant=_checked_covenant(covenant),
-        auditum=auditum or _auditum_from_listening(
+        auditum=auditum
+        or _auditum_from_listening(
             enveloped,
             covenant=covenant,
             disagreements=disagreements,
@@ -565,7 +689,162 @@ def build_akousma_from_listen(
     return record
 
 
-def _maybe_link_recurrence(record: dict[str, Any], store: "akousma.AkousmataStore") -> None:
+def build_human_response_akousma(
+    machine_record: dict[str, Any],
+    machine_akousma_id: str,
+    note: str,
+    *,
+    listener_id: str = "oida-local-human",
+    display_name: str | None = None,
+    privacy: str = "private",
+) -> dict[str, Any]:
+    """Build a separate human account linked to one machine listening.
+
+    A note is attributable human testimony, but it is not automatically a
+    ``heard`` claim. The linked machine record remains untouched, and
+    ``same_source_as`` is asserted only because this builder copies the exact
+    source identity from that record.
+    """
+
+    normalized_note = str(note or "").strip()
+    normalized_listener = str(listener_id or "").strip()
+    normalized_privacy = str(privacy or "private").strip().lower()
+    if not normalized_note:
+        raise ValueError("a human listening account requires a non-empty note")
+    if not normalized_listener:
+        raise ValueError("a human listening account requires a stable listener id")
+    if normalized_privacy not in {"private", "shared"}:
+        raise ValueError("human profile privacy must be private or shared")
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    listening_id = f"lst_human_{re.sub(r'[^a-z0-9]+', '_', normalized_listener.lower()).strip('_') or 'local'}"
+    decision = akousma.route_decision(
+        f"decision_remember_{listening_id}",
+        gate="memory",
+        outcome="proceed",
+        subject="human listening account",
+        reason="A local person explicitly chose to retain this separate account.",
+        actor=normalized_listener,
+        decided_at=created_at,
+        granted_by="explicit local remember action",
+        requires_confirmation=False,
+        reversible=True,
+        listening_id=listening_id,
+    )
+    audio = (
+        machine_record.get("audio")
+        if isinstance(machine_record.get("audio"), dict)
+        else None
+    )
+    auditum = akousma.auditum(
+        listenings=[
+            {
+                "listening_id": listening_id,
+                "listener_id": normalized_listener,
+                "listener_type": "human",
+                "created_at": created_at,
+                "report_namespace": "oida.human",
+                "contract": OIDA_HUMAN_LISTENING_CONTRACT,
+                "route_decision_refs": [decision["decision_id"]],
+                "note": normalized_note,
+            }
+        ],
+        disagreements=[],
+        honest_absences=(
+            []
+            if audio
+            else [
+                {
+                    "id": f"absence_{listening_id}",
+                    "kind": "unavailable",
+                    "subject": "raw audio",
+                    "attributed_to": "linked machine record",
+                    "listening_id": listening_id,
+                    "count": 1,
+                    "note": "The source identity is linked, but raw audio is not present in this record.",
+                }
+            ]
+        ),
+        actions=[],
+        route_decisions=[decision],
+    )
+    subject = (
+        None
+        if audio
+        else str(machine_record.get("subject") or "linked listening event")
+    )
+    provenance = (
+        machine_record.get("provenance")
+        if isinstance(machine_record.get("provenance"), dict)
+        else {}
+    )
+    relations = [
+        akousma.relation(
+            "response_to",
+            machine_akousma_id,
+            note="Separate human account made in response to the machine listening.",
+        )
+    ]
+    if audio:
+        relations.append(
+            akousma.relation(
+                "same_source_as",
+                machine_akousma_id,
+                note="The two records were created from the same verified source identity.",
+            )
+        )
+    record = akousma.new_akousma(
+        audio=dict(audio) if audio else None,
+        subject=subject,
+        originating_app="oida",
+        source_type=str(provenance.get("source_type") or "unknown"),
+        origin=str(provenance.get("origin") or "unknown"),
+        listening={
+            "oida.human": {
+                "contract": OIDA_HUMAN_LISTENING_CONTRACT,
+                "created_at": created_at,
+                "summary": normalized_note,
+                "payload": {
+                    "note": normalized_note,
+                    "heard_claimed": False,
+                    "claims": [],
+                    "response_to_akousma_id": machine_akousma_id,
+                },
+            }
+        },
+        relations=relations,
+        tags=["human-listening", "linked-account"],
+        session_id=str(machine_record.get("session_id") or "") or None,
+        summary=normalized_note,
+        auditum=auditum,
+        extensions={
+            "oida.human_profile": {
+                "listener_id": normalized_listener,
+                "display_name": (
+                    str(display_name).strip()
+                    if normalized_privacy == "shared" and display_name
+                    else None
+                ),
+                "local_only": normalized_privacy != "shared",
+            }
+        },
+    )
+    human_meta: dict[str, Any] = {
+        "owner_listener_id": normalized_listener,
+        "privacy": normalized_privacy,
+        "revision_root": record["akousma_id"],
+    }
+    if normalized_privacy == "shared" and display_name and str(display_name).strip():
+        human_meta["display_name"] = str(display_name).strip()
+    record["extensions"]["akousmata.app"] = {
+        "listener": {"type": "human", "process": "oida_linked_account"},
+        "human_record": human_meta,
+    }
+    return record
+
+
+def _maybe_link_recurrence(
+    record: dict[str, Any], store: "akousma.AkousmataStore"
+) -> None:
     """When the same audio content already lives in the store, link the new record
     to the most recent holder as ``same_source_as`` (spec v1.1 relations). Best-effort:
     registration must never fail because kinship lookup did."""
@@ -573,15 +852,25 @@ def _maybe_link_recurrence(record: dict[str, Any], store: "akousma.AkousmataStor
         content_hash = str(record.get("audio", {}).get("content_hash") or "")
         if not content_hash or not hasattr(store, "find_by_hash"):
             return
-        matches = [r for r in store.find_by_hash(content_hash) if r.get("akousma_id") != record.get("akousma_id")]
+        matches = [
+            r
+            for r in store.find_by_hash(content_hash)
+            if r.get("akousma_id") != record.get("akousma_id")
+        ]
         if not matches:
             return
         newest = matches[0]
         relations = record.setdefault("lineage", {}).setdefault("relations", [])
-        if any(rel.get("target_akousma_id") == newest["akousma_id"] for rel in relations):
+        if any(
+            rel.get("target_akousma_id") == newest["akousma_id"] for rel in relations
+        ):
             return
         relations.append(
-            akousma.relation("same_source_as", newest["akousma_id"], note="Same audio content hash already in the akousmata.")
+            akousma.relation(
+                "same_source_as",
+                newest["akousma_id"],
+                note="Same audio content hash already in the akousmata.",
+            )
         )
     except Exception:
         pass

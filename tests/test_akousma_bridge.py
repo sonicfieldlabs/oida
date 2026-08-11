@@ -1,4 +1,5 @@
 """oída→germ bridge + cross-app akousma round-trip (Phase 4 acceptance)."""
+
 import os
 import tempfile
 import unittest
@@ -10,7 +11,9 @@ from oida import akousma_bridge
 
 class TestGermDeepLinks(unittest.TestCase):
     def test_capability_is_optional_and_does_not_claim_reachability(self):
-        with patch.dict(os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False):
+        with patch.dict(
+            os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False
+        ):
             capability = akousma_bridge.germ_capability()
         self.assertTrue(capability["optional"])
         self.assertFalse(capability["configured"])
@@ -31,21 +34,28 @@ class TestGermDeepLinks(unittest.TestCase):
         self.assertIsNone(capability["reachable"])
 
     def test_enable_flag_without_url_does_not_invent_a_target(self):
-        with patch.dict(os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": "1"}, clear=False):
+        with patch.dict(
+            os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": "1"}, clear=False
+        ):
             capability = akousma_bridge.germ_capability()
         self.assertFalse(capability["configured"])
         self.assertFalse(capability["enabled"])
         self.assertIsNone(capability["base_url"])
 
     def test_deep_link_format(self):
-        with patch.dict(os.environ, {"OIDA_GERM_URL": "http://127.0.0.1:5178", "OIDA_GERM_ENABLED": "1"}):
+        with patch.dict(
+            os.environ,
+            {"OIDA_GERM_URL": "http://127.0.0.1:5178", "OIDA_GERM_ENABLED": "1"},
+        ):
             url = akousma_bridge.germ_deep_link("akm_1", "prompt")
         self.assertIn("/import?", url)
         self.assertIn("akousma=akm_1", url)
         self.assertIn("mode=prompt", url)
 
     def test_unconfigured_handoff_has_no_implicit_local_target(self):
-        with patch.dict(os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False):
+        with patch.dict(
+            os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False
+        ):
             with self.assertRaises(akousma_bridge.GermNotConfiguredError):
                 akousma_bridge.germ_deep_link("akm_1", "prompt")
 
@@ -65,12 +75,19 @@ class TestGermDeepLinks(unittest.TestCase):
         rec = akousma_bridge.build_akousma_from_listen(
             audio={"asset_id": "a1"},
             origin="live-input",
-            location={"lat": 6.2442, "lon": -75.5812, "accuracy_m": 12, "label": "río Medellín"},
+            location={
+                "lat": 6.2442,
+                "lon": -75.5812,
+                "accuracy_m": 12,
+                "label": "río Medellín",
+            },
             capture={"direction": "past", "seconds": 30, "trigger": "remote-ear"},
         )
         self.assertEqual(akousma.validation_errors(rec), [])
         self.assertEqual(rec["location"]["lat"], 6.2442)
-        self.assertEqual(rec["location"]["source"], "gps")  # remote captures default to gps
+        self.assertEqual(
+            rec["location"]["source"], "gps"
+        )  # remote captures default to gps
         self.assertEqual(rec["capture"]["direction"], "past")
         self.assertEqual(rec["capture"]["seconds"], 30)
         self.assertIn("triggered_at", rec["capture"])
@@ -105,6 +122,33 @@ class TestGermDeepLinks(unittest.TestCase):
         self.assertFalse(block["content_included"])
         self.assertNotIn("text", block)
 
+    def test_human_note_is_a_separate_linked_account_and_not_an_automatic_heard_claim(
+        self,
+    ):
+        machine = akousma_bridge.build_akousma_from_listen(
+            audio={"asset_id": "shared-source", "content_hash": "sha256:" + "a" * 64},
+            listening={"oida.signal": {"summary": "Measured signal account"}},
+        )
+        human = akousma_bridge.build_human_response_akousma(
+            machine,
+            machine["akousma_id"],
+            "I want to return to the quiet ending.",
+            listener_id="local-person-1",
+        )
+
+        self.assertEqual(akousma.validation_errors(human), [])
+        self.assertEqual(human["auditum"]["listenings"][0]["listener_type"], "human")
+        payload = human["listening"]["oida.human"]["payload"]
+        self.assertFalse(payload["heard_claimed"])
+        self.assertEqual(payload["claims"], [])
+        relations = {relation["type"] for relation in human["lineage"]["relations"]}
+        self.assertEqual(relations, {"response_to", "same_source_as"})
+        self.assertEqual(
+            human["extensions"]["akousmata.app"]["human_record"]["owner_listener_id"],
+            "local-person-1",
+        )
+        self.assertEqual(machine["auditum"]["listenings"][0]["listener_type"], "agent")
+
 
 class TestCrossAppRoundTrip(unittest.TestCase):
     def setUp(self):
@@ -120,7 +164,9 @@ class TestCrossAppRoundTrip(unittest.TestCase):
             audio={"asset_id": "file-unconfigured"},
             origin="file",
         )
-        with patch.dict(os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False):
+        with patch.dict(
+            os.environ, {"OIDA_GERM_URL": "", "OIDA_GERM_ENABLED": ""}, clear=False
+        ):
             with self.assertRaises(akousma_bridge.GermNotConfiguredError):
                 akousma_bridge.handoff_to_germ(record, "prompt", store=self.store)
         self.assertEqual(self.store.query(), [])
@@ -128,11 +174,21 @@ class TestCrossAppRoundTrip(unittest.TestCase):
     def test_listen_to_generate_to_lineage(self):
         # 1) oída listens to a file → akousma A, "open as prompt" hands it to germ.
         a = akousma_bridge.build_akousma_from_listen(
-            audio={"asset_id": "file1", "uri": "akousmata://objects/x.wav", "duration_seconds": 8.0},
+            audio={
+                "asset_id": "file1",
+                "uri": "akousmata://objects/x.wav",
+                "duration_seconds": 8.0,
+            },
             origin="file",
-            listening={"oida.signal": {"class": "tonal"}, "akouo.describe": {"summary": "struck bell"}},
+            listening={
+                "oida.signal": {"class": "tonal"},
+                "akouo.describe": {"summary": "struck bell"},
+            },
         )
-        with patch.dict(os.environ, {"OIDA_GERM_URL": "http://127.0.0.1:5178", "OIDA_GERM_ENABLED": "1"}):
+        with patch.dict(
+            os.environ,
+            {"OIDA_GERM_URL": "http://127.0.0.1:5178", "OIDA_GERM_ENABLED": "1"},
+        ):
             handoff = akousma_bridge.handoff_to_germ(a, "prompt", store=self.store)
         A = handoff["akousma_id"]
         self.assertIn("mode=prompt", handoff["germ_url"])
@@ -155,7 +211,9 @@ class TestCrossAppRoundTrip(unittest.TestCase):
         self.assertEqual(self.store.children(A), [B])
 
         # 4) algophony batch query retrieves germ generations from the shared store.
-        germ_generations = [r["akousma_id"] for r in self.store.query(originating_app="germ")]
+        germ_generations = [
+            r["akousma_id"] for r in self.store.query(originating_app="germ")
+        ]
         self.assertIn(B, germ_generations)
         self.assertEqual(len(self.store.query()), 2)  # both A and B live in one store
 

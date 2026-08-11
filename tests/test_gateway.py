@@ -144,6 +144,61 @@ class GatewayContractTests(unittest.TestCase):
         self.assertIn("Spectral centroid", inferred)
         self.assertIn("Measurement status is unsupported", undetermined)
 
+    def test_separately_attributed_human_hearing_survives_with_its_participant_and_pass(self) -> None:
+        payload = host_payload()
+        context = payload["listening_context"]
+        context["participants"].append({
+            "id": "person-local-1",
+            "type": "human",
+            "role": "human listener",
+            "standing": "listener",
+            "report_ref": "#/observations/0",
+        })
+        context["listening_passes"].append({
+            "id": "pass-human-1",
+            "listener_id": "person-local-1",
+            "route": ["human-report"],
+            "started_at": "2026-07-27T00:00:00Z",
+            "completed_at": "2026-07-27T00:00:02Z",
+            "moment": {"relation": "past_capture", "scales": ["event"]},
+            "source_refs": ["#/source"],
+            "claim_refs": ["#/observations/0"],
+            "decision_refs": ["decision-host-input"],
+            "influenced_by": [],
+        })
+        payload["observations"] = [{
+            "statement": "I heard a brief metallic impact.",
+            "category": "heard",
+            "confidence": "high",
+            "source": "human",
+            "listening_pass_id": "pass-human-1",
+        }]
+
+        report = normalize_host_perception(payload)
+        claims = map_report_to_claims(report)
+
+        self.assertEqual(claims["heard"][0]["listening_pass_id"], "pass-human-1")
+        participants = report["listening_context"]["participants"]
+        self.assertIn("person-local-1", {item["id"] for item in participants})
+        passes = report["listening_context"]["listening_passes"]
+        self.assertIn("pass-human-1", {item["id"] for item in passes})
+
+    def test_human_source_without_a_resolving_human_participant_is_not_heard(self) -> None:
+        payload = host_payload()
+        payload["observations"] = [{
+            "statement": "I heard a brief metallic impact.",
+            "category": "heard",
+            "confidence": "high",
+            "source": "human",
+            "listening_pass_id": "pass-host-fixture",
+        }]
+
+        report = normalize_host_perception(payload)
+        claims = map_report_to_claims(report)
+
+        self.assertEqual(claims["heard"], [])
+        self.assertEqual(report["host_observations"][0]["category"], "inferred")
+
     def test_host_harness_builds_event_without_exposing_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             memory = AkousmataStore(root=Path(tmp) / "memory")
@@ -155,7 +210,7 @@ class GatewayContractTests(unittest.TestCase):
         self.assertEqual(event["source"]["platform"], "codex")
         self.assertIsNotNone(result["trace"])
         self.assertEqual(result["trace"]["earworm"]["session"]["app_id"], "oida.akousmata")
-        self.assertEqual(result["earworm"]["version"], "0.6.1")
+        self.assertEqual(result["earworm"]["version"], "0.7.0")
         context = event["listening_context"]
         self.assertEqual(context["contract"], "akouo/listening-context/v2")
         self.assertEqual(context["action_authority"]["mode"], "observe_only")
@@ -270,6 +325,17 @@ class GatewayContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["contract"], GATEWAY_CONTRACT)
         self.assertEqual(response.json()["components"]["akouo"]["contract"], "akouo/v0.9")
+        self.assertEqual(
+            response.json()["memory_accounts"],
+            {
+                "separate_human_and_machine_records": True,
+                "machine_core_immutable": True,
+                "human_revisions": "additive_new_record",
+                "classification_source": "auditum.listenings[].listener_type",
+                "notes_imply_heard": False,
+                "library": "/library/",
+            },
+        )
         self.assertEqual(set(response.json()["perception_paths"]), {"oida_owned", "host_supplied"})
         self.assertEqual(
             set(response.json()["schemas"]),

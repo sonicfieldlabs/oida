@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oida.local/schemas/listening-event.schema.json",
   "title": "OÍDA accountable listening event",
-  "description": "The stable cross-surface result emitted by Oída v0.9. It preserves AKOÚŌ v0.9 provenance, temporal passes, and route decisions alongside the listening report. Extension fields such as covenant, location, capture, and session remain additive.",
+  "description": "The stable cross-surface result emitted by Oída v0.10. It preserves AKOÚŌ v0.9 provenance, temporal passes, and route decisions alongside the listening report. Extension fields such as covenant, location, capture, and session remain additive.",
   "type": "object",
   "additionalProperties": true,
   "required": [

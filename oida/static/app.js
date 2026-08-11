@@ -1846,6 +1846,7 @@ function resultActions(event, session) {
   const items = [
     ["conversation", "Ask about this result"],
     ["remember", event.memory?.saved_trace_id ? "Remembered" : "Remember"],
+    ["human-listening", "Add my listening"],
     ["wiki", "Expand on Wiki"],
     ["json", "Export JSON"],
   ];
@@ -2246,7 +2247,11 @@ async function rememberReading(event, trigger = null) {
   try {
     const result = await post("/memory/remember", { event, tags: [state.preset] });
     if (result.trace?.id) {
-      event.memory = { ...(event.memory || {}), saved_trace_id: result.trace.id };
+      event.memory = {
+        ...(event.memory || {}),
+        saved_trace_id: result.trace.id,
+        akousma_id: result.akousma_id || event.memory?.akousma_id,
+      };
       if (trigger) trigger.textContent = "Remembered";
     }
     setListenStatus("Listening result remembered.", "");
@@ -2257,6 +2262,31 @@ async function rememberReading(event, trigger = null) {
   }
 }
 
+async function addHumanListening(event) {
+  if (!event) return;
+  const note = window.prompt("Add your separate listening account. A note is not automatically a heard claim.");
+  if (!note?.trim()) return;
+  const machineId = event.memory?.akousma_id;
+  const result = machineId
+    ? await post("/memory/human-listening", {
+        machine_akousma_id: machineId,
+        note: note.trim(),
+      })
+    : await post("/memory/remember", {
+        event,
+        user_notes: note.trim(),
+        tags: [state.preset],
+      });
+  event.memory = {
+    ...(event.memory || {}),
+    saved_trace_id: result.trace?.id || event.memory?.saved_trace_id,
+    akousma_id: result.akousma_id || machineId,
+    human_akousma_id: result.human_akousma_id,
+  };
+  setListenStatus("Your separate human listening was remembered.", "");
+  refreshMemory();
+}
+
 function handleResultAction(action, event, session, trigger = null) {
   switch (action) {
     case "conversation":
@@ -2265,6 +2295,9 @@ function handleResultAction(action, event, session, trigger = null) {
       break;
     case "remember":
       rememberReading(event, trigger);
+      break;
+    case "human-listening":
+      addHumanListening(event);
       break;
     case "wiki":
       if (ui.wikiModal && typeof ui.wikiModal.showModal === "function" && !ui.wikiModal.open) ui.wikiModal.showModal();
@@ -2610,6 +2643,7 @@ function listeningMenu(event, session) {
   actions.push(
     ["rename", "Rename"],
     ["remember", event.memory?.saved_trace_id ? "Remembered" : "Remember sound"],
+    ["human-listening", "Add my listening"],
     ["wiki", "Expand listening on Wiki"],
     ["json", "Export listening JSON"],
     ["delete", "Delete listening"],

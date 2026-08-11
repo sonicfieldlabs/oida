@@ -148,6 +148,11 @@ def listening_context_for_report(
     dsp = report.get("dsp") if isinstance(report.get("dsp"), dict) else {}
     transcript = report.get("transcript") if isinstance(report.get("transcript"), dict) else {}
     identity = report.get("listening_identity") if isinstance(report.get("listening_identity"), dict) else {}
+    declared_context = (
+        report.get("host_declared_listening_context")
+        if isinstance(report.get("host_declared_listening_context"), dict)
+        else {}
+    )
 
     host_supplied = bool(host)
     direct_audio_to_oida = not host_supplied or bool(source.get("audio_available_to_oida"))
@@ -245,6 +250,24 @@ def listening_context_for_report(
             "standing": "listener",
             "report_ref": "#/",
         })
+    declared_humans: dict[str, dict[str, Any]] = {}
+    for candidate in declared_context.get("participants", []):
+        if not isinstance(candidate, dict) or candidate.get("type") != "human":
+            continue
+        participant_id = str(candidate.get("id") or "").strip()
+        if not participant_id or participant_id in declared_humans:
+            continue
+        participant = {
+            "id": participant_id,
+            "type": "human",
+            "role": str(candidate.get("role") or "attributed human listener"),
+            "standing": "listener",
+            "report_ref": "#/host_declared_listening_context",
+        }
+        declared_humans[participant_id] = participant
+        participants.append(participant)
+    if declared_humans:
+        sources.append("human")
 
     honest_absences: list[dict[str, Any]] = []
     if host_supplied and not direct_audio_to_oida:
@@ -302,6 +325,60 @@ def listening_context_for_report(
         "decision_refs": [str(item["id"]) for item in decision_items if item.get("id")],
         "influenced_by": [],
     }]
+    declared_passes = [
+        item
+        for item in declared_context.get("listening_passes", [])
+        if isinstance(item, dict)
+        and str(item.get("listener_id") or "") in declared_humans
+        and isinstance(item.get("id"), str)
+        and item["id"].strip()
+    ]
+    declared_pass_ids = {str(item["id"]) for item in declared_passes}
+    observations = report.get("host_observations") if isinstance(report.get("host_observations"), list) else []
+    for declared_pass in declared_passes:
+        pass_id = str(declared_pass["id"])
+        moment = declared_pass.get("moment") if isinstance(declared_pass.get("moment"), dict) else {}
+        relation = str(moment.get("relation") or "unknown")
+        if relation not in {"live", "past_capture", "relisten", "archive", "seasonal", "prospective", "unknown"}:
+            relation = "unknown"
+        declared_scales = [
+            str(value)
+            for value in moment.get("scales", [])
+            if value in {"sample", "frame", "gesture", "event", "scene", "session", "archive", "lineage", "infrastructural", "planetary", "unknown"}
+        ]
+        claim_refs = [
+            f"#/host_observations/{index}"
+            for index, observation in enumerate(observations)
+            if isinstance(observation, dict)
+            and observation.get("source") == "human"
+            and observation.get("listening_pass_id") == pass_id
+        ]
+        listening_passes.append({
+            "id": pass_id,
+            "listener_id": str(declared_pass["listener_id"]),
+            "route": _string_list(declared_pass.get("route")) or ["human-report"],
+            "started_at": str(declared_pass.get("started_at") or pass_started),
+            "completed_at": str(declared_pass.get("completed_at") or pass_completed),
+            "moment": {
+                "relation": relation,
+                "scales": _dedupe(declared_scales or ["event"]),
+                **(
+                    {"time_range": dict(moment["time_range"])}
+                    if isinstance(moment.get("time_range"), dict)
+                    else {}
+                ),
+            },
+            "source_refs": ["#/host_declared_listening_context", "#/host_observations"],
+            "claim_refs": claim_refs,
+            "decision_refs": [str(item["id"]) for item in decision_items if item.get("id")],
+            "influenced_by": [
+                {"pass_id": str(edge["pass_id"]), "effect": str(edge["effect"])}
+                for edge in declared_pass.get("influenced_by", [])
+                if isinstance(edge, dict)
+                and str(edge.get("pass_id") or "") in declared_pass_ids
+                and str(edge.get("effect") or "").strip()
+            ],
+        })
     return {
         "contract": LISTENING_CONTEXT_CONTRACT,
         "position": {

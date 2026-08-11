@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import akousma
 from fastapi.testclient import TestClient
 
 from oida.engine_base import EngineUnavailable
@@ -53,7 +54,9 @@ class _Client:
 
     def __enter__(self):
         self.environment.__enter__()
-        self.client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+        self.client = TestClient(
+            create_app(profile="stub"), base_url="http://127.0.0.1"
+        )
         # The mounted FastMCP session manager is process-global and explicitly
         # single-run; endpoint tests do not need to start that lifespan.
         return self.client
@@ -102,9 +105,13 @@ def test_reasoning_settings_provider_and_model_endpoints() -> None:
         assert settings.json()["allow_external_audio"] is False
         assert settings.json()["resources"]["resident_mode"] in {"single", "multi"}
         assert models.json()["models"][0]["id"] == "oida-deterministic-v1"
-        moss_models = client.get("/reasoning/models?provider_id=oida_moss").json()["models"]
+        moss_models = client.get("/reasoning/models?provider_id=oida_moss").json()[
+            "models"
+        ]
         assert {item["id"] for item in moss_models} >= {"instruct", "thinking"}
-        local_audio_models = client.get("/reasoning/models?provider_id=local_audio").json()["models"]
+        local_audio_models = client.get(
+            "/reasoning/models?provider_id=local_audio"
+        ).json()["models"]
         assert {item["id"] for item in local_audio_models} >= {
             "OpenMOSS-Team/MOSS-Transcribe-Diarize",
             "mispeech/midashenglm-0.6b-fp32",
@@ -115,7 +122,9 @@ def test_reasoning_settings_provider_and_model_endpoints() -> None:
         }
 
 
-def test_listening_identity_endpoint_writes_the_harness_file_and_reaches_compiler() -> None:
+def test_listening_identity_endpoint_writes_the_harness_file_and_reaches_compiler() -> (
+    None
+):
     with _Client() as client:
         initial = client.get("/listening")
         assert initial.status_code == 200
@@ -176,7 +185,10 @@ def test_listening_identity_endpoint_writes_the_harness_file_and_reaches_compile
 
         stale = client.put(
             "/listening",
-            json={"text": "Stale replacement", "expected_sha256": initial.json()["sha256"]},
+            json={
+                "text": "Stale replacement",
+                "expected_sha256": initial.json()["sha256"],
+            },
         )
         assert stale.status_code == 409
         assert client.get("/listening").json()["text"] == perspective
@@ -206,6 +218,59 @@ def test_memory_remember_normalizes_malformed_optional_event_fields() -> None:
         assert body["trace"]["tags"] == ["requested"]
 
 
+def test_memory_note_creates_a_separate_linked_human_record() -> None:
+    with _Client() as client:
+        response = client.post(
+            "/memory/remember",
+            json={
+                "event": _event("evt_human_response"),
+                "user_notes": "The ending felt quieter than the machine summary suggests.",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["akousma_id"]
+        assert body["human_akousma_id"]
+        assert body["akousma_id"] != body["human_akousma_id"]
+        store = akousma.AkousmataStore()
+        try:
+            machine = store.get(body["akousma_id"])
+            human = store.get(body["human_akousma_id"])
+        finally:
+            store.close()
+
+        assert akousma.record_class(machine) == "agent"
+        assert akousma.record_class(human) == "human"
+        assert human["listening"]["oida.human"]["payload"]["heard_claimed"] is False
+        local_profile = client.get("/library/api/human-profile").json()
+        human_meta = human["extensions"]["akousmata.app"]["human_record"]
+        assert human_meta["owner_listener_id"] == local_profile["listener_id"]
+        library_detail = client.get(f"/library/api/records/{body['human_akousma_id']}")
+        assert library_detail.status_code == 200, library_detail.text
+        assert library_detail.json()["human_record"]["editable"] is True
+        relations = {
+            (relation["type"], relation["target_akousma_id"])
+            for relation in human["lineage"]["relations"]
+        }
+        assert ("response_to", body["akousma_id"]) in relations
+        assert ("same_source_as", body["akousma_id"]) in relations
+
+        second = client.post(
+            "/memory/human-listening",
+            json={
+                "machine_akousma_id": body["akousma_id"],
+                "note": "A second independently attributed human response.",
+                "human_listener_id": "local-listener-fixture",
+            },
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["human_akousma_id"] not in {
+            body["akousma_id"],
+            body["human_akousma_id"],
+        }
+
+
 def test_report_endpoint_uses_configured_chunk_budget() -> None:
     with patch.dict(os.environ, {"OIDA_MOSS_CHUNK_SECONDS": "12"}, clear=False):
         with _Client() as client:
@@ -213,12 +278,17 @@ def test_report_endpoint_uses_configured_chunk_budget() -> None:
                 patch("oida.server.report", return_value=object()) as report_mock,
                 patch("oida.server.report_to_dict", return_value={"ok": True}),
             ):
-                response = client.post("/report", json={"path": "/unused.wav", "profile": "audit"})
+                response = client.post(
+                    "/report", json={"path": "/unused.wav", "profile": "audit"}
+                )
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert response.json()["listening_identity"]["application"] == "inactive"
-    assert report_mock.call_args.kwargs == {"chunk_seconds": 12.0, "overlap_seconds": 5.0}
+    assert report_mock.call_args.kwargs == {
+        "chunk_seconds": 12.0,
+        "overlap_seconds": 5.0,
+    }
 
 
 def test_destructive_cleanup_limits_reject_negative_and_nonfinite_values() -> None:
@@ -249,11 +319,17 @@ def test_destructive_cleanup_limits_reject_negative_and_nonfinite_values() -> No
         )
         valid_infinity_word = client.post(
             "/memory/remember",
-            json={"event": {"id": "evt_infinity_word", "aggregate": {"title": "Infinity"}}},
+            json={
+                "event": {"id": "evt_infinity_word", "aggregate": {"title": "Infinity"}}
+            },
         )
         negative_thinking_budget = client.post(
             "/qa",
-            json={"path": "/unused.wav", "question": "What is audible?", "thinking_budget": -1},
+            json={
+                "path": "/unused.wav",
+                "question": "What is audible?",
+                "thinking_budget": -1,
+            },
         )
 
         assert negative.status_code == 422
@@ -306,7 +382,9 @@ def test_persisted_perception_roles_are_applied_during_daemon_restart() -> None:
             "OIDA_MOSS_PREWARM": "0",
         }
         with patch.dict(os.environ, environment, clear=False):
-            store = ReasoningSettingsStore(root / "data" / "settings" / "reasoning.json")
+            store = ReasoningSettingsStore(
+                root / "data" / "settings" / "reasoning.json"
+            )
             settings = ReasoningSettings()
             roles = dict(settings.roles)
             roles[ModelRole.FAST_PERCEPTION] = RoleAssignment(
@@ -330,7 +408,9 @@ def test_persisted_perception_roles_are_applied_during_daemon_restart() -> None:
                     ],
                 ),
             ):
-                client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+                client = TestClient(
+                    create_app(profile="stub"), base_url="http://127.0.0.1"
+                )
                 try:
                     status = client.get("/health")
                     settings_response = client.get("/reasoning/settings")
@@ -399,7 +479,10 @@ def test_conversation_v02_sync_stream_comparison_list_get_and_delete() -> None:
         forged = client.post(
             "/conversation/ask",
             json={
-                "event": {**_event("evt_primary"), "aggregate": {"short_summary": "FORGED"}},
+                "event": {
+                    **_event("evt_primary"),
+                    "aggregate": {"short_summary": "FORGED"},
+                },
                 "conversation_id": conversation_id,
                 "question": "Use the replacement?",
             },
@@ -423,7 +506,9 @@ def test_conversation_v02_sync_stream_comparison_list_get_and_delete() -> None:
         assert client.get(f"/conversation/{conversation_id}").status_code == 404
 
 
-def test_new_active_covenant_filters_an_existing_conversation_without_replacing_its_event() -> None:
+def test_new_active_covenant_filters_an_existing_conversation_without_replacing_its_event() -> (
+    None
+):
     event = _event("evt_governed")
     event["aggregate"]["short_summary"] = "A speaker says launch at dawn."
     event["routes"] = [
@@ -443,7 +528,9 @@ def test_new_active_covenant_filters_an_existing_conversation_without_replacing_
     ]
     with _Client() as client:
         comparison = _event("evt_governed_comparison", "Comparison")
-        comparison["aggregate"]["short_summary"] = "A speaker says comparison secret 9876."
+        comparison["aggregate"]["short_summary"] = (
+            "A speaker says comparison secret 9876."
+        )
         comparison["routes"] = [
             {
                 "structured": {
@@ -461,13 +548,21 @@ def test_new_active_covenant_filters_an_existing_conversation_without_replacing_
         ]
         stored_comparison = client.post(
             "/conversation/ask",
-            json={"event": comparison, "question": "What did you hear?", "include_transcript": True},
+            json={
+                "event": comparison,
+                "question": "What did you hear?",
+                "include_transcript": True,
+            },
         )
         assert stored_comparison.status_code == 200
 
         first = client.post(
             "/conversation/ask",
-            json={"event": event, "question": "What did you hear?", "include_transcript": True},
+            json={
+                "event": event,
+                "question": "What did you hear?",
+                "include_transcript": True,
+            },
         )
         assert first.status_code == 200
         conversation_id = first.json()["conversation_id"]
@@ -572,10 +667,13 @@ def test_host_prepare_commit_uses_enabled_selection_and_one_time_token() -> None
         )
         assert committed.status_code == 200
         assert committed.json()["turn"]["reasoner"]["host_managed"] is True
-        assert client.post(
-            "/conversation/commit",
-            json={"prepare_token": token, "response": {"answer_blocks": []}},
-        ).status_code == 400
+        assert (
+            client.post(
+                "/conversation/commit",
+                json={"prepare_token": token, "response": {"answer_blocks": []}},
+            ).status_code
+            == 400
+        )
 
 
 def test_openrouter_oauth_start_is_pkce_and_loopback() -> None:
@@ -588,7 +686,9 @@ def test_openrouter_oauth_start_is_pkce_and_loopback() -> None:
         assert "127.0.0.1" in body["authorization_url"]
 
 
-def test_settings_reject_incompatible_roles_and_default_ask_uses_saved_provider() -> None:
+def test_settings_reject_incompatible_roles_and_default_ask_uses_saved_provider() -> (
+    None
+):
     with _Client() as client:
         settings = client.get("/reasoning/settings").json()
         settings["role_assignments"]["fast_perception"] = {
@@ -632,7 +732,9 @@ def test_global_incognito_forces_local_nonpersistent_reasoning() -> None:
             "model_id": "gpt-test",
         }
         assert client.put("/reasoning/settings", json=settings).status_code == 200
-        configured = client.post("/background/config", json={"updates": {"incognito": True}})
+        configured = client.post(
+            "/background/config", json={"updates": {"incognito": True}}
+        )
         assert configured.status_code == 200
 
         response = client.post(
@@ -651,4 +753,7 @@ def test_global_incognito_forces_local_nonpersistent_reasoning() -> None:
         assert body["turn"]["reasoner"]["provider_id"] == "local_structured"
         assert body["turn"]["audit"]["transcript_included"] is False
         assert body["turn"]["audit"]["memory_content_included"] is False
-        assert client.get("/conversation?event_id=evt_incognito_global").json()["count"] == 0
+        assert (
+            client.get("/conversation?event_id=evt_incognito_global").json()["count"]
+            == 0
+        )

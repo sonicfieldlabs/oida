@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0 - 2026-08-11
+
+- Advanced the gateway to `oida/gateway/v0.6` and aligned the complete core
+  with AKOÚŌ 0.9.2, Earworm/Akousma 0.7.0/spec 1.6, and Akousmata 0.7.0.
+- Added separate linked human listening accounts to REST, MCP, dashboard, and
+  shared memory. Machine accounts remain immutable; human changes are additive
+  revisions, and notes never become `heard` without an attributable human pass.
+- Preserved separately declared human participants and passes at the host
+  boundary, while demoting `heard` when its pass does not resolve to a human
+  listener.
+
 ## 0.9.2 - 2026-08-03
 
 - Reserved `heard` for separately attributable human reports. Local and host

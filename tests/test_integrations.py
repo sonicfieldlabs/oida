@@ -113,6 +113,7 @@ class IntegrationAssetTests(unittest.TestCase):
                 "oida_memory_search",
                 "oida_memory_get",
                 "oida_remember",
+                "oida_add_human_listening",
                 "oida_forget",
                 "oida_covenant",
                 "oida_live",
