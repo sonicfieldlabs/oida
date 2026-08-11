@@ -11,7 +11,7 @@ embedded Akousmata library.
 audio file / live capture / declared host perception
                         |
                         v
-                OÍDA gateway v0.5
+                OÍDA gateway v0.6
                         |
           +-------------+--------------+
           |                            |

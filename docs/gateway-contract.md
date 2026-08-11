@@ -5,7 +5,7 @@ Installing Oída installs and exposes the complete stack: AKOÚŌ routing and
 claim discipline, Earworm event/provenance envelopes, and the Akousmata store
 and navigator.
 
-The stable gateway contract is `oida/gateway/v0.5`. It supports two paths and
+The stable gateway contract is `oida/gateway/v0.6`. It supports two paths and
 one decision-only outcome:
 
 1. **Oída-owned perception** — pass Oída a local audio path. Its configured
@@ -30,12 +30,19 @@ marked undetermined. Model output can never become a `heard` or `measured`
 claim merely because the model processed audio or used a number. It remains
 inferred or interpreted; measurements need DSP, metadata, a measuring tool,
 or a declared human measurement. A `heard` claim requires `source: "human"`
-and a separately attributable `listening_pass_id`.
+and a separately attributable `listening_pass_id` whose listener resolves to
+a human participant with listener standing.
 
 Prompts, transcripts, captions, and contextual notes are attributable inputs,
 not auditory evidence. They may ground inference or interpretation when their
 source is named, but they are never promoted to `heard` merely because they
 describe a sound.
+
+Gateway discovery also declares the durable account boundary under
+`memory_accounts`. Machine listening cores are immutable. An explicit human
+note creates a separate `human` auditum linked to its machine record; it is not
+converted into `heard`. Editing that locally owned human account creates a new
+revision record and preserves the earlier account.
 
 Both perception paths emit `oida/listening-event/v0.3` with an
 `akouo/listening-context/v2` block. The context answers different questions

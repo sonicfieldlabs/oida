@@ -96,7 +96,7 @@ name **oída**.
 
 ## What Is Implemented
 
-- **Unified gateway contract** (`oida/gateway/v0.5`) with two honest perception
+- **Unified gateway contract** (`oida/gateway/v0.6`) with two honest perception
   paths: Oída-owned audio through `POST /gateway/listen`, and host-owned model
   perception through `POST /gateway/harness`. `GET /gateway` advertises the
   installed AKOÚŌ, Earworm, and Akousmata contracts; `GET
@@ -104,6 +104,11 @@ name **oída**.
   `/gateway/schema/listening-context`, and `/gateway/schema/route-outcome`
   publish the integration boundaries while
   leaving AKOÚŌ as the semantic owner of listening context.
+- **Separate human memory accounts**: Remember retains the immutable machine
+  listening and, when a person supplies a note, creates a distinct human
+  Akousma linked by `response_to` (and `same_source_as` only when the source
+  identity is verified). Notes are not automatically `heard`; human edits are
+  additive revisions in the mounted Akousmata library.
 - **Decision-first refusal**: a covenant or input gate that closes before
   perception returns a complete `oida/route-outcome/v0.1` receipt without
   fabricating a listening event, audio asset, or acoustic claim. The
@@ -237,10 +242,10 @@ component for explicit cultivation handoffs.
 
 | Component | Version / contract | Role in OÍDA |
 | --- | --- | --- |
-| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.1` / `akouo/v0.9` | Listening vocabulary, embodied heard boundary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
-| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.6.1` / spec v1.5 | Addressable auditums, decision-only records, provenance, lineage, attributable disagreement resolution, attributed absence, forgetting receipts, and additive revision. |
-| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.6.1` | Embedded library at `/library/`, accountable-memory audit, decision and forgetting views, and the shared durable store. |
-| OÍDA gateway | `sonicfield-oida 0.9.2` / `oida/gateway/v0.5` | Unified REST, MCP, agent, dashboard, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
+| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.2` / `akouo/v0.9` | Listening vocabulary, embodied heard boundary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
+| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.7.0` / spec v1.6 | Addressable human, agent, hybrid, plural, decision-only, and legacy accounts; immutable machine core; provenance, lineage, and additive revision. |
+| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.7.0` | Embedded library at `/library/`, listener-type filtering, locally owned human accounts and revisions, accountable-memory audit, and the shared durable store. |
+| OÍDA gateway | `sonicfield-oida 0.10.0` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.3 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
@@ -445,9 +450,11 @@ capped at 1 GiB and normalized through ffmpeg. `/raw-audio/status` and
 `/raw-audio/wipe` inspect and delete raw upload/live-buffer audio, including
 pre-data-dir recordings in the checkout's `uploads/` via `include_legacy`.
 
-Memory is explicit: events are saved only through `/memory/remember` or the
-dashboard's Remember. Incognito events stay out of durable history. The shared
-akousmata store is written only by the explicit germ handoff actions.
+Memory is explicit: events are saved only through `/memory/remember`, the
+dashboard's Remember or Add my listening actions, or an explicit GERM handoff.
+Incognito events stay out of durable history. A human note is stored as a
+separate linked account and never changes the machine account or implies a
+`heard` claim.
 
 Reasoning providers are also explicit. The deterministic local provider is the
 default; host CLIs and network endpoints remain disabled until the operator

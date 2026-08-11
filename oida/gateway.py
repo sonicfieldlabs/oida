@@ -36,7 +36,7 @@ from oida.listening_identity import (
 )
 from oida.memory import earworm_context_for_event
 
-GATEWAY_CONTRACT = "oida/gateway/v0.5"
+GATEWAY_CONTRACT = "oida/gateway/v0.6"
 HOST_PERCEPTION_CONTRACT = "oida/host-perception/v0.4"
 SUPPORTED_HOSTS = ("hermes", "codex", "claude", "openclaw", "opencode", "generic")
 CLAIM_CATEGORIES = ("heard", "measured", "inferred", "interpreted", "speculative", "undetermined")
@@ -58,8 +58,8 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
                 "contract": f"akouo/{akouo['akouo_contract_version']}",
                 "host_profile_version": akouo["version"],
             },
-            "earworm": {"role": "auditum, event, provenance, and context protocol", "contract": "earworm/v0.6"},
-            "akousmata": {"role": "local accountable-memory store and navigator", "contract": "akousmata/v0.6"},
+            "earworm": {"role": "auditum, event, provenance, and context protocol", "contract": "earworm/v0.7", "akousma_schema": "1.6"},
+            "akousmata": {"role": "local accountable-memory store and navigator", "contract": "akousmata/v0.7"},
         },
         "perception_paths": {
             "oida_owned": {
@@ -100,6 +100,14 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
             "memory_is_explicit": True,
             "raw_audio_default": "external_ref",
             "remote_access": "operator-configured private network only",
+        },
+        "memory_accounts": {
+            "separate_human_and_machine_records": True,
+            "machine_core_immutable": True,
+            "human_revisions": "additive_new_record",
+            "classification_source": "auditum.listenings[].listener_type",
+            "notes_imply_heard": False,
+            "library": "/library/",
         },
         "route_presets": [preset["id"] for preset in akouo["route_presets"]],
         "optional_components": {
@@ -217,7 +225,7 @@ def decision_first_refusal(
         "command_output": None,
         "earworm": {
             "protocol": "earworm",
-            "version": "0.6.1",
+            "version": "0.7.0",
             "auditum": record["auditum"],
         },
         "trace": None,
@@ -309,6 +317,30 @@ def normalize_host_perception(payload: dict[str, Any]) -> dict[str, Any]:
         privacy_mode="session",
         action_mode="observe_only",
     )
+    context = normalized["listening_context"]
+    human_listener_ids = {
+        str(participant.get("id"))
+        for participant in context.get("participants", [])
+        if isinstance(participant, dict)
+        and participant.get("type") == "human"
+        and participant.get("standing") == "listener"
+    }
+    attributable_human_passes = {
+        str(listening_pass.get("id"))
+        for listening_pass in context.get("listening_passes", [])
+        if isinstance(listening_pass, dict)
+        and str(listening_pass.get("listener_id") or "") in human_listener_ids
+    }
+    for observation in observations:
+        if (
+            observation.get("category") == "heard"
+            and observation.get("listening_pass_id") not in attributable_human_passes
+        ):
+            observation["category"] = "inferred"
+            observation["basis"] = (
+                f"{observation.get('basis')}; demoted because the declared pass does not resolve "
+                "to a human listener participant"
+            )
     return normalized
 
 

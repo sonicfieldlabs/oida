@@ -276,14 +276,47 @@ async def oida_memory_get(trace_id: str) -> dict[str, Any]:
 async def oida_remember(
     event: dict[str, Any],
     user_notes: str | None = None,
+    human_listener_id: str | None = None,
+    human_display_name: str | None = None,
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Explicitly save a normalized listening event into local Akousmata memory."""
+    """Explicitly save a machine event and, when notes are supplied, a separate linked human account."""
     return await asyncio.to_thread(
         post_json,
         _server(),
         "/memory/remember",
-        {"event": event, "user_notes": user_notes, "tags": tags or []},
+        {
+            "event": event,
+            "user_notes": user_notes,
+            "human_listener_id": human_listener_id,
+            "human_display_name": human_display_name,
+            "tags": tags or [],
+        },
+    )
+
+
+@MCP.tool(structured_output=True)
+async def oida_add_human_listening(
+    machine_akousma_id: str,
+    note: str,
+    human_listener_id: str | None = None,
+    human_display_name: str | None = None,
+) -> dict[str, Any]:
+    """Add a separate local human account linked to an immutable machine listening.
+
+    The note is not converted into a ``heard`` claim. A human can later revise
+    the account additively through the Akousmata library.
+    """
+    return await asyncio.to_thread(
+        post_json,
+        _server(),
+        "/memory/human-listening",
+        {
+            "machine_akousma_id": machine_akousma_id,
+            "note": note,
+            "human_listener_id": human_listener_id,
+            "human_display_name": human_display_name,
+        },
     )
 
 
