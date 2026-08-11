@@ -49,6 +49,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
+          version: "0.12.3"
           python-version: "3.12"
 
       - name: Verify release tag and project version
@@ -123,15 +124,13 @@ jobs:
           name: python-distributions
           path: release
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-
       - name: Publish ${{ matrix.project }}
-        run: >-
-          uv publish
-          --trusted-publishing always
-          --check-url https://pypi.org/simple
-          "release/${{ matrix.directory }}/*"
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/${{ matrix.directory }}
+          skip-existing: true
+          verify-metadata: true
+          attestations: true
 
   publish-oida:
     name: Publish sonicfield-oida to PyPI
@@ -151,12 +150,10 @@ jobs:
           name: python-distributions
           path: release
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-
       - name: Publish sonicfield-oida
-        run: >-
-          uv publish
-          --trusted-publishing always
-          --check-url https://pypi.org/simple
-          "release/oida/*"
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/oida
+          skip-existing: true
+          verify-metadata: true
+          attestations: true
