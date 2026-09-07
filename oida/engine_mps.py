@@ -12,6 +12,8 @@ from pathlib import Path
 from oida.config import HF_INSTRUCT_ID, HF_THINKING_ID, OidaConfig
 from oida.engine_base import EngineResult, EngineUnavailable, MossEngine
 from oida.recipes import GenerationSettings
+from oida.pass_provenance import pass_receipt, weight_inventory
+from oida.input_binding import input_array_receipt, binding_for_receipt, verify_input_binding, unknown_binding
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +31,8 @@ class MpsMossEngine(MossEngine):
     def __init__(self, config: OidaConfig) -> None:
         self.config = config
         self._models: dict[str, object] = {}
+        self._weight_provenance: dict[str, dict] = {}
+        self._loaded_revisions: dict[str, str | None] = {}
         self._processors: dict[str, object] = {}
         self._model_overrides: dict[str, str] = {}
         self._lock = threading.Lock()
@@ -82,6 +86,7 @@ class MpsMossEngine(MossEngine):
             self._clear_loaded_models(except_model=None)
 
         model_source, revision = self._resolve_model_source(model_id)
+        weights = weight_inventory(Path(model_source))
         model = MossAudioModel.from_pretrained(
             model_source,
             dtype="auto",
@@ -93,6 +98,15 @@ class MpsMossEngine(MossEngine):
         model.eval()
         _adapt_moss_whisper_layers(model)
         processor = _load_moss_processor(MossAudioProcessor, model_source, revision=revision)
+        # Only locally resolved weight bytes are claimed. Remote cache resolution
+        # is deliberately unknown here; an immutable revision is a separate fact.
+        if weights.get("status") == "known":
+            # Attribute the resident model to the same on-disk inventory that
+            # surrounded loading; never relabel a resident model after a file edit.
+            if weight_inventory(Path(model_source)) != weights:
+                raise EngineUnavailable("Weights changed during model loading")
+        self._weight_provenance[model_id] = weights
+        self._loaded_revisions[model_id] = revision or getattr(getattr(model, "config", None), "_commit_hash", None)
         self._models[model_id] = model
         self._processors[model_id] = processor
         return model, processor
@@ -129,6 +143,28 @@ class MpsMossEngine(MossEngine):
         )
         return source, revision.lower()
 
+    def _input_receipt(self, model_id, model_kind, raw_audio, rate):
+        return pass_receipt(model=model_id, provider="local-moss", model_kind=model_kind,
+            revision=self._loaded_revisions.get(model_id),
+            revision_basis="loaded_model" if self._loaded_revisions.get(model_id) else "unknown",
+            weights=self._weight_provenance.get(model_id),
+            effective_input=input_array_receipt(raw_audio, rate))
+
+    def prepare_input_binding(self, audio_path: str, model_kind: str = "instruct") -> dict:
+        # Preparation never loads weights or changes residency. The same loader
+        # and receipt constructor are used by generate under this model lock.
+        with self._lock:
+            model_id = self.model_id_for_kind(model_kind)
+            if model_id not in self._models or model_id not in self._processors:
+                return unknown_binding("Selected local model is not loaded")
+            try:
+                from src.audio_io import load_audio
+            except ImportError:
+                return unknown_binding("Loaded adapter audio preprocessing is unavailable")
+            rate = int(self._processors[model_id].config.mel_sr)
+            raw_audio = load_audio(str(Path(audio_path)), sample_rate=rate)
+            return binding_for_receipt(self._input_receipt(model_id, model_kind, raw_audio, rate))
+
     def prewarm(self, model_kind: str = "instruct") -> None:
         model_id = self.model_id_for_kind(model_kind)
         with self._lock:
@@ -161,6 +197,8 @@ class MpsMossEngine(MossEngine):
             return
         self._models = {key: value for key, value in self._models.items() if key == except_model}
         self._processors = {key: value for key, value in self._processors.items() if key == except_model}
+        self._weight_provenance = {key: value for key, value in self._weight_provenance.items() if key == except_model}
+        self._loaded_revisions = {key: value for key, value in self._loaded_revisions.items() if key == except_model}
         try:
             import gc
             import torch
@@ -202,6 +240,10 @@ class MpsMossEngine(MossEngine):
             model, processor = self._load_pair(model_id)
             start = time.perf_counter()
             raw_audio = load_audio(str(Path(audio_path)), sample_rate=processor.config.mel_sr)
+            rate = int(processor.config.mel_sr)
+            provenance = self._input_receipt(model_id, settings.model_kind, raw_audio, rate)
+            binding = verify_input_binding(provenance)
+            provenance["input_binding_id"] = binding["binding_id"]
             inputs = processor(text=prompt, audios=[raw_audio], return_tensors="pt")
             inputs = inputs.to(model.device)
             if inputs.get("audio_data") is not None:
@@ -240,6 +282,7 @@ class MpsMossEngine(MossEngine):
             settings=settings,
             reasoning_trace=reasoning_trace,
             wall_ms=wall_ms,
+            pass_provenance=[provenance],
         )
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from oida.recipes import GenerationSettings
 
@@ -18,6 +18,7 @@ class EngineResult:
     reasoning_trace: str | None = None
     wall_ms: int | None = None
     unavailable_reason: str | None = None
+    pass_provenance: list[dict] = field(default_factory=list)
 
 
 class MossEngine:
@@ -31,6 +32,10 @@ class MossEngine:
         thinking_budget: int | None = None,
     ) -> EngineResult:
         raise NotImplementedError
+
+    def prepare_input_binding(self, audio_path: str, model_kind: str = "instruct") -> dict:
+        from oida.input_binding import unknown_binding
+        return unknown_binding("Adapter does not expose verifiable prepared model input")
 
     def prewarm(self, model_kind: str = "instruct") -> None:
         """Load weights ahead of the first request. Default: nothing to warm."""

@@ -354,6 +354,12 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
                     if isinstance(event.get("listening_provenance"), dict)
                     else {}
                 ),
+                "source_admission": (source.get("details") or {}).get("source_admission"),
+                "pass_provenance": (
+                    event.get("pass_provenance")
+                    if isinstance(event.get("pass_provenance"), list)
+                    else []
+                ),
                 "listening_passes": (
                     event.get("listening_passes")
                     if isinstance(event.get("listening_passes"), list)
@@ -398,6 +404,12 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
                     event.get("listening_provenance")
                     if isinstance(event.get("listening_provenance"), dict)
                     else {}
+                ),
+                "source_admission": (source.get("details") or {}).get("source_admission"),
+                "pass_provenance": (
+                    event.get("pass_provenance")
+                    if isinstance(event.get("pass_provenance"), list)
+                    else []
                 ),
                 "listening_passes": (
                     event.get("listening_passes")

@@ -524,3 +524,10 @@ promising production stability.
   The PyPI upload job additionally requires the repository variable
   `PYPI_PUBLISH_ENABLED=true` and matching Trusted Publisher records for
   `akouo-contract`, `akousma`, `akousmata`, and `sonicfield-oida`.
+
+Unreleased runtime integration: [apparatus decisions and per-pass provenance](docs/runtime-attribution.md).
+
+Bounded source declarations: [source admission](docs/source-admission.md).
+
+Measured local MOSS runtime and conservative residency decision:
+[hardware profile](docs/moss-hardware-profile.md).

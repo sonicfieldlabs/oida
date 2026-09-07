@@ -1,0 +1,273 @@
+"""Bounded owner-configured acquisition. No caller-supplied URL or FFmpeg arguments."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
+
+import soundfile as sf
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from oida.contracts import now_iso
+
+MAX_AUDIO_BYTES = 128 * 1024 * 1024
+
+
+class CaptureSource(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
+    adapter: Literal["radio", "avfoundation", "alsa"]
+    input: str = Field(min_length=1, max_length=2048)
+    sample_rate: int = Field(ge=8000, le=384000)
+    channels: int = Field(ge=1, le=8)
+    max_seconds: float = Field(gt=0, le=300)
+    producer_id: str = Field(min_length=1, max_length=256)
+    consent: Literal["granted", "denied", "unknown"]
+    consent_ref: str = Field(min_length=1, max_length=512)
+    apparatus: dict = Field(default_factory=lambda: {"status": "unknown"})
+
+    @model_validator(mode="after")
+    def bounded(self):
+        if (
+            self.max_seconds * self.sample_rate * self.channels * 4
+            > MAX_AUDIO_BYTES - 4096
+        ):
+            raise ValueError("configured capture exceeds 128 MiB PCM budget")
+        if self.adapter == "radio":
+            u = urlsplit(self.input)
+            if (
+                u.scheme not in {"http", "https"}
+                or not u.hostname
+                or u.username
+                or u.password
+                or u.fragment
+            ):
+                raise ValueError(
+                    "radio requires an owner-selected HTTP(S) URL without credentials"
+                )
+        if len(json.dumps(self.apparatus, allow_nan=False).encode()) > 16384:
+            raise ValueError("apparatus exceeds 16 KiB")
+        return self
+
+    @property
+    def source_type(self):
+        return "external_stream" if self.adapter == "radio" else "live_input"
+
+
+def load_capture_sources(path: str | None) -> dict[str, CaptureSource]:
+    if not path:
+        return {}
+    with Path(path).open("rb") as stream:
+        raw = stream.read(128 * 1024 + 1)
+    if len(raw) > 128 * 1024:
+        raise ValueError("source manifest exceeds 128 KiB")
+    value = json.loads(raw)
+    if (
+        set(value) != {"contract", "sources"}
+        or value["contract"] != "oida/capture-sources/v1"
+    ):
+        raise ValueError("invalid capture source manifest")
+    if not isinstance(value["sources"], list) or len(value["sources"]) > 64:
+        raise ValueError("at most 64 configured sources are supported")
+    result = {}
+    for item in value["sources"]:
+        source = CaptureSource.model_validate(item)
+        if source.id in result:
+            raise ValueError("duplicate source id")
+        result[source.id] = source
+    return result
+
+
+def capture_command(source: CaptureSource, seconds: float, path: Path) -> list[str]:
+    executable = shutil.which("ffmpeg")
+    if not executable:
+        raise RuntimeError("FFmpeg is unavailable")
+    command = [executable, "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
+    if source.adapter == "radio":
+        command += [
+            "-protocol_whitelist",
+            "http,https,tcp,tls,crypto",
+            "-rw_timeout",
+            "10000000",
+        ]
+    elif source.adapter == "alsa":
+        command += [
+            "-f",
+            "alsa",
+            "-sample_rate",
+            str(source.sample_rate),
+            "-channels",
+            str(source.channels),
+        ]
+    else:
+        command += ["-f", "avfoundation"]
+    # No output -ar/-ac: never resample a device to pretend it captured a rate.
+    return command + [
+        "-i",
+        source.input,
+        "-map",
+        "0:a:0",
+        "-vn",
+        "-t",
+        str(seconds),
+        "-c:a",
+        "pcm_f32le",
+        "-fs",
+        str(MAX_AUDIO_BYTES),
+        str(path),
+    ]
+
+
+class CaptureInterrupted(RuntimeError):
+    pass
+
+
+def capture_audio(
+    source: CaptureSource, seconds: float, path: Path, cancelled: threading.Event
+) -> None:
+    if source.consent != "granted" or not 0 < seconds <= source.max_seconds:
+        raise ValueError("capture consent or duration refused")
+    if cancelled.is_set():
+        raise CaptureInterrupted("capture cancelled")
+    # Do not retain URL-bearing FFmpeg diagnostics in receipts or responses.
+    command = capture_command(source, seconds, path)
+    process = subprocess.Popen(
+        [sys.executable, "-m", "oida.capture_worker"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    deadline = time.monotonic() + seconds + 15
+    try:
+        assert process.stdin is not None
+        process.stdin.write((json.dumps(command) + "\n").encode())
+        process.stdin.flush()
+        while process.poll() is None:
+            if cancelled.wait(0.05):
+                raise CaptureInterrupted("capture cancelled")
+            if time.monotonic() > deadline:
+                raise TimeoutError("capture deadline exceeded")
+            if path.exists() and path.stat().st_size >= MAX_AUDIO_BYTES:
+                raise ValueError("capture byte budget exceeded")
+        if cancelled.is_set():
+            raise CaptureInterrupted("capture cancelled")
+        if process.returncode:
+            raise RuntimeError(
+                "capture backend failed; check device availability or stream configuration"
+            )
+        info = sf.info(path)
+        if info.samplerate != source.sample_rate or info.channels != source.channels:
+            raise ValueError(
+                "native input rate/channels differ from configured expectation; no resampling applied"
+            )
+        if (
+            info.frames <= 0
+            or info.duration > seconds + 1 / info.samplerate
+            or path.stat().st_size >= MAX_AUDIO_BYTES
+        ):
+            raise ValueError("capture output violates declared bounds")
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+        if process.stdin is not None:
+            process.stdin.close()
+
+
+class AcquisitionReceipts:
+    """One active acquisition, no queue. Later schedulers can reuse this boundary."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.lock = threading.Lock()
+        self.active: dict[str, threading.Event] = {}
+        root.mkdir(parents=True, exist_ok=True)
+        for path in root.glob("*.json"):
+            item = json.loads(path.read_text())
+            if item.get("status") in {"queued", "acquiring", "listening"}:
+                expired = (
+                    item.get("status") == "queued"
+                    and item.get("expires_at")
+                    and datetime.fromisoformat(item["expires_at"])
+                    <= datetime.now(timezone.utc)
+                )
+                self.save(
+                    {
+                        **item,
+                        "status": "expired" if expired else "interrupted",
+                        "finished_at": now_iso(),
+                        "reason": "queued deadline elapsed before restart"
+                        if expired
+                        else "owner restarted before a terminal acquisition receipt",
+                    }
+                )
+
+    def save(self, receipt: dict):
+        target = self.root / (receipt["id"] + ".json")
+        temp = target.with_suffix(".tmp")
+        temp.write_text(json.dumps(receipt, allow_nan=False) + "\n")
+        os.replace(temp, target)
+
+    def begin(
+        self, identifier: str, source_id: str, *, scheduled: bool = False
+    ) -> tuple[dict, threading.Event]:
+        with self.lock:
+            if self.active:
+                raise ValueError(
+                    "an acquisition is already active; no queue is configured"
+                )
+            previous = {}
+            target = self.root / (identifier + ".json")
+            if target.exists():
+                previous = json.loads(target.read_text())
+                if (
+                    not scheduled
+                    or previous.get("status") != "queued"
+                    or previous.get("source_id") != source_id
+                ):
+                    raise ValueError(
+                        "acquisition id already exists; inspect its receipt or retry with a fresh id"
+                    )
+            elif scheduled:
+                raise ValueError("scheduled acquisition receipt is missing")
+            item = dict(
+                contract="oida/acquisition-receipt/v1",
+                id=identifier,
+                source_id=source_id,
+                status="acquiring",
+                started_at=now_iso(),
+            )
+            item = {**previous, **item}
+            cancel = threading.Event()
+            self.save(item)
+            self.active[identifier] = cancel
+            return item, cancel
+
+    def finish(self, item: dict):
+        with self.lock:
+            self.save(item)
+            self.active.pop(item["id"], None)
+
+    def cancel(self, identifier: str) -> bool:
+        with self.lock:
+            event = self.active.get(identifier)
+            if event is None:
+                return False
+            item = json.loads((self.root / (identifier + ".json")).read_text())
+            if item["status"] != "acquiring":
+                return False
+            event.set()
+            return True

@@ -113,6 +113,7 @@ def listening_event_from_report(
         features=features,
         listening_context=listening_context,
         listening_provenance=listening_provenance,
+        pass_provenance=list(report.get("engine", {}).get("pass_provenance", [])),
         listening_passes=list(listening_context["listening_passes"]),
         route_decisions=list(listening_context["route_decisions"]),
         apparatus=apparatus,

@@ -1,5 +1,63 @@
 # Changelog
 
+## Unreleased — full-model source hardware qualification
+
+- Add an offline MPS profiling tool with decoder preflight, bounded synthetic
+  inputs and sampled driver/tensor memory alongside wall timing.
+- Record full-weight Instruct/Thinking and actual owner-API measurements. Retain
+  single residency and one source worker; document the FFmpeg 8 library requirement
+  for the pinned TorchCodec runtime and observed cold-load control latency.
+
+## Unreleased — bounded source scheduling
+
+- Add a bounded FIFO source-job API with independent expiry, queued cancellation,
+  dispatch-time covenant checks and durable restart outcomes. Reuse capture
+  supervision and the existing gateway without changing model residency.
+- Record observed queue/capture/listening timing and explicitly scoped process
+  peak RSS. Full-model/GPU hardware qualification remains separate.
+
+## Unreleased — source acquisition and observations
+
+- Add owner-configured bounded radio, AVFoundation and ALSA capture through
+  FFmpeg, with native-format checks, pre-capture covenant gates, cancellation,
+  restart recovery and linked acquisition receipts. Reuse the existing gateway.
+- Receive Cosmoaudition MASA snapshots through the existing MASA validator and
+  AKOÚŌ/Earworm observation constructors, preserving complete source attribution
+  without an audio asset or new measurement claim.
+
+## Unreleased — bounded source admission
+
+- Accept source identity, source time, declared apparatus and consent on existing
+  listen routes; check adapter/type, effective retention and measured window size
+  before inference. Preserve the source receipt in canonical listening records.
+- Keep capture bandwidth unknown unless separately evidenced; source declarations
+  alone do not establish device support or physical capture performance.
+
+## Unreleased — prepared input binding
+
+- Add bounded, no-inference preflight for already-loaded local adapters and expose
+  actual input descriptors in spectral decisions without granting claim authority.
+- Record preprocessed-array identities in pass receipts. Provide a request-local
+  execution guard that rejects model/input drift and incompatible fallback before
+  generation. Preserve unknown states for opaque or unloaded adapters.
+
+## Unreleased — source links and operator evidence
+
+- Bind report passes to source and submitted-file hashes, sample-aligned windows
+  and unique pass IDs; reject audio changes instead of retaining stale attribution.
+- Resolve bounded operator-selected capture/representation evidence and expose
+  expiry/mismatch results. Close reference-aliasing permission bypasses by keeping
+  actual model-input support unresolved until loaded-adapter binding exists.
+
+## Unreleased — runtime attribution foundations
+
+- Compose the existing spectral gate before explicit spectral listening attempts;
+  reject unsupported or unresolved apparatus support independently of model prose.
+- Preserve every pass's model/provider attribution across aggregation and fallback;
+  capture local processor input and safetensors inventory without inferring hidden
+  provider details. See docs/runtime-attribution.md for evidence and open limits.
+
+
 ## 0.10.0 - 2026-08-11
 
 - Advanced the gateway to `oida/gateway/v0.6` and aligned the complete core

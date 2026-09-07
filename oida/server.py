@@ -136,6 +136,7 @@ from oida.source_routes import (
     normalize_system_audio_source_route,
     system_audio_source_label,
 )
+from oida.source_admission import SourceAdmission
 from oida.sources import source_registry_dict
 from oida.system_audio import system_audio_status_dict
 from harness.akouo.command import build_harness_output
@@ -311,6 +312,9 @@ class ReportRequest(PathRequest):
 
 
 class ListenEventRequest(PathRequest):
+    source_admission: SourceAdmission | None = None
+    listening_access: dict[str, Any] | None = None
+    spectral_request: dict[str, Any] | None = None
     route_preset: str = "basic"
     enabled_skill_ids: list[str] | None = None
     disabled_skill_ids: list[str] | None = None
@@ -591,6 +595,8 @@ def create_app(
         ) from FASTAPI_IMPORT_ERROR
 
     config = load_config(profile=profile, host=host, port=port)
+    evidence_setting = os.environ.get("OIDA_APPARATUS_EVIDENCE")
+    evidence_manifest = Path(evidence_setting).expanduser().resolve() if evidence_setting else None
     local_engine = build_engine(config)
     live = LiveManager()
     memory = AkousmataStore()
@@ -941,6 +947,8 @@ def create_app(
         ).start()
         return True
 
+    source_shutdown_callbacks = []
+
     @asynccontextmanager
     async def lifespan(_app: Any):
         async with AsyncExitStack() as stack:
@@ -968,6 +976,8 @@ def create_app(
             try:
                 yield
             finally:
+                for stop_sources in source_shutdown_callbacks:
+                    stop_sources()
                 if navigator_watcher is not None:
                     try:
                         navigator_watcher.stop()
@@ -1391,6 +1401,8 @@ def create_app(
                     "features": event.get("features") or {},
                     "listening_context": event.get("listening_context") or {},
                     "listening_provenance": event.get("listening_provenance") or {},
+                    "source_admission": (event.get("source") or {}).get("details", {}).get("source_admission"),
+                    "pass_provenance": event.get("pass_provenance") or [],
                     "listening_passes": event.get("listening_passes") or [],
                     "route_decisions": event.get("route_decisions") or [],
                     "apparatus": event.get("apparatus") or {},
@@ -2573,8 +2585,13 @@ def create_app(
                     else "external_ref"
                 )
             )
+            if req.source_admission is not None:
+                req.source_admission.check_policy(source_type, raw_audio_policy)
             capture_info = _capture_info(req)
             location = _validated_location(req.location)
+            if (req.listening_access is None) != (req.spectral_request is None):
+                raise ValueError("listening_access and spectral_request must be supplied together")
+
 
             # The sovereignty layer (spec v1.3): empty by default; the active
             # covenant — or one pinned by name on this request — gates what is
@@ -2664,8 +2681,28 @@ def create_app(
                 ),
                 privacy_mode=privacy_mode,
                 ephemeral=raw_audio_policy in {"temp", "not_stored"},
+                captured_at=req.source_admission.source_time if req.source_admission else None,
                 metadata=metadata,
             )
+            if req.source_admission is not None:
+                # Covenants may narrow retention after the first policy check.
+                req.source_admission.check_policy(source_type, raw_audio_policy)
+                segment.source.details["source_admission"] = req.source_admission.receipt(segment)
+            if req.spectral_request is not None:
+                try:
+                    from oida.apparatus_gate import gate_spectral_request
+                    from oida.apparatus_evidence import EvidenceUnavailable
+                    from oida.reporting import prepare_report_bindings
+                    apparatus_decision = gate_spectral_request(path, req.listening_access, req.spectral_request,
+                        evidence_manifest=evidence_manifest,
+                        prepare_bindings=lambda source: prepare_report_bindings(engine, str(path), passes, source, config.moss_chunk_seconds))
+                except (ImportError, FileNotFoundError, StopIteration) as exc:
+                    raise HTTPException(503, "Apparatus contracts unavailable; install compatible packaged dependencies") from exc
+                except EvidenceUnavailable as exc:
+                    raise HTTPException(503, str(exc)) from exc
+                broadcaster.publish("listen_decided", {"apparatus_decision": apparatus_decision})
+                if not apparatus_decision["measurement_permitted"]:
+                    raise HTTPException(status_code=409, detail={"apparatus_decision": apparatus_decision})
             broadcaster.publish(
                 "listen_started",
                 {"path": str(path), "route_preset": preset.id, "source": source_type},
@@ -2975,6 +3012,8 @@ def create_app(
                     "event_id": event.get("id"),
                     "listening_context": event.get("listening_context") or {},
                     "listening_provenance": event.get("listening_provenance") or {},
+                    "source_admission": (event.get("source") or {}).get("details", {}).get("source_admission"),
+                    "pass_provenance": event.get("pass_provenance") or [],
                     "listening_passes": event.get("listening_passes") or [],
                     "route_decisions": event.get("route_decisions") or [],
                     "apparatus": event.get("apparatus") or {},
@@ -4378,6 +4417,27 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"version": "0.1", "similar": similar}
+
+    from oida.source_api import source_router
+
+    def source_preflight(source_type, seconds, preset_id, remember):
+        if preset_id is not None:
+            route_preset(preset_id)
+        checker = covenant_store.engine()
+        if checker is None:
+            return
+        refusal = checker.refuse_source(source_type) or checker.refuse_quiet_hours()
+        if refusal:
+            raise HTTPException(423, "source acquisition withheld by active covenant")
+        limit = checker.max_window_seconds()
+        if seconds is not None and limit is not None and seconds > limit:
+            raise HTTPException(423, "source acquisition exceeds covenant window")
+        if remember and checker.forbids_retention("memory"):
+            raise HTTPException(423, "source remembering withheld by active covenant")
+
+    app.include_router(source_router(config.data_dir,
+        lambda payload: gateway_listen_endpoint(GatewayListenRequest.model_validate(payload)),
+        source_preflight, shutdown_callbacks=source_shutdown_callbacks))
 
     return app
 

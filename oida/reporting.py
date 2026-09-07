@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from oida import __version__
+from oida.pass_provenance import SourceBoundEngine
 from oida.chunker import Chunk, chunks_as_dicts, dedupe_events, offset_event, plan_chunks, write_chunk_audios
 from oida.dsp import inspect_path
 from oida.engine_base import EngineResult, MossEngine
@@ -121,6 +122,7 @@ def make_engine_info(result: EngineResult, chunks: list[dict[str, object]], thin
         chunks=[ChunkInfo(**chunk) for chunk in chunks],
         wall_ms=result.wall_ms,
         unavailable_reason=result.unavailable_reason,
+        pass_provenance=provenance_for_result(result),
     )
 
 
@@ -231,7 +233,11 @@ ALL_MOSS_PASSES = ("transcribe", "events", "caption", "speech", "music")
 
 def _dsp_only_engine_result(engine: MossEngine) -> EngineResult:
     settings = GenerationSettings(model_kind="instruct", temperature=0.0, top_p=1.0, top_k=50, max_new_tokens=0)
-    return EngineResult(text="", model="dsp-only", profile=engine.profile, settings=settings, wall_ms=0)
+    from oida.pass_provenance import pass_receipt
+    return EngineResult(text="", model="dsp-only", profile=engine.profile, settings=settings, wall_ms=0,
+        pass_provenance=[pass_receipt(model="dsp-only", provider="oida-dsp", model_kind="none",
+            weights={"status": "not_applicable", "reason": "No model weights used"},
+            effective_input={"status": "not_applicable", "reason": "DSP-only report; no model input"})])
 
 
 def _normalize_passes(passes: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -242,6 +248,18 @@ def _normalize_passes(passes: list[str] | tuple[str, ...] | None) -> list[str]:
         valid = ", ".join(ALL_MOSS_PASSES)
         raise ValueError(f"unknown MOSS pass(es): {', '.join(unknown)}. Valid passes: {valid}")
     return [name for name in ALL_MOSS_PASSES if name in set(passes)]
+
+
+def prepare_report_bindings(engine: MossEngine, path: str, passes, source: dict,
+                            max_duration_s: float) -> dict:
+    """Prepare bounded whole-source inputs without loading models or inference."""
+    from oida.input_binding import unknown_binding
+    recipes = {"transcribe": "transcribe_sentence", "caption": "caption_dense",
+               "events": "events", "speech": "speech", "music": "music"}
+    kinds = dict.fromkeys(get_recipe(recipes[name]).settings.model_kind for name in _normalize_passes(passes))
+    if float(source["durationSeconds"]) > max_duration_s:
+        return {kind: unknown_binding("Chunked input preparation is not supported by this preflight") for kind in kinds}
+    return {kind: engine.prepare_input_binding(path, kind) for kind in kinds}
 
 
 def report(
@@ -265,6 +283,7 @@ def report(
     chunks = plan_chunks(path, chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds)
     if len(chunks) > 1:
         return chunked_report(engine, path, dsp, chunks, profile=profile, passes=selected, signal_interpretation=signal_interpretation)
+    engine = SourceBoundEngine(engine, path, str(dsp["sha256"]), float(dsp["durationSeconds"]))
     chunk_dicts = chunks_as_dicts(chunks)
     engine_results: list[EngineResult] = []
     sanity_notes: list[str] = []
@@ -355,7 +374,19 @@ def chunked_report(
     music_obj: Music | None = None
 
     with tempfile.TemporaryDirectory(prefix="oida-chunks-") as temp_dir:
+        # Verify the original on both sides of crop creation. Chunk identities
+        # bind to the sample-aligned windows used by the existing cropper.
+        source_guard = SourceBoundEngine(engine, path, str(dsp["sha256"]), float(dsp["durationSeconds"]))
         chunk_paths = write_chunk_audios(path, chunks, temp_dir)
+        source_guard.verify_source()
+        rate = int(dsp["sampleRate"])
+        frames = round(float(dsp["durationSeconds"]) * rate)
+        engine = SourceBoundEngine(engine, path, str(dsp["sha256"]), float(dsp["durationSeconds"]),
+            inputs={str(chunk_path.resolve()): {
+                "chunk_index": chunk.i,
+                "window_s": {"start": max(0, round(chunk.t0 * rate)) / rate,
+                             "end": min(frames, round(chunk.t1 * rate)) / rate}}
+                for chunk, chunk_path in zip(chunks, chunk_paths, strict=True)})
         for chunk, chunk_path in zip(chunks, chunk_paths, strict=True):
             if "transcribe" in selected:
                 transcript_obj, transcript_result = transcribe(engine, str(chunk_path), timestamps="sentence")
@@ -446,6 +477,14 @@ def chunked_report(
     )
 
 
+def provenance_for_result(result: EngineResult) -> list[dict]:
+    if result.pass_provenance:
+        return result.pass_provenance
+    from oida.pass_provenance import pass_receipt
+    return [pass_receipt(model=result.model, provider=result.profile,
+                         model_kind=result.settings.model_kind)]
+
+
 def aggregate_engine_results(results: list[EngineResult]) -> EngineResult:
     if not results:
         raise ValueError("cannot aggregate empty engine result list")
@@ -465,6 +504,7 @@ def aggregate_engine_results(results: list[EngineResult]) -> EngineResult:
         reasoning_trace=None,
         wall_ms=wall_ms or None,
         unavailable_reason="; ".join(unavailable) if unavailable else None,
+        pass_provenance=[receipt for result in results for receipt in provenance_for_result(result)],
     )
 
 

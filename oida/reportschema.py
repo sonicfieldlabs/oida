@@ -96,6 +96,7 @@ class EngineInfo(JsonModel):
     chunks: list[ChunkInfo] = Field(default_factory=list)
     wall_ms: int | None = None
     unavailable_reason: str | None = None
+    pass_provenance: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TranscriptSegment(JsonModel):

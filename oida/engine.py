@@ -39,7 +39,11 @@ class FallbackEngine(MossEngine):
                 reasoning_trace=result.reasoning_trace,
                 wall_ms=result.wall_ms,
                 unavailable_reason=str(exc),
+                pass_provenance=result.pass_provenance,
             )
+
+    def prepare_input_binding(self, audio_path: str, model_kind: str = "instruct") -> dict:
+        return self.primary.prepare_input_binding(audio_path, model_kind)
 
     def prewarm(self, model_kind: str = "instruct") -> None:
         self.primary.prewarm(model_kind)

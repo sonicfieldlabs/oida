@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from oida.pass_provenance import pass_receipt
+
 import base64
 import json
 import mimetypes
@@ -162,6 +164,18 @@ class RoutedAudioEngine(MossEngine):
         finally:
             self._policy.reset(token)
 
+    def prepare_input_binding(self, audio_path: str, model_kind: str = "instruct") -> dict:
+        from oida.input_binding import unknown_binding
+        role = _ROLE_FOR_MODEL_KIND.get(model_kind)
+        if role is not None:
+            try:
+                assignment = self.settings_store.load().roles[role]
+            except ValueError:
+                return unknown_binding("Audio routing settings are unavailable")
+            if assignment.provider_id != "oida_moss":
+                return unknown_binding("Selected provider preprocessing is not observable")
+        return self.local_engine.prepare_input_binding(audio_path, model_kind)
+
     def generate(
         self,
         audio_path: str,
@@ -191,6 +205,9 @@ class RoutedAudioEngine(MossEngine):
         provider = configured.providers.get(assignment.provider_id)
         model_id = assignment.model_id or (provider.default_model if provider else None)
 
+        if assignment.provider_id != "oida_moss":
+            from oida.input_binding import reject_unobservable_binding
+            reject_unobservable_binding()
         if assignment.provider_id == "oida_moss":
             self._record_route(role, assignment.provider_id, model_id, "embedded")
             return self.local_engine.generate(audio_path, prompt, settings, thinking_budget)
@@ -588,6 +605,8 @@ class RoutedAudioEngine(MossEngine):
                     else None
                 ),
                 wall_ms=round((time.monotonic() - started) * 1000),
+                pass_provenance=[pass_receipt(model=str(data.get("model") or model_id),
+                    provider=provider_id, model_kind=settings.model_kind)],
             )
         finally:
             if staged_asset_id is not None and key:
@@ -695,6 +714,10 @@ class RoutedAudioEngine(MossEngine):
             model=model_id,
             profile="google-api",
             settings=settings,
+            pass_provenance=[pass_receipt(model=model_id, provider="google",
+                model_kind=settings.model_kind,
+                revision=data.get("modelVersion") if isinstance(data.get("modelVersion"), str) else None,
+                revision_basis="provider_reported" if isinstance(data.get("modelVersion"), str) else "unknown")],
             wall_ms=round((time.monotonic() - started) * 1000),
         )
 
@@ -730,6 +753,7 @@ class RoutedAudioEngine(MossEngine):
             model=str(data.get("model") or model_id),
             profile="local-audio-host" if provider_id == "local_audio" else f"{provider_id}-api",
             settings=settings,
+            pass_provenance=[pass_receipt(model=str(data.get("model") or model_id), provider=provider_id, model_kind=settings.model_kind)],
             wall_ms=round((time.monotonic() - started) * 1000),
         )
 
