@@ -250,7 +250,7 @@ component for explicit cultivation handoffs.
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.2` / `akouo/v0.9` | Listening vocabulary, embodied heard boundary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
 | [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.8.0` / spec v1.8 | Addressable human, agent, hybrid, plural, decision-only, and legacy accounts; immutable machine core; provenance, lineage, and additive revision. |
 | [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.8.0` | Embedded library at `/library/`, listener-type filtering, locally owned human accounts and revisions, accountable-memory audit, and the shared durable store. |
-| OÍDA gateway | `sonicfield-oida 0.11.0` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
+| OÍDA gateway | `sonicfield-oida 0.11.1` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.3 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
@@ -574,3 +574,23 @@ D5 local integration: [listening-bundles](docs/listening-bundles.md). Unreleased
 Optional D6 application delivery uses [explicit local approval and ephemeral processing](docs/public-delivery.md). The Oída owner API remains local.
 
 D7 adds the [native Pi adapter](integrations/pi/README.md), staged for an explicit extension launch. Standalone wheels include all six host adapter assets; host credentials and conversations remain host-owned.
+
+### Station aperture integration (0.11.1)
+
+The ordinary `/gateway/listen`, `/gateway/listen-window` and capture requests accept
+`aperture` with contract `listeningstack/aperture-request/v1`. The selected route/model
+remains intact; native DSP and that route consume one immutable audio excerpt. Read-only
+`/sources/agent-native/preview` binds file limits without capture or inference. Capabilities
+advertise the portable contract separately from the standalone `native_options` route.
+
+Modes request frequency bands; they do not grant physical or human access. Per-band
+measurements retain bin spacing and report unresolved narrow bands explicitly. Requests
+for `views` also require an explicit `retention` block (`derivatives_permitted: true`,
+`expires_at` Unix seconds, `permission_ref`) plus permitted audio memory. System output,
+incognito and temporary-only registrations cannot retain views. Native evidence and the
+ordinary listening publish in one Akousmata record; selected audio/derivatives share one
+expiry and are not duplicated into the permanent Library directory.
+
+Use Akousma **0.8.1** and Akousmata **0.8.1** or later. The patch floors distinguish the
+atomic publication API from earlier local 0.8.0 artifacts. These are local package changes;
+rebuild and load the matching packages to update a daemon.

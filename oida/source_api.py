@@ -30,9 +30,11 @@ from oida.source_capture import (
     load_capture_sources,
 )
 from oida.capture_registry import CaptureRegistry, Registration
+from oida.station_aperture import Aperture, admit as admit_aperture
 
 
 class AcquisitionRequest(BaseModel):
+    aperture: Aperture | None = None
     specialist_tasks: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(default_factory=list, max_length=3)
     speech_vad: bool = True
     speech_alignment: bool = False
@@ -163,6 +165,9 @@ def source_router(
             raise HTTPException(404, "unknown configured source")
         # Gates precede subprocess/device/network acquisition, not just inference.
         try:
+            if req.aperture and (req.seconds > 60 or source.channels > 2 or source.sample_rate > 192000):
+                raise ValueError("Requested capture exceeds native aperture duration/channel/rate budget")
+            admit_aperture(req.aperture, remember=req.remember, retain_audio=req.retain_library_audio, source_type=source.source_type)
             if source.runtime_registered and req.retain_library_audio:
                 raise ValueError('Registered radio consent permits temporary capture only')
             if source.consent != "granted" or req.seconds > source.max_seconds:
@@ -238,6 +243,7 @@ def source_router(
                 with controlled(control):
                     result = listen(
                         dict(
+                            **({"aperture": req.aperture.model_dump(exclude_none=True)} if req.aperture else {}),
                             path=str(path),
                             source_type=source.source_type,
                             source_label=source.id,

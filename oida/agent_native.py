@@ -11,12 +11,16 @@ import time
 import numpy as np
 import soundfile as sf
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from akouo_contract.native_evidence import native_evidence_errors
 from oida.apertures import file_aperture
 from oida.dsp_multires import pyramid
 from oida.agent_reports import report, account, unknown, identity
 from oida.operation_control import checkpoint
+from oida.station_aperture import PreviewRequest, preview as preview_aperture
+
+
+admission = threading.Lock()
 
 
 class NativeRequest(BaseModel):
@@ -30,9 +34,18 @@ class NativeRequest(BaseModel):
     memory: Literal["none", "record", "record_audio"] = "none"
     derivatives_permitted: bool = False
     expires_at: float | None = None
+    retained_views: list[Literal["complex_stft", "nsgt", "scattering"]] | None = Field(default=None, max_length=3)
     workers: list[Literal["nsgt", "kymatio"]] = Field(
         default_factory=list, max_length=2
     )
+
+    @model_validator(mode="after")
+    def selected_bands(self):
+        from oida.station_aperture import Aperture
+        Aperture(mode=self.mode, bands_hz=self.bands_hz, views=self.retained_views or [])
+        if len(set(self.workers)) != len(self.workers):
+            raise ValueError("Workers must be unique")
+        return self
 
 
 def native_measure(req):
@@ -67,6 +80,7 @@ def native_measure(req):
         identity("aperture"),
     )
     total = 0
+    aperture["band_measurements"] = []
 
     def cancelled():
         checkpoint()
@@ -94,6 +108,32 @@ def native_measure(req):
         )
         if level["state"] == "available":
             view["settings"]["hop"] = level["hop"]
+            frequency = np.arange(level["complex"].shape[1]) * rate / window
+            for band_index, (lower, upper) in enumerate(aperture["request"]["bands_hz"]):
+                mask = (frequency >= lower) & (frequency < upper)
+                if upper == rate / 2:
+                    mask |= frequency == upper
+                bins = int(mask.sum())
+                measured = dict(window_samples=window, band_hz=[lower, upper], bin_count=bins,
+                                bin_spacing_hz=rate / window, observed_seconds=n / rate,
+                                status="measured" if bins else "undetermined")
+                aperture["band_measurements"].append(measured)
+                if not bins:
+                    measured["reason"] = "No transform bin falls in this requested band at this window length"
+                    continue
+                band_value = float(np.sum(np.abs(level["complex"][:, mask, :]) ** 2))
+                measured["spectral_energy_sum"] = band_value
+                band_obs = identity("observation")
+                observations.append(dict(id=band_obs, evidence_id=evidence_id, aperture_id=aperture_id,
+                    clock_id=clock_id, source_interval_s=[0, n / rate], spectral_interval_hz=[lower, upper],
+                    method=f"ShortTimeFFT Hann {window} samples, hop {level['hop']}; bins restricted to requested band",
+                    method_version="oida/pyramid/v1",
+                    access=[dict(observer_ref="oida:dsp", access="native_computable", basis="Calculated from verified sampled bytes")],
+                    metrics=[dict(name="requested_band_energy_sum", value=band_value, unit="normalized_amplitude_squared")]))
+                features.append(dict(namespace="akouo.agent-native", name=f"window_{window}_requested_band_{band_index}_energy",
+                    category="measured", value=dict(status="known", value=band_value, unit="normalized_amplitude_squared"),
+                    claim=dict(statement=f"Window {window} samples: squared STFT magnitudes in {bins} bins within [{lower:g}, {upper:g}] Hz sum to {band_value:.8g}; bin sampling and leakage limit this estimate.",
+                               confidence="undetermined", source="dsp", evidence_refs=[band_obs], actionability="informational")))
             metric = float(sum(values.sum() for values in level["band_power"].values()))
             obs_id = identity("observation")
             features.append(
@@ -164,7 +204,7 @@ def native_measure(req):
                     ],
                 )
             )
-            if req.memory == "record_audio" and req.derivatives_permitted:
+            if req.memory == "record_audio" and req.derivatives_permitted and (req.retained_views is None or "complex_stft" in req.retained_views):
                 # NPY overhead is bounded and total selected bytes are admitted before encoding.
                 array = level["complex"]
                 if total + array.nbytes + 256 <= 64 * 1024**2:
@@ -223,6 +263,7 @@ def native_measure(req):
             if (
                 req.memory == "record_audio"
                 and req.derivatives_permitted
+                and (req.retained_views is None or view["kind"] in req.retained_views)
                 and total + len(data) <= 64 * 1024**2
             ):
                 meta = inspect_numeric(data)
@@ -242,6 +283,8 @@ def native_measure(req):
                 view.pop("reason")
                 payloads[view["view_id"]] = data
                 total += len(data)
+            elif req.retained_views is not None and view["kind"] not in req.retained_views:
+                view["reason"] = "View was not selected for retention"
             elif req.memory == "record_audio":
                 view["reason"] = "Selected derivative total exceeds 64 MiB"
             del data
@@ -457,13 +500,12 @@ def native_router(
     router = APIRouter()
     from oida.spectral_specialists import recover_temporary
     recover_temporary()
-    admission = threading.Lock()
-
     @router.get("/sources/agent-native/capabilities")
     def capabilities():
         from oida.spectral_specialists import capabilities as workers
 
         return dict(
+            **__import__("oida.station_aperture", fromlist=["capabilities"]).capabilities(),
             source_kinds=["file"],
             workers=workers(),
             reasoning_endpoint="/situated/decide",
@@ -471,6 +513,10 @@ def native_router(
                 status="unavailable", reason="No admitted non-audio adapter"
             ),
         )
+
+    @router.post("/sources/agent-native/preview")
+    def preview(req: PreviewRequest):
+        return preview_aperture(req)
 
     @router.post("/sources/agent-native")
     def listen(req: NativeRequest):
@@ -528,7 +574,7 @@ def native_router(
                                 derivatives_permitted=True,
                                 expires_at=req.expires_at,
                                 validate_native=result["validate_native"],
-                                resolve_representation=lambda ref: result["bundle"],
+                                resolve_representation=lambda ref: result["bundle"] if ref == result["bundle"]["sampled_representation"] else None,
                                 source_bytes=result["source_bytes"],
                             )
                         else:
@@ -537,7 +583,7 @@ def native_router(
                                 supported_versions=["1.8.0"],
                                 validate_native=result["validate_native"],
                                 resolve_object=lambda ref: None,
-                                resolve_representation=lambda ref: result["bundle"],
+                                resolve_representation=lambda ref: result["bundle"] if ref == result["bundle"]["sampled_representation"] else None,
                             )
                     journal.record_reference(
                         result["record"]["akousma_id"], record=result["record"]

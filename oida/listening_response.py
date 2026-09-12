@@ -11,6 +11,7 @@ def compact_listening_result(event, *, remembered=None, remember_requested=False
             "segment",
             "aggregate",
             "apparatus",
+            "acoustics",
             "pass_provenance",
             "specialist_evidence",
             "listening_task_status",

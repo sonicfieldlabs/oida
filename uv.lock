@@ -188,7 +188,7 @@ requires-dist = [
 
 [[package]]
 name = "akousma"
-version = "0.8.0"
+version = "0.8.1"
 source = { editable = "../earworm/packages/py-akousma" }
 dependencies = [
     { name = "jsonschema" },
@@ -205,7 +205,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "akousmata"
-version = "0.8.0"
+version = "0.8.1"
 source = { editable = "../akousmata" }
 dependencies = [
     { name = "akousma" },
@@ -2302,7 +2302,7 @@ wheels = [
 
 [[package]]
 name = "sonicfield-oida"
-version = "0.11.0"
+version = "0.11.1"
 source = { editable = "." }
 dependencies = [
     { name = "akouo-contract" },

@@ -49,6 +49,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised only without 
 else:
     FASTAPI_IMPORT_ERROR = None
 
+from oida.station_aperture import Aperture
 from oida.config import REPO_ROOT, load_config, uploads_dir
 from oida.acoustic_system import acoustic_system_manifest
 from oida.akouo_skills import akouo_manifest, route_preset
@@ -312,6 +313,7 @@ class ReportRequest(PathRequest):
 
 
 class ListenEventRequest(PathRequest):
+    aperture: Aperture | None = None
     specialist_tasks: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(default_factory=list, max_length=3)
     speech_vad: bool = True
     speech_alignment: bool = False
@@ -1352,6 +1354,7 @@ def create_app(
         event: dict[str, Any],
         *,
         tags: list[str] | None = None,
+        native_analysis=None,
         user_notes: str | None = None,
         human_listener_id: str | None = None,
         human_display_name: str | None = None,
@@ -1535,7 +1538,11 @@ def create_app(
                     }
                 ],
             )
-            akousma_id = persist_akousma(record)
+            if native_analysis is not None:
+                from oida.station_aperture import persist as persist_native
+                akousma_id = persist_native(record, native_analysis)
+            else:
+                akousma_id = persist_akousma(record)
             owner_journal.record_reference(akousma_id, event_id=event.get("id"), record=record)
             memory_block["akousma_id"] = akousma_id
             if isinstance(user_notes, str) and user_notes.strip():
@@ -2672,17 +2679,19 @@ def create_app(
 
     @app.post("/listen-event")
     def listen_event_endpoint(req: ListenEventRequest) -> dict[str, object]:
+        if req.aperture is not None:
+            raise HTTPException(400, "Use the gateway for portable aperture requests")
         return execute_listen_event(req)
 
-    def execute_listen_event(req: ListenEventRequest, *, file_window=None) -> dict[str, object]:
+    def execute_listen_event(req: ListenEventRequest, *, file_window=None, native_analysis=None) -> dict[str, object]:
         from oida.engine_base import use_listening_model
         if len(req.specialist_tasks) != len(set(req.specialist_tasks)):
             raise HTTPException(400, "Duplicate specialist task")
         model = validate_listening_selection(req.model_id, req.listening_mode)
         with use_listening_model(model):
-            return run_listen_event(req, file_window=file_window)
+            return run_listen_event(req, file_window=file_window, native_analysis=native_analysis)
 
-    def run_listen_event(req: ListenEventRequest, *, file_window=None) -> dict[str, object]:
+    def run_listen_event(req: ListenEventRequest, *, file_window=None, native_analysis=None) -> dict[str, object]:
         try:
             checkpoint()
             preset = route_preset(req.route_preset)
@@ -2921,6 +2930,10 @@ def create_app(
                 owner_journal.save("apparatus_decision", refreshed["decision"]["id"], refreshed)
                 if not refreshed["measurement_permitted"] or refreshed.get("execution_bindings") != apparatus_decision.get("execution_bindings"):
                     raise HTTPException(409, "Apparatus approval or prepared input changed during execution")
+            if native_analysis is not None:
+                native_analysis["recheck"]()
+                from oida.station_aperture import receipt
+                event["acoustics"] = receipt(native_analysis)
             checkpoint(seal=True)
             event = memory.enrich_event(event)
             if getattr(req, "ephemeral_delivery", False):
@@ -2946,6 +2959,8 @@ def create_app(
     @app.post("/gateway/listen")
     def gateway_listen_endpoint(req: GatewayListenRequest) -> dict[str, object]:
         if req.route_preset == 'agent-native':
+            if req.aperture is not None:
+                raise HTTPException(400, 'Portable apertures accompany ordinary listening routes; the native route uses native_options')
             from oida.agent_native import NativeRequest
             if req.source_type != 'file' or req.native_options is None:
                 raise HTTPException(400, 'Agent-native requires a file and explicit native_options')
@@ -2992,12 +3007,36 @@ def create_app(
         return operations.run(req.operation_id, execute_window)
 
     def gateway_listen_impl(req: GatewayListenRequest, *, file_window=None) -> dict[str, object]:
+        if req.aperture is None:
+            return gateway_listen_prepared(req, file_window=file_window)
+        from oida.station_aperture import prepare
+        validate_listening_selection(req.model_id, req.listening_mode)
+        initial_policy = covenant_store.engine(override_name=req.covenant)
+        def preflight(path):
+            checker = covenant_store.engine(override_name=req.covenant)
+            if (checker.covenant if checker else None) != (initial_policy.covenant if initial_policy else None):
+                raise HTTPException(423, "Covenant changed during aperture analysis")
+            if req.aperture.views and req.aperture.retention.expires_at <= time.time():
+                raise HTTPException(423, "Spectral retention permission expired during analysis")
+            if req.aperture.views and (req.privacy_mode == "incognito" or background.config.incognito or req.ephemeral_delivery or req.raw_audio_policy == "not_stored"):
+                raise HTTPException(423, "Private delivery forbids retained spectral views")
+            if checker:
+                info = audio_info(path)
+                limit = checker.max_window_seconds()
+                if checker.refuse_source(req.source_type) or checker.refuse_quiet_hours() or (limit is not None and info["durationSeconds"] > limit):
+                    raise HTTPException(423, "Aperture withheld by source or window covenant")
+                if req.aperture.views and (checker.forbids_retention("raw-audio") or checker.forbids_retention("memory")):
+                    raise HTTPException(423, "Spectral retention withheld by covenant")
+        with prepare(req, root=config.data_dir / "source-capture-temp", preflight=preflight) as (bound, native):
+            return gateway_listen_prepared(bound, file_window=file_window, native_analysis=native)
+
+    def gateway_listen_prepared(req: GatewayListenRequest, *, file_window=None, native_analysis=None) -> dict[str, object]:
         if req.source_type == 'system_output' and (req.retain_library_audio or req.raw_audio_policy not in {None, 'temp'}):
             raise HTTPException(400, 'System output permits temporary audio and record-only memory')
         if req.ephemeral_delivery and (req.remember or req.privacy_mode != "incognito" or req.raw_audio_policy != "not_stored" or req.song_id):
             raise HTTPException(400, "Ephemeral delivery requires incognito, no storage, no recognition and remember=false")
         try:
-            result = execute_listen_event(req, file_window=file_window)
+            result = execute_listen_event(req, file_window=file_window, native_analysis=native_analysis)
         except HTTPException as exc:
             if exc.status_code != 423:
                 raise
@@ -3043,14 +3082,26 @@ def create_app(
         elif req.remember and req.privacy_mode != "incognito":
             remembered = remember_event(
                 event,
+                native_analysis=native_analysis,
                 user_notes=req.user_notes,
                 human_listener_id=req.human_listener_id,
                 human_display_name=req.human_display_name,
                 tags=req.tags,
             )
             trace = remembered["trace"]
+        if native_analysis is not None and req.aperture.views:
+            saved_native = bool(remembered and remembered.get("akousma_id"))
+            event["acoustics"]["retention_status"] = "retained" if saved_native else "failed"
+            event["acoustics"]["views"] = [
+                v if saved_native or v["state"] != "retained" else {**v, "state": "omitted", "reason": "Shared publication failed"}
+                for v in native_analysis["bundle"]["views"]
+            ]
         library_audio = None
-        if req.retain_library_audio:
+        if native_analysis is not None and req.aperture.views:
+            library_audio = dict(status="retained" if remembered and remembered.get("akousma_id") else "unavailable",
+                                 record_id=remembered.get("akousma_id") if remembered else None,
+                                 retention="governed-spectral-bundle", expires_at=req.aperture.retention.expires_at)
+        elif req.retain_library_audio:
             from oida.library_capture import retain_capture
             checker = covenant_store.engine(override_name=req.covenant)
             library_audio = retain_capture(Path(req.path), uploads_dir(),

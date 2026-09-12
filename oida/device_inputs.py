@@ -232,9 +232,13 @@ class MacInputs:
         with self.lock:
             state = self._state(identity)
             state["expires"] = time.monotonic() + LEASE_SECONDS
+            ring = self.live.status(state["session_id"])
             return {
                 k: state[k] for k in ("id", "session_id", "device", "chunks", "error", "source_type")
             } | {
+                "cursor_seconds": ring["cursor_seconds"],
+                "available_start_seconds": ring["available_start_seconds"],
+                "ring_seconds": ring["ring_seconds"],
                 "active": not bool(state["error"]),
                 "lease_seconds": LEASE_SECONDS,
                 "state": "error"

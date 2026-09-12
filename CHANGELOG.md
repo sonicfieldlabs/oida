@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.1 — Station aperture integration and phases 0–3 audit
+
+- Preserve the selected gateway route while adding native DSP from the same frozen excerpt.
+- Add source-bound read-only previews, band-specific measurements and explicit retained-view deadlines.
+- Publish ordinary listening and native evidence in one governed record; expose actual Mac ring bounds.
+- Require distinct Akousma/Akousmata 0.8.1 artifacts for the atomic publication API.
+
+
 ## 0.11.0 — local expansion Phase 2
 
 - Add owner-resolved apertures, bounded multiwindow DSP, native evidence reports

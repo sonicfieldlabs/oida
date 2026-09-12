@@ -82,6 +82,8 @@ def file_aperture(
     )
     return dict(
         request=request,
+        requested_bands_hz=bands,
+        effective_bands_hz=[entry["band_hz"] for entry in decision["bands"] if entry["support"] == "supported"],
         decision=decision,
         source_sha256=subject,
         sample_rate=info.samplerate,
