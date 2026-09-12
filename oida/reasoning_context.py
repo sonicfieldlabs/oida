@@ -31,10 +31,22 @@ def retained_event(record):
     routes = []
     specialist_observations = []
     covenant = deepcopy(record.get("covenant") or {})
+    native_policy = (record.get('extensions') or {}).get('oida.native-policy', {})
+    if native_policy.get('covenant'):
+        covenant = deepcopy(native_policy['covenant'])
     for entry in record.get("listening", {}).values():
         payload = entry.get("payload") or {}
         if not isinstance(payload, dict):
             continue
+        if payload.get('contract') == 'akouo/agent-report/v0.1':
+            inherited = []
+            for feature in payload.get('features', [])[:40]:
+                claim = deepcopy(feature.get('claim') or {})
+                claim['statement'] = 'Retained digital measurement: ' + str(claim.get('statement') or '')[:3000]
+                claim.update(source='memory', confidence='undetermined')
+                inherited.append(claim)
+            if inherited:
+                routes.append({'structured': {'claim_summary': {'undetermined': inherited}}})
         from oida.reasoning.specialist_context import project
         specialist_observations.extend(project(payload.get("specialist_evidence")))
         context = payload.get("listening_context") or {}

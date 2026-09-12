@@ -17,6 +17,7 @@ ListeningMode = Literal[
     "comparative",
     "generative",
     "experimental",
+    "agent-native-listening",
 ]
 
 
@@ -109,6 +110,7 @@ SKILL_MANIFEST_SCHEMA: dict[str, Any] = {
                 "comparative",
                 "generative",
                 "experimental",
+                "agent-native-listening",
             ],
         },
         "input_requirements": {
@@ -157,6 +159,12 @@ ROUTE_PRESET_SCHEMA: dict[str, Any] = {
 
 
 SKILLS: list[ListeningSkillManifest] = [
+    ListeningSkillManifest(
+        id='agent-native-listening', name='Agent-native listening', version='0.10.0',
+        description='Canonical AKOUO native measurement interpretation with host-validated evidence, clocks and apertures.',
+        listening_mode='agent-native-listening', input_requirements={'audio': True},
+        model_requirements=[], memory_policy='none', enabled_by_default=False,
+    ),
     ListeningSkillManifest(
         id="basic-listener",
         name="Basic Listener",
@@ -276,6 +284,12 @@ SKILLS: list[ListeningSkillManifest] = [
 
 
 PRESETS: list[RoutePreset] = [
+    RoutePreset(
+        id='agent-native', name='Agent-native',
+        description='Admitted file aperture and multiwindow DSP; explicit native options and retention required.',
+        skill_ids=['agent-native-listening', 'signal-health', 'spectral-cartographer'], akouo_command='/tech',
+        moss_passes=[], enabled_by_default=False,
+    ),
     RoutePreset(
         id="basic",
         name="General",

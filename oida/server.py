@@ -347,6 +347,7 @@ class ListenEventRequest(PathRequest):
 
 
 class GatewayListenRequest(ListenEventRequest):
+    native_options: dict[str, Any] | None = None
     retain_library_audio: bool = False
     library_parent_sound_id: str | None = Field(default=None, min_length=1, max_length=256)
     response_mode: Literal["full", "summary"] = "full"
@@ -2944,6 +2945,26 @@ def create_app(
 
     @app.post("/gateway/listen")
     def gateway_listen_endpoint(req: GatewayListenRequest) -> dict[str, object]:
+        if req.route_preset == 'agent-native':
+            from oida.agent_native import NativeRequest
+            if req.source_type != 'file' or req.native_options is None:
+                raise HTTPException(400, 'Agent-native requires a file and explicit native_options')
+            payload = dict(req.native_options)
+            if req.covenant is not None or req.source_admission is not None or req.listening_access is not None or req.spectral_request is not None:
+                raise HTTPException(400, 'Native files use the active covenant and owner-resolved evidence')
+            memory = payload.get('memory', 'none')
+            if req.remember != (memory != 'none') or req.retain_library_audio != (memory == 'record_audio'):
+                raise HTTPException(400, 'Gateway memory flags must match native_options.memory')
+            if req.ephemeral_delivery and memory != 'none':
+                raise HTTPException(400, 'Ephemeral delivery refuses native persistence')
+            if req.privacy_mode == 'incognito' and payload.get('memory', 'none') != 'none':
+                raise HTTPException(423, 'Incognito refuses native persistence')
+            payload.update(path=req.path, operation_id=req.operation_id or payload.get('operation_id'))
+            try:
+                native_request = NativeRequest.model_validate(payload)
+            except ValueError as exc:
+                raise HTTPException(400, 'Invalid native options') from exc
+            return native_listen(native_request)
         return operations.run(req.operation_id, lambda: gateway_listen_impl(req))
 
     @app.post("/gateway/listen-window")
@@ -2971,6 +2992,8 @@ def create_app(
         return operations.run(req.operation_id, execute_window)
 
     def gateway_listen_impl(req: GatewayListenRequest, *, file_window=None) -> dict[str, object]:
+        if req.source_type == 'system_output' and (req.retain_library_audio or req.raw_audio_policy not in {None, 'temp'}):
+            raise HTTPException(400, 'System output permits temporary audio and record-only memory')
         if req.ephemeral_delivery and (req.remember or req.privacy_mode != "incognito" or req.raw_audio_policy != "not_stored" or req.song_id):
             raise HTTPException(400, "Ephemeral delivery requires incognito, no storage, no recognition and remember=false")
         try:
@@ -4650,6 +4673,12 @@ def create_app(
             raise HTTPException(423, "audio derivative retention withheld by active covenant")
 
     app.include_router(transposition_router(config.data_dir, operations, owner_journal, transposition_preflight))
+
+    from oida.agent_native import native_router
+    native_routes, native_listen = native_router(operations, owner_journal, source_preflight,
+                                                 transposition_preflight, lambda: background.config.incognito,
+                                                 lambda: apply_current_conversation_covenant({}).get('covenant', {}))
+    app.include_router(native_routes)
 
     from oida.ensemble_runtime import runtime_router
     app.include_router(runtime_router(operations, owner_journal, source_preflight, reasoning))

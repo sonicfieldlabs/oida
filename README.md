@@ -248,9 +248,9 @@ component for explicit cultivation handoffs.
 | Component | Version / contract | Role in OÍDA |
 | --- | --- | --- |
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.2` / `akouo/v0.9` | Listening vocabulary, embodied heard boundary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
-| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.7.0` / spec v1.6 | Addressable human, agent, hybrid, plural, decision-only, and legacy accounts; immutable machine core; provenance, lineage, and additive revision. |
-| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.7.0` | Embedded library at `/library/`, listener-type filtering, locally owned human accounts and revisions, accountable-memory audit, and the shared durable store. |
-| OÍDA gateway | `sonicfield-oida 0.10.0` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
+| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.8.0` / spec v1.8 | Addressable human, agent, hybrid, plural, decision-only, and legacy accounts; immutable machine core; provenance, lineage, and additive revision. |
+| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.8.0` | Embedded library at `/library/`, listener-type filtering, locally owned human accounts and revisions, accountable-memory audit, and the shared durable store. |
+| OÍDA gateway | `sonicfield-oida 0.11.0` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.3 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |

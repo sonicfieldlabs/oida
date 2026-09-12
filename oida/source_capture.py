@@ -36,6 +36,11 @@ class CaptureSource(BaseModel):
     consent: Literal["granted", "denied", "unknown"]
     consent_ref: str = Field(min_length=1, max_length=512)
     apparatus: dict = Field(default_factory=lambda: {"status": "unknown"})
+    runtime_registered: bool = False
+    registration_revision: str | None = None
+    rights_ref: str | None = None
+    source_ref: str | None = None
+    guarded_format: Literal['mp3', 'aac', 'wav', 'flac', 'ogg'] | None = None
 
     @model_validator(mode="after")
     def bounded(self):
@@ -95,7 +100,9 @@ def capture_input_command(source: CaptureSource) -> list[str]:
     if not executable:
         raise RuntimeError("FFmpeg is unavailable")
     command = [executable, "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
-    if source.adapter == "radio":
+    if source.guarded_format:
+        command += ['-protocol_whitelist', 'file,pipe', '-f', source.guarded_format]
+    elif source.adapter == "radio":
         command += [
             "-protocol_whitelist",
             "http,https,tcp,tls,crypto",
@@ -139,6 +146,25 @@ class CaptureInterrupted(RuntimeError):
 def capture_audio(
     source: CaptureSource, seconds: float, path: Path, cancelled: threading.Event
 ) -> None:
+    if source.consent != 'granted' or not 0 < seconds <= source.max_seconds:
+        raise ValueError('Capture consent or duration refused')
+    if cancelled.is_set():
+        raise CaptureInterrupted('Capture cancelled')
+    if source.runtime_registered:
+        from tempfile import TemporaryDirectory
+        from oida.public_fetch import PublicFetcher
+        result = PublicFetcher().get(source.input, limit=32*1024**2, cancel=cancelled, stream_seconds=min(seconds+2, 40))
+        data = result.data
+        formats = {'audio/mpeg':'mp3', 'audio/aac':'aac', 'audio/aacp':'aac', 'audio/wav':'wav',
+                   'audio/x-wav':'wav', 'audio/flac':'flac', 'audio/ogg':'ogg', 'application/ogg':'ogg'}
+        format_name = formats.get(result.content_type.lower())
+        if not format_name or data.lstrip().startswith((b'#EXTM3U', b'[playlist]', b'<')):
+            raise ValueError('Only guarded direct audio streams are available; playlists/HLS refused')
+        with TemporaryDirectory(prefix='oida-radio-', dir=path.parent) as temp:
+            local = Path(temp)/'input.audio'
+            local.write_bytes(data)
+            return capture_audio(source.model_copy(update={'input':str(local), 'runtime_registered':False,
+                                                          'guarded_format':format_name}), seconds, path, cancelled)
     if source.consent != "granted" or not 0 < seconds <= source.max_seconds:
         raise ValueError("capture consent or duration refused")
     if cancelled.is_set():
@@ -170,7 +196,10 @@ def capture_audio(
                 "capture backend failed; check device availability or stream configuration"
             )
         info = sf.info(path)
-        if info.samplerate != source.sample_rate or info.channels != source.channels:
+        if source.guarded_format:
+            if not 8000 <= info.samplerate <= source.sample_rate or not 1 <= info.channels <= source.channels:
+                raise ValueError('Direct stream exceeds admitted native format limits')
+        elif info.samplerate != source.sample_rate or info.channels != source.channels:
             raise ValueError(
                 "native input rate/channels differ from configured expectation; no resampling applied"
             )

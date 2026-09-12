@@ -8,6 +8,19 @@ from oida import device_inputs as inputs
 from oida.live import LiveManager
 
 
+def test_system_output_requires_actual_loopback(monkeypatch):
+    monkeypatch.delenv('OIDA_SYSTEM_OUTPUT_DEVICE', raising=False)
+    assert inputs.system_output_backend()['status'] == 'unavailable'
+    monkeypatch.setenv('OIDA_SYSTEM_OUTPUT_DEVICE', '0')
+    monkeypatch.setattr(inputs, 'audio_devices', lambda: [{'id':'0','label':'Microphone'}])
+    assert inputs.system_output_backend()['status'] == 'unavailable'
+    monkeypatch.setattr(inputs, 'audio_devices', lambda: [{'id':'0','label':'BlackHole 2ch'}])
+    result = inputs.system_output_backend()
+    assert result['status'] == 'available'
+    assert result['memory'] == 'record' and result['raw_audio_policy'] == 'temp'
+    assert result['monitor_playback'] is False
+
+
 def test_device_inventory_excludes_screen_devices():
     text = """[AVFoundation indev @ 0x1] AVFoundation video devices:
 [AVFoundation indev @ 0x1] [0] Capture screen 0

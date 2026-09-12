@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import shutil
@@ -66,7 +67,11 @@ class MacInputs:
         self.lock = threading.RLock()
         self.current = None
 
-    def start(self, device_id: str, device_label: str):
+    def start(self, device_id: str, device_label: str, source_type='live_input'):
+        if source_type == 'system_output':
+            configured = os.environ.get('OIDA_SYSTEM_OUTPUT_DEVICE')
+            if configured != device_id or not is_system_device(device_label):
+                raise ValueError('System output requires an explicitly configured loopback device')
         with self.lock:
             if self.current is not None:
                 raise ValueError(
@@ -123,7 +128,7 @@ class MacInputs:
                 process.stdin.flush()
                 session = self.live.start(
                     ring_seconds=20,
-                    source_type="live_input",
+                    source_type=source_type,
                     source_label=device["label"],
                     device_id=device_id,
                 )
@@ -136,6 +141,7 @@ class MacInputs:
             state = dict(
                 id=uuid4().hex,
                 session_id=session["session_id"],
+                source_type=source_type,
                 device=device,
                 folder=folder,
                 process=process,
@@ -227,7 +233,7 @@ class MacInputs:
             state = self._state(identity)
             state["expires"] = time.monotonic() + LEASE_SECONDS
             return {
-                k: state[k] for k in ("id", "session_id", "device", "chunks", "error")
+                k: state[k] for k in ("id", "session_id", "device", "chunks", "error", "source_type")
             } | {
                 "active": not bool(state["error"]),
                 "lease_seconds": LEASE_SECONDS,
@@ -239,6 +245,8 @@ class MacInputs:
     def chunk(self, identity, sequence):
         with self.lock:
             state = self._state(identity)
+            if state['source_type'] == 'system_output':
+                raise ValueError('System-output monitoring is disabled to prevent feedback')
             if not any(c["sequence"] == sequence for c in state["chunks"]):
                 raise ValueError("Audio chunk is no longer in the input buffer")
             return (Path(state["folder"].name) / f"{sequence:08d}.wav").read_bytes()
@@ -280,6 +288,24 @@ class OpenInput(BaseModel):
     device_label: str = Field(min_length=1, max_length=256)
 
 
+def is_system_device(label):
+    from oida.system_audio import is_loopback_device_label
+    return is_loopback_device_label(label)
+
+
+def system_output_backend():
+    configured = os.environ.get('OIDA_SYSTEM_OUTPUT_DEVICE')
+    if not configured:
+        return {'status':'unavailable', 'reason':'Configure OIDA_SYSTEM_OUTPUT_DEVICE to an installed loopback audio device; no driver is installed automatically.'}
+    try:
+        device = next((d for d in audio_devices() if d['id'] == configured and is_system_device(d['label'])), None)
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        device = None
+    return {'status':'available', 'device':device, 'backend':'avfoundation', 'raw_audio_policy':'temp',
+            'memory':'record', 'monitor_playback':False} if device else {
+                'status':'unavailable', 'reason':'Configured loopback device was not found in the actual backend inventory'}
+
+
 def input_router(live, shutdown_callbacks):
     manager = MacInputs(live)
     shutdown_callbacks.append(manager.close)
@@ -298,6 +324,18 @@ def input_router(live, shutdown_callbacks):
     @router.get("/devices")
     def devices():
         return {"host": "stack-mac", "devices": call(audio_devices)}
+
+    @router.get('/system-output')
+    def system_output():
+        return system_output_backend()
+
+    @router.post('/system-output/start')
+    def start_system_output():
+        status = system_output_backend()
+        if status['status'] != 'available':
+            raise HTTPException(503, status['reason'])
+        device = status['device']
+        return call(manager.start, device['id'], device['label'], 'system_output')
 
     @router.post("/start")
     def start(body: OpenInput):

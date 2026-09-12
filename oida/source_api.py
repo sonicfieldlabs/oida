@@ -29,6 +29,7 @@ from oida.source_capture import (
     capture_audio,
     load_capture_sources,
 )
+from oida.capture_registry import CaptureRegistry, Registration
 
 
 class AcquisitionRequest(BaseModel):
@@ -63,6 +64,39 @@ def source_router(
 ) -> APIRouter:
     router = APIRouter()
     sources = load_capture_sources(os.environ.get("OIDA_CAPTURE_SOURCES"))
+    registry = CaptureRegistry(data_dir / 'capture-registry', sources)
+
+    def resolve_source(identifier):
+        return sources.get(identifier) or registry.source(identifier)
+
+    @router.post('/sources/capture/register')
+    def register_source(body: Registration):
+        preflight('external_stream', body.max_seconds, None, False)
+        try:
+            return registry.register(body)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.get('/sources/capture/registered')
+    def registered_sources():
+        return {'sources': registry.entries(), 'hls': 'unavailable', 'retention': 'temp_only'}
+
+    @router.delete('/sources/capture/registered/{identifier}')
+    def revoke_source(identifier: str):
+        try:
+            registry.revoke(identifier)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        with scheduler.condition:
+            jobs = [job[1].acquisition_id for job in list(scheduler.pending)
+                    if job[0] == identifier]
+            if scheduler.running and scheduler.running[0] == identifier:
+                jobs.append(scheduler.running[1].acquisition_id)
+        with receipts.lock:
+            jobs += [key for key in receipts.active if receipts.get(key).get('source_id') == identifier]
+        for job in set(jobs):
+            scheduler.cancel(job)
+        return {'revoked': identifier, 'dependent_jobs_cancelled': len(set(jobs))}
     masa_module = os.environ.get("OIDA_MASA_VALIDATOR_MODULE")
     receipts = AcquisitionReceipts(data_dir / "source-acquisitions", journal=journal)
     if operations is None:
@@ -124,11 +158,13 @@ def source_router(
         )
 
     def execute(source_id: str, req: AcquisitionRequest, deadline=None):
-        source = sources.get(source_id)
+        source = resolve_source(source_id)
         if source is None:
             raise HTTPException(404, "unknown configured source")
         # Gates precede subprocess/device/network acquisition, not just inference.
         try:
+            if source.runtime_registered and req.retain_library_audio:
+                raise ValueError('Registered radio consent permits temporary capture only')
             if source.consent != "granted" or req.seconds > source.max_seconds:
                 raise ValueError("source consent or duration refused")
             if validate_listening is not None:
@@ -160,6 +196,9 @@ def source_router(
                 apparatus=source.apparatus,
                 consent=source.consent,
                 consent_ref=source.consent_ref,
+                rights_ref=source.rights_ref,
+                source_ref=source.source_ref,
+                registration_revision=source.registration_revision,
                 raw_audio_policy="temp",
                 source_time=item["started_at"],
                 source_time_basis="local-acquisition-start",
@@ -167,11 +206,16 @@ def source_router(
                     sample_rate=source.sample_rate, channels=source.channels
                 ),
             )
+            if source.runtime_registered:
+                item['source_descriptor']['format_limits'] = item['source_descriptor'].pop('expected_format')
             receipts.save(item)
             with TemporaryDirectory(prefix="oida-source-", dir=capture_temp) as temp:
                 path = Path(temp) / "capture.wav"
                 capture_started = time.perf_counter()
                 capture_audio(source, req.seconds, path, cancel)
+                import soundfile as sf
+                actual = sf.info(path)
+                item['source_descriptor']['actual_format'] = dict(sample_rate=actual.samplerate, channels=actual.channels)
                 timing["capture_seconds"] = time.perf_counter() - capture_started
                 with receipts.lock:
                     if deadline is not None and time.time() >= deadline:
@@ -183,8 +227,12 @@ def source_router(
                 def seal():
                     item.update(status="committing")
                     receipts.save(item)
+                def recheck():
+                    if source.runtime_registered and registry.source(source_id) != source:
+                        raise CaptureInterrupted('Capture registration revoked')
+                    preflight(source.source_type, req.seconds, req.route_preset, req.remember)
                 control = Control(event=cancel, lock=receipts.lock,
-                    recheck=lambda: preflight(source.source_type, req.seconds, req.route_preset, req.remember),
+                    recheck=recheck,
                     on_seal=seal, identifier=req.acquisition_id)
                 listening_started = time.perf_counter()
                 with controlled(control):
@@ -299,7 +347,7 @@ def source_router(
 
     @router.post("/sources/capture/{source_id}/jobs", status_code=202)
     def schedule(source_id: str, req: ScheduledAcquisitionRequest):
-        source = sources.get(source_id)
+        source = resolve_source(source_id)
         if source is None:
             raise HTTPException(404, "unknown configured source")
         try:

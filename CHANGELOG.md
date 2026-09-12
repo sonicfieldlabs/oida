@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.0 — local expansion Phase 2
+
+- Add owner-resolved apertures, bounded multiwindow DSP, native evidence reports
+  and atomic Akousmata 0.8 audio/derivative publication with retention gates.
+- Add revision-bound runtime radio registration with pinned public fetching,
+  revocation and playlist refusal; expose the configured system-output lifecycle.
+- Add optional, isolated NSGT/Kymatio workers through installer qualification;
+  project retained measurements into the existing situated-reasoning policy path.
+- Preserve legacy model routes and separate digital measurements from physical
+  capture, model competence and human access. See `docs/native-listening.md`.
+
 ## Unreleased — full-model source hardware qualification
 
 - Add an offline MPS profiling tool with decoder preflight, bounded synthetic
