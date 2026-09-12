@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ from urllib.parse import urlsplit
 import soundfile as sf
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from oida.owner_journal import OwnerJournal
 from oida.contracts import now_iso
 
 MAX_AUDIO_BYTES = 128 * 1024 * 1024
@@ -87,7 +89,8 @@ def load_capture_sources(path: str | None) -> dict[str, CaptureSource]:
     return result
 
 
-def capture_command(source: CaptureSource, seconds: float, path: Path) -> list[str]:
+def capture_input_command(source: CaptureSource) -> list[str]:
+    """Shared fixed input setup for bounded capture and model-free monitoring."""
     executable = shutil.which("ffmpeg")
     if not executable:
         raise RuntimeError("FFmpeg is unavailable")
@@ -110,10 +113,12 @@ def capture_command(source: CaptureSource, seconds: float, path: Path) -> list[s
         ]
     else:
         command += ["-f", "avfoundation"]
+    return command + ["-i", source.input]
+
+
+def capture_command(source: CaptureSource, seconds: float, path: Path) -> list[str]:
     # No output -ar/-ac: never resample a device to pretend it captured a rate.
-    return command + [
-        "-i",
-        source.input,
+    return capture_input_command(source) + [
         "-map",
         "0:a:0",
         "-vn",
@@ -188,16 +193,37 @@ def capture_audio(
 
 
 class AcquisitionReceipts:
-    """One active acquisition, no queue. Later schedulers can reuse this boundary."""
+    """Durable receipts shared by direct acquisition and the bounded scheduler."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, journal=None):
         self.root = root
+        self.journal = journal or OwnerJournal(root.parent / "owner-journal.sqlite3")
         self.lock = threading.Lock()
         self.active: dict[str, threading.Event] = {}
         root.mkdir(parents=True, exist_ok=True)
         for path in root.glob("*.json"):
-            item = json.loads(path.read_text())
-            if item.get("status") in {"queued", "acquiring", "listening"}:
+            legacy = json.loads(path.read_text())
+            if self.journal.get("acquisition", legacy["id"]) is None:
+                self.journal.save("acquisition", legacy["id"], legacy)
+        # Recover authoritative snapshots, including transitions whose JSON mirror failed.
+        cursor = 0
+        boundary = None
+        items = []
+        while True:
+            page = self.journal.snapshots(
+                after=cursor, producer_id=self.journal.producer_id, at=boundary
+            )
+            boundary = page["high_water_sequence"]
+            items.extend(
+                row["payload"]
+                for row in page["snapshots"]
+                if row["kind"] == "acquisition"
+            )
+            if not page["has_more"]:
+                break
+            cursor = page["next_sequence"]
+        for item in items:
+            if item.get("status") in {"queued", "acquiring", "listening", "committing"}:
                 expired = (
                     item.get("status") == "queued"
                     and item.get("expires_at")
@@ -215,11 +241,21 @@ class AcquisitionReceipts:
                     }
                 )
 
+    def get(self, identifier):
+        return self.journal.get("acquisition", identifier)
+
     def save(self, receipt: dict):
+        self.journal.save("acquisition", receipt["id"], receipt)
+        # Disposable legacy mirror; never overrides committed journal state on restart.
         target = self.root / (receipt["id"] + ".json")
         temp = target.with_suffix(".tmp")
-        temp.write_text(json.dumps(receipt, allow_nan=False) + "\n")
-        os.replace(temp, target)
+        try:
+            temp.write_text(json.dumps(receipt, allow_nan=False) + "\n")
+            os.replace(temp, target)
+        except OSError:
+            logging.getLogger(__name__).warning(
+                "Acquisition JSON mirror unavailable; journal commit retained"
+            )
 
     def begin(
         self, identifier: str, source_id: str, *, scheduled: bool = False
@@ -230,9 +266,9 @@ class AcquisitionReceipts:
                     "an acquisition is already active; no queue is configured"
                 )
             previous = {}
-            target = self.root / (identifier + ".json")
-            if target.exists():
-                previous = json.loads(target.read_text())
+            existing = self.get(identifier)
+            if existing is not None:
+                previous = existing
                 if (
                     not scheduled
                     or previous.get("status") != "queued"
@@ -258,6 +294,12 @@ class AcquisitionReceipts:
 
     def finish(self, item: dict):
         with self.lock:
+            event = self.active.get(item["id"])
+            if event is not None and event.is_set():
+                if item.get("status") != "expired":
+                    item.update(status="cancelled", reason="owner cancellation accepted; late output discarded")
+                for key in ("event_id", "akousma_id", "source_admission"):
+                    item.pop(key, None)
             self.save(item)
             self.active.pop(item["id"], None)
 
@@ -265,9 +307,11 @@ class AcquisitionReceipts:
         with self.lock:
             event = self.active.get(identifier)
             if event is None:
-                return False
-            item = json.loads((self.root / (identifier + ".json")).read_text())
-            if item["status"] != "acquiring":
+                return (self.get(identifier) or {}).get("status") == "cancelled"
+            item = self.get(identifier)
+            if item["status"] not in {"acquiring", "listening", "cancelled"}:
                 return False
             event.set()
+            item.update(status="cancelled", reason="owner cancellation accepted; late output will be discarded", finished_at=now_iso())
+            self.save(item)
             return True

@@ -49,6 +49,11 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
     return {
         "name": "oida",
         "display_name": "oída",
+        "evidence_limits": {
+            "native_beyond_band_understanding": "not_established",
+            "inter_agent_negotiation": "record_exchange_only",
+            "promotion_requires": "configuration-specific apparatus, effective model input and evaluated task evidence",
+        },
         "version": version,
         "contract": GATEWAY_CONTRACT,
         "role": ["listening_agent", "agentic_listening_harness", "local_gateway"],

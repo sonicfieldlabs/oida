@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from harness.akouo.loader import default_akouo_root
-from harness.akouo.routing import COMMAND_ROUTES, claim_permissions_for
+from harness.akouo.routing import COMMAND_ROUTES, PLANNING_COMMANDS, claim_permissions_for
 from harness.types import LISTENING_MODES
 
 
@@ -73,11 +73,11 @@ def drift_errors(root: str | Path | None = None) -> list[str] | None:
             errors.append(f"upstream mode {mode} missing from harness LISTENING_MODES")
 
     manifest_commands = {cmd["name"] for cmd in manifest.get("commands", [])}
-    for command in COMMAND_ROUTES:
+    for command in set(COMMAND_ROUTES) | PLANNING_COMMANDS:
         if command not in manifest_commands:
             errors.append(f"harness command {command} missing from upstream manifest")
     for command in manifest_commands:
-        if command not in COMMAND_ROUTES:
+        if command not in COMMAND_ROUTES and command not in PLANNING_COMMANDS:
             errors.append(f"upstream command {command} missing from harness COMMAND_ROUTES")
 
     # evidence ladder: harness permissions must match the manifest row by row

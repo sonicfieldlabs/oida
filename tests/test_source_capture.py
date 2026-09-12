@@ -167,7 +167,7 @@ def test_cancel_before_listening_and_cleanup(setup):
         t.join(timeout=5)
         assert not t.is_alive()
     assert outputs[0].json()["receipt"]["status"] == "cancelled"
-    assert not client.post("/sources/acquisitions/cancel/cancel").json()[
+    assert client.post("/sources/acquisitions/cancel/cancel").json()[
         "cancel_requested"
     ]
 

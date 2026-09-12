@@ -40,6 +40,7 @@ class LiveSession:
     source_label: str = "Live input"
     device_id: str | None = None
     active: bool = True
+    cursor_seconds: float = 0.0
     chunks: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -102,6 +103,10 @@ class LiveManager:
             "received_at": datetime.now(timezone.utc).isoformat(),
             "sha256": saved.get("sha256"),
         }
+        duration = float(chunk.get("duration_s") or 0)
+        chunk["start_seconds"] = session.cursor_seconds
+        session.cursor_seconds += duration
+        chunk["end_seconds"] = session.cursor_seconds
         session.chunks.append(chunk)
         session.updated_at = datetime.now(timezone.utc).isoformat()
         self._trim_ring(session)
@@ -168,12 +173,42 @@ class LiveManager:
         )
         return {
             "session_id": session_id,
+            "window": dict(session_id=session_id, start_seconds=max(0, session.cursor_seconds - float(to_dict(segment)["duration_ms"])/1000), end_seconds=session.cursor_seconds, clock="session captured-audio time"),
             "capture_seconds": capture_seconds,
             "captured_chunk_count": len(selected),
             "path": str(output_path),
             "raw_audio_policy": "temp",
             "segment": to_dict(segment),
         }
+
+    @_synchronized
+    def capture_window(self, session_id: str, *, end_seconds: float, seconds: float) -> dict[str, Any]:
+        session = self.ensure_active(session_id)
+        if not math.isfinite(end_seconds) or not math.isfinite(seconds) or not 0 < seconds <= 60:
+            raise ValueError("Historical windows require a finite duration of at most 60 seconds")
+        start = end_seconds - seconds
+        available = self.status(session_id)["available_start_seconds"]
+        if start < available - 1e-6 or end_seconds > session.cursor_seconds + 1e-6:
+            raise ValueError("Requested interval is expired or not yet captured; no substitute audio was selected")
+        selected = []
+        covered = 0.0
+        for chunk in session.chunks:
+            low = max(start, chunk["start_seconds"])
+            high = min(end_seconds, chunk["end_seconds"])
+            if high > low:
+                if not Path(chunk["path"]).is_file():
+                    raise ValueError("Requested interval is unavailable; a captured chunk is missing")
+                selected.append({**chunk, "crop_start": low - chunk["start_seconds"], "crop_end": high - chunk["start_seconds"]})
+                covered += high - low
+        if abs(covered - seconds) > 1e-4:
+            raise ValueError("Requested interval has a gap")
+        output = uploads_dir() / (uuid4().hex + "-oida-capture-last-window-s.wav")
+        write_capture(selected, output, max_seconds=seconds)
+        _prune_capture_temp_files()
+        segment = audio_segment_from_path(output, source=source_for_path(output, source_type=session.source_type, label=session.source_label, device_id=session.device_id), privacy_mode="ephemeral", ephemeral=True)
+        return dict(session_id=session_id, path=str(output), raw_audio_policy="temp", segment=to_dict(segment),
+                    capture_seconds=seconds, captured_chunk_count=len(selected),
+                    window=dict(start_seconds=start, end_seconds=end_seconds, clock="session captured-audio time", session_id=session_id))
 
     @_synchronized
     def status(self, session_id: str) -> dict[str, Any]:
@@ -192,6 +227,9 @@ class LiveManager:
                 "device_id": session.device_id,
             },
             "ring_seconds": session.ring_seconds,
+            "cursor_seconds": session.cursor_seconds,
+            "clock": "concatenated captured audio; not wall-clock time",
+            "available_start_seconds": max(session.cursor_seconds - session.ring_seconds, float(session.chunks[0].get("start_seconds", 0))) if session.chunks else session.cursor_seconds,
             "vad_threshold_dbfs": session.vad_threshold_dbfs,
             "chunk_count": len(session.chunks),
             "ring_duration_s": round(total_duration, 3),
@@ -223,6 +261,9 @@ class LiveManager:
             "chunk_count": len(session.chunks),
             "recent_chunk_count": len(recent),
             "ring_seconds": session.ring_seconds,
+            "cursor_seconds": session.cursor_seconds,
+            "clock": "concatenated captured audio; not wall-clock time",
+            "available_start_seconds": max(session.cursor_seconds - session.ring_seconds, float(session.chunks[0].get("start_seconds", 0))) if session.chunks else session.cursor_seconds,
             "ring_duration_s": round(sum(float(chunk.get("duration_s") or 0.0) for chunk in session.chunks), 3),
             "vad_active": bool(latest.get("vad_active")) if isinstance(latest, dict) else False,
             "vad_active_recent_count": active_chunks,
@@ -262,7 +303,7 @@ class LiveManager:
         total = 0.0
         for chunk in reversed(session.chunks):
             if not Path(str(chunk.get("path") or "")).exists():
-                continue
+                raise ValueError("Recent captured interval is unavailable; a chunk is missing")
             selected.append(chunk)
             total += float(chunk.get("duration_s") or 0.0)
             if total >= seconds:
@@ -391,7 +432,11 @@ def write_capture(chunks: list[dict[str, Any]], output_path: str | Path, *, max_
         if target_sr is None:
             target_sr = audio.sample_rate
             target_channels = audio.channels
-        audio_items.append(_match_channels(audio, target_channels or audio.channels))
+        audio = _match_channels(audio, target_channels or audio.channels)
+        if "crop_start" in chunk:
+            samples = audio.samples[round(chunk["crop_start"] * audio.sample_rate):round(chunk["crop_end"] * audio.sample_rate)]
+            audio = AudioData(samples=samples, sample_rate=audio.sample_rate, channels=audio.channels, duration_s=len(samples)/audio.sample_rate)
+        audio_items.append(audio)
 
     if not audio_items or target_sr is None:
         raise ValueError("no readable live chunks were available for capture")

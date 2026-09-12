@@ -107,8 +107,9 @@ across acquisition receipts and the account store.
 
 One acquisition executes at a time. The scheduling API below adds a bounded waiting
 queue. Duplicate acquisition IDs fail;
-use a fresh ID for an intentional retry. Cancellation is accepted only while
-acquiring, before gateway listening starts. Model cancellation and a unified journal belong to subsequent runtime phases. Use a
+use a fresh ID for an intentional retry. Cancellation is accepted during acquisition and listening until the publication
+commit fence. Late model output is discarded after an accepted cancellation.
+See [operation cancellation](operation-cancellation.md) for receipts and limits. Use a
 single owner process for a data directory. Acquisition windows are at most 300
 seconds, with a 128 MiB PCM budget and a wall-clock deadline. Source consent and
 active covenant source/time/window rules are checked before acquisition.
@@ -185,12 +186,13 @@ The existing cancellation endpoint now also cancels queued jobs. An independent
 monitor expires waiting jobs even while the worker is blocked in listening. It
 interrupts stale acquisition through the existing capture cancellation mechanism;
 the worker rechecks the deadline before starting listening. Expired/cancelled jobs
-cannot later be dispatched. Cancellation after listening starts remains outside
-this boundary and is reported as not accepted.
+cannot later be dispatched. Cancellation during listening discards late output; once publication commits,
+cancellation is no longer accepted.
 
 Restart marks stale queued jobs `expired`; other unfinished jobs are `interrupted`.
 Neither is replayed. Graceful shutdown rejects submissions and cancels pending
-work or capture, while an already-started listening call may finish. Existing
+work, capture and uncommitted listening. A model call may finish computing, but
+its output is discarded after accepted cancellation. Existing
 completed receipt and canonical-account links survive restart. These receipt
 writes are still not a transaction with account persistence.
 
@@ -204,3 +206,94 @@ acquisition bound; other existing Oída routes retain their own concurrency rule
 The [local full-model profile](moss-hardware-profile.md) now supports retaining
 single-model residency and one source executor on the measured host. Different
 hardware, longer workloads or higher concurrency require fresh measurements.
+
+### Durable owner replay
+
+Acquisition receipt transitions now use the [owner journal](owner-journal.md).
+The journal supplies stable owner sequences, pinned snapshots and canonical record
+references. Existing JSON receipts remain compatibility mirrors. Owner replay stays
+separate from the application's filtered public projection cursor.
+
+### Observation route and operation lifecycle (unreleased)
+
+The observation receiver calls AKOUO's existing agent route planner with
+`relation: {"of": "observation", "ref": "selected-observation-id"}`. The retained
+`listening["oida.observation-route"]` payload binds the source record, selected
+observation, provider source, receiving report/pass, recipient and access declaration.
+The canonical auditum decision references that route decision. Only undetermined
+source attribution is requested; hearing, measurement, inference and interpretation
+permissions are disabled. Deleted values and values with unknown units retain the
+mapper's omitted projection without inventing receiving claims.
+
+Send an optional `operation_id` to reuse the owner's durable operation controller.
+`GET /operations/{id}` exposes the outcome and canonical account link when retained.
+Retries return 409 with the existing receipt, including after restart; use a fresh
+ID only for an intentional new receiving pass. Missing references and invalid source
+records produce refused receipts; unavailable validation produces a failed receipt.
+Unfinished operations become interrupted on restart and are never replayed.
+
+`POST /operations/{id}/cancel` can cancel validation or mapping until the publication
+fence. The validator process may finish, but cancelled output is discarded before
+canonical retention. Current source/covenant policy is rechecked immediately before
+that fence. After sealing, cancellation is refused. Canonical storage, journal links
+and terminal operation receipts are separate writes: interrupted committing work
+may require owner reconciliation. Without an operation ID, the existing synchronous
+request behavior remains available.
+
+`producer_id` is caller-supplied attribution; use the identity from the selected
+Cosmoaudition process when transporting its snapshots. It is not authenticated by
+the received MASA record, and neither the process identity nor a successful intake
+establishes provider freshness, consent truth or public disclosure permission.
+
+### Mac input monitoring before listening
+
+`GET /inputs/devices` enumerates AVFoundation audio devices on the owner Mac.
+`POST /inputs/start` accepts an enumerated `device_id` and matching `device_label`;
+it rejects a changed device identity and a second concurrent producer.
+`POST /inputs/{id}/status` renews the 45-second lease and returns completed WAV
+chunk descriptors, actual sample rate/channel count, and DSP input level.
+`GET /inputs/{id}/chunks/{sequence}` serves only a chunk in that session's bounded
+ring. `POST /inputs/{id}/stop` releases capture and temporary audio. Server shutdown
+also closes capture; the existing capture worker kills FFmpeg on owner-pipe EOF.
+
+This route reuses the capture input setup and LiveManager, without selecting a
+background listening session or calling a model. Monitoring has approximately a
+few seconds of buffering. The device's native rate/channels are reported rather
+than resampled into a purported capture capability. Sessions start only through
+explicit local-owner controls and expire if the dashboard stops renewing them.
+
+
+### Dashboard listening selection
+
+`POST /gateway/listen` and `POST /listen-event` accept optional `model_id` and
+`listening_mode`. The model resolves against the owner's installed/configured
+MOSS catalog; the modality must be in AKOÚŌ's canonical `LISTENING_MODES`.
+Invalid selections are refused before audio inspection or inference. Model
+selection is request-local across report passes and prepared input bindings,
+including exception cleanup; it never changes global model assignments.
+Omitting the fields preserves the existing route defaults and modality chain.
+
+Configured-source acquisition and job requests accept the same optional fields
+and validate them before capture. `GET /listening/options` exposes owner-derived
+models, resident state, routes, and modalities without starting model execution.
+Music analysis remains an existing perception pass. Non-acoustic observations
+continue through the observation API and never become audio by selecting a model.
+
+Dashboard gateway and configured-source requests can set `response_mode: "summary"`.
+The default remains `"full"` for existing clients. Summary replies contain the
+current event's source, segment, apparatus, aggregate and route summaries, plus
+the canonical memory ID and save status. They omit complete background history
+and repeated Earworm context; remembering still saves the full event through the
+existing owner path before returning. Refusals also omit background history in
+summary mode. No model result is inferred from a successful capture receipt.
+
+`POST /gateway/listen-window` accepts the gateway fields plus `start_seconds`
+(0–86400, default 0) and `seconds` (greater than 0, at most 10, default 10). It
+admits ordinary uploaded files only. Source/retention preflight runs before
+slicing, and normal selection, covenant and input gates still run on the window.
+The temporary native-rate, native-channel WAV contains only the available window;
+requests past the end fail instead of manufacturing silence. It is removed after
+the operation. Canonical `oida.listen` metadata retains the original file hash,
+offset, full source duration and actual window duration. The original upload is
+unchanged. Declared spectral/source-admission material continues through its
+existing dedicated paths rather than this ordinary-file endpoint.

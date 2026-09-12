@@ -119,3 +119,7 @@ def verify_input_binding(receipt: dict) -> dict:
             "Model, adapter or preprocessed input changed after preparation"
         )
     return binding
+
+
+def has_input_bindings():
+    return _EXPECTED.get() is not None

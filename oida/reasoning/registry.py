@@ -262,6 +262,22 @@ def build_provider_registry(
 
         return get
 
+    # Optional local worker reuses the endpoint adapter; persisted providers are untouched.
+    import os
+    from pathlib import Path
+    import json
+    local_config = os.environ.get("OIDA_LOCAL_REASONING_CONFIG")
+    if local_config:
+        try:
+            local = json.loads(Path(local_config).read_text())
+            registry.register(OpenAICompatibleProvider(
+                provider_id="local_ecology", base_url="http://127.0.0.1:5194/v1",
+                enabled=True, api_key_getter=lambda: Path(local["token_file"]).read_text().strip(),
+                display_name="Local planning · " + local["recommended_model"],
+            ), enabled=True)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # Missing optional provisioning cannot disable existing providers.
+
     ollama_cfg = configured("ollama")
     registry.register(
         OllamaProvider(

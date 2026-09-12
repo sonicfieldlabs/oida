@@ -28,7 +28,8 @@ class SGLangMossEngine(MossEngine):
         self._model_overrides: dict[str, str] = {}
 
     def model_id_for_kind(self, model_kind: str) -> str:
-        return self._model_overrides.get(model_kind, "moss-audio")
+        from oida.engine_base import selected_model
+        return selected_model() or self._model_overrides.get(model_kind, "moss-audio")
 
     def set_model(self, model_kind: str, model_id: str) -> None:
         if model_kind not in {"instruct", "thinking", "transcription", "music", "targeted_relisten"}:

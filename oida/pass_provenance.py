@@ -151,9 +151,24 @@ class SourceBoundEngine:
         expected = self.fingerprints[key]
         if audio_fingerprint(path) != expected:
             raise SourceChangedError("Submitted audio changed before the pass")
-        result = self.engine.generate(
-            audio_path, prompt, settings, thinking_budget=thinking_budget
+        from contextlib import nullcontext
+        from oida.input_binding import enforce_input_bindings, has_input_bindings
+
+        prepare = getattr(self.engine, "prepare_input_binding", None)
+        binding = (
+            prepare(audio_path, settings.model_kind)
+            if prepare is not None and not has_input_bindings()
+            else {}
         )
+        guard = (
+            enforce_input_bindings({settings.model_kind: binding["binding_id"]})
+            if binding.get("status") == "prepared"
+            else nullcontext()
+        )
+        with guard:
+            result = self.engine.generate(
+                audio_path, prompt, settings, thinking_budget=thinking_budget
+            )
         if audio_fingerprint(path) != expected:
             raise SourceChangedError("Submitted audio changed during the pass")
         self.verify_source()

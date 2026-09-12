@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from oida.reasoning.contracts import (
+    strict_output_schema,
     ModelDescriptor,
     ProviderDescriptor,
     ProviderRequest,
@@ -247,7 +248,7 @@ class OpenAICompatibleProvider:
                     name=str(item.get("name") or model_id),
                     capabilities=[value for value in self.capabilities if value != "models"],
                     locality=endpoint_locality(self.base_url),
-                    metadata={"owned_by": item.get("owned_by")},
+                    metadata={"owned_by": item.get("owned_by"), **(item.get("metadata", {}) if self.provider_id == "local_ecology" and isinstance(item.get("metadata"), dict) else {})},
                 )
             )
         return result
@@ -271,7 +272,7 @@ class OpenAICompatibleProvider:
                 "json_schema": {
                     "name": "oida_response",
                     "strict": True,
-                    "schema": request.response_schema,
+                    "schema": strict_output_schema(request.response_schema),
                 },
             }
         if self.force_stream:
@@ -306,6 +307,7 @@ class OpenAICompatibleProvider:
                 usage=usage,
                 latency_ms=_elapsed_ms(started),
                 metadata={
+                    **({"deployment": data.get("centaur_deployment")} if self.provider_id == "local_ecology" else {}),
                     "response_id": data.get("id"),
                     "finish_reason": choices[0].get("finish_reason") if choices else None,
                 },

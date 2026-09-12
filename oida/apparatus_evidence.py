@@ -57,7 +57,12 @@ def _json(data: bytes) -> dict:
 
 
 def resolve_evidence(
-    manifest: Path, access: dict, *, now: datetime | None = None
+    manifest: Path,
+    access: dict,
+    *,
+    now: datetime | None = None,
+    bindings=None,
+    preprocessing=None,
 ) -> dict:
     """Resolve approved declarations, not physical truth or model capability.
 
@@ -76,6 +81,7 @@ def resolve_evidence(
         raise EvidenceUnavailable("Unsupported apparatus evidence manifest")
     root = manifest.resolve().parent
     refs, seen, unresolved = [], set(), []
+    model_refs = []
     for entry in index["entries"]:
         if not isinstance(entry, dict) or set(entry) != {
             "ref",
@@ -90,6 +96,7 @@ def resolve_evidence(
         if entry["ref"] in seen or entry["kind"] not in {
             "capture",
             "sampled_representation",
+            "model_input",
         }:
             raise EvidenceUnavailable(
                 "Duplicate reference or unsupported evidence kind"
@@ -130,14 +137,30 @@ def resolve_evidence(
             "kind": entry["kind"],
             "declaration": access[entry["kind"]],
         }
+        if entry["kind"] == "model_input":
+            prepared = bindings or {}
+            expected["binding_ids"] = {
+                k: v["binding_id"]
+                for k, v in prepared.items()
+                if v.get("status") == "prepared"
+            }
+            expected["preprocessing"] = preprocessing or []
+            if not prepared or len(expected["binding_ids"]) != len(prepared):
+                unresolved.append(
+                    {"ref": entry["ref"], "reason": "prepared input unavailable"}
+                )
+                continue
         if json.dumps(evidence, sort_keys=True) == json.dumps(expected, sort_keys=True):
             refs.append(entry["ref"])
+            if entry["kind"] == "model_input":
+                model_refs.append(entry["ref"])
         else:
             unresolved.append(
                 {"ref": entry["ref"], "reason": "subject or declaration mismatch"}
             )
     return {
         "resolved_refs": refs,
+        "model_refs": model_refs,
         "unresolved": unresolved,
         "manifest_sha256": hashlib.sha256(raw).hexdigest(),
         "basis": "operator-selected declarations; not independent calibration verification",

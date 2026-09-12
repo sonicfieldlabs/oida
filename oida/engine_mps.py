@@ -6,6 +6,9 @@ import re
 import sys
 import threading
 import time
+from akousma.resource_admission import admitted
+from oida.operation_control import checkpoint
+
 from functools import wraps
 from pathlib import Path
 
@@ -54,7 +57,8 @@ class MpsMossEngine(MossEngine):
         return self.model_id_for_kind(settings.model_kind)
 
     def model_id_for_kind(self, model_kind: str) -> str:
-        override = self._model_overrides.get(model_kind)
+        from oida.engine_base import selected_model
+        override = selected_model() or self._model_overrides.get(model_kind)
         if override:
             return override
         return (
@@ -86,6 +90,12 @@ class MpsMossEngine(MossEngine):
             self._clear_loaded_models(except_model=None)
 
         model_source, revision = self._resolve_model_source(model_id)
+        if revision is not None:
+            # Resolve one pinned snapshot before either model or processor loading;
+            # the existing explicit Hub policy above controls network permission.
+            from huggingface_hub import snapshot_download
+            model_source = snapshot_download(repo_id=model_source, revision=revision,
+                local_files_only=self.config.hf_hub_offline)
         weights = weight_inventory(Path(model_source))
         model = MossAudioModel.from_pretrained(
             model_source,
@@ -165,6 +175,7 @@ class MpsMossEngine(MossEngine):
             raw_audio = load_audio(str(Path(audio_path)), sample_rate=rate)
             return binding_for_receipt(self._input_receipt(model_id, model_kind, raw_audio, rate))
 
+    @admitted("oida", checkpoint=lambda *a, **k: checkpoint())
     def prewarm(self, model_kind: str = "instruct") -> None:
         model_id = self.model_id_for_kind(model_kind)
         with self._lock:
@@ -211,6 +222,7 @@ class MpsMossEngine(MossEngine):
         except Exception:
             pass
 
+    @admitted("oida", checkpoint=lambda *a, **k: checkpoint())
     def generate(
         self,
         audio_path: str,

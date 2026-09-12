@@ -28,6 +28,11 @@ uv run oida serve --profile stub
 ```
 
 Open `http://127.0.0.1:8765`, choose a WAV file, and begin with **Signal**.
+On macOS, the MPS gateway also searches an installed `ffmpeg@8` keg before the
+active FFmpeg formula. TorchCodec 0.10 needs compatible libraries; FFmpeg 9 alone
+is insufficient. Discovery changes only the gateway child environment and does
+not install or relink Homebrew packages.
+
 Install `ffmpeg` to use non-WAV files or browser recordings. The stub profile
 still performs deterministic DSP; it does not invent a semantic caption.
 
@@ -304,6 +309,17 @@ uv run oida integrate opencode
 uv run oida doctor
 ```
 
+Installed adapters retain the selected local runtime paths (data, audio, shared
+store, model cache/checkpoints and gateway address), alongside the exact Python
+executable. Reinstall an adapter after changing those selections. Only named local
+configuration fields are copied; credentials and arbitrary environment variables
+are not serialized into plugin manifests. Hosts remain responsible for supplying
+any required authentication through their own configuration.
+
+Hermes uses its recorded runtime before searching PATH. An explicit `OIDA_COMMAND`
+remains an operator override; a malformed runtime file requires reinstalling the
+adapter instead of silently choosing a different installation.
+
 The `/remote` page is the dedicated remote ear: past/future capture with an
 on-device ring buffer, optional consent-scoped location, and the akousma
 (sound plus listening record) filed into the shared store by the server. OÍDA
@@ -531,3 +547,30 @@ Bounded source declarations: [source admission](docs/source-admission.md).
 
 Measured local MOSS runtime and conservative residency decision:
 [hardware profile](docs/moss-hardware-profile.md).
+
+Durable owner receipt and record APIs: [owner journal](docs/owner-journal.md).
+
+Unreleased runtime additions: [transposition recipes](docs/transposition-runtime.md),
+[receiving-claim expiry](docs/claim-lifecycle.md), and explicit
+[capability evidence limits](docs/capability-limits.md).
+
+The unreleased [digital sector and structured-report APIs](docs/digital-sectors.md)
+add bounded band-energy measurements and readable accounts of retained evidence.
+[Runtime attribution](docs/runtime-attribution.md) documents operator-approved
+spectral attempts, prepared-input enforcement and per-pass source provenance.
+
+Independent retained ensembles and local A2 second-report execution are documented
+in [ensembles and second reports](docs/ensembles-second-reports.md) (unreleased).
+
+[Retained influence and local record exchange](docs/influence-exchange.md) documents
+validated decision traces, negotiated handoff and durable idempotent receipts.
+
+Unreleased [Akousmata-owned research integration](docs/research-integration.md)
+delegates canonical proposals and changed-record reconciliation to the existing
+shared service and scheduled watcher.
+
+D5 local integration: [listening-bundles](docs/listening-bundles.md). Unreleased; no automatic publication.
+
+Optional D6 application delivery uses [explicit local approval and ephemeral processing](docs/public-delivery.md). The Oída owner API remains local.
+
+D7 adds the [native Pi adapter](integrations/pi/README.md), staged for an explicit extension launch. Standalone wheels include all six host adapter assets; host credentials and conversations remain host-owned.

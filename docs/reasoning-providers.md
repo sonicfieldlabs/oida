@@ -302,3 +302,47 @@ The dashboard uses the same loopback API available to other local clients:
 These controls are loopback administration surfaces. A wildcard/LAN daemon
 still requires Oída's bearer-token protection, and enabling a provider does not
 weaken the evidence-packet rules.
+
+## Record-linked dashboard workspace
+
+`/reasoning/workspace` exposes the private dashboard integration. It reuses this
+provider registry, model discovery, evidence validation and `ConversationStore`.
+The dashboard can explicitly enable an installed harness; it does not enable all
+providers or alter perception roles. Codex and OpenAI-compatible strict transports
+use a closed response schema with every property required; canonical response
+validation still accepts its documented defaults. Codex retains the actual model
+reported by its app-server, including when the provider default was requested.
+
+Research jobs and automatic-mode configuration persist in `OwnerJournal`.
+Conversations persist separately from Auditum records. Each turn records the
+canonical record ID and initial SHA-256, selected context switches, execution
+provider/model, retrieval receipts and any fallback. No research operation edits
+an Auditum, adds a listening, or invokes targeted re-listening. Retained claims
+are marked as inherited accounts, not fresh measurements.
+
+Context can independently include related canonical memories (using Akousmata's
+existing research gatherer), the existing local wiki, and web search. With all
+three disabled, only the selected listening and model are used. Public web
+retrieval uses DuckDuckGo snippets with a Bing RSS fallback, fixed endpoints,
+15-second per-endpoint timeouts and bounded responses. No result page or URL is
+fetched automatically. Links, snippets, search provider and retrieval times are
+kept in the separate turn. Empty, irrelevant or failed retrievals are reported;
+search snippets do not establish facts about the recording. The optional manual
+query overrides keywords derived from the retained listening summary. Enabling
+web therefore sends a query externally even with a local reasoning model.
+
+Automatic mode is off by default. Enabling it captures the owner-journal cursor;
+only subsequent first `record_reference` events from Oída enqueue work. Updates
+to existing records, reasoning sessions, restart replay and historical records do
+not generate duplicate sessions. The queue holds at most 32 pending jobs, executes
+one at a time and survives dashboard closure. Disabling cancels queued automatic
+jobs; an already running turn may finish. Interrupted calls are reconciled with
+saved conversation request IDs and are never silently replayed. A stopped Mac or
+stopped Oída service cannot process jobs. Incognito mode refuses persistent
+workspace research. Active covenant restrictions still apply to retained context.
+
+Each turn's context switches also gate history: a follow-up excluding web, wiki
+or other memories does not replay earlier turns that used the excluded source.
+The visible conversation remains intact. Existing ConversationStore retention
+applies: up to 50 turns persist per session and the most recent six eligible turns
+are supplied as model history.

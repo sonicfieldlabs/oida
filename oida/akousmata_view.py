@@ -194,4 +194,26 @@ def build_akousmata_router():
         finally:
             store.close()
 
+    @router.post("/bundles/export")
+    def export_cached_passes(body: dict):
+        from .listening_bundles import package_passes
+        try:
+            with _store() as store:
+                return package_passes(store, body["selections"], disclosure=body.get("disclosure", "private"))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/bundles/import")
+    def import_listening_bundle(body: dict):
+        import base64
+        from .listening_bundles import receive
+        from akousmata_app.bundles import MAX_BYTES
+        try:
+            if set(body) != {"archive_base64", "supported_contracts"} or len(body["archive_base64"]) > MAX_BYTES * 4 // 3 + 4:
+                raise ValueError("Expected bounded archive_base64 and supported_contracts")
+            with _store() as store:
+                return receive(store, base64.b64decode(body["archive_base64"], validate=True), supported_contracts=body["supported_contracts"])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     return router

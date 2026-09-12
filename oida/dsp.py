@@ -72,7 +72,7 @@ def load_audio(path: str | Path, target_sr: int | None = None, mono: bool = Fals
     if isinstance(max_seconds, (int, float)) and max_seconds > 0:
         frames = max(1, int(math.ceil(float(max_seconds) * _samplerate_hint(audio_path))))
     try:
-        samples, sample_rate = sf.read(str(audio_path), frames=frames, always_2d=True, dtype="float32")
+        samples, sample_rate = sf.read(str(audio_path), frames=frames if frames is not None else -1, always_2d=True, dtype="float32")
     except Exception:
         samples, sample_rate = _load_wave(audio_path, max_frames=frames)
 

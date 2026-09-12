@@ -18,7 +18,7 @@ import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import jsonschema
 
@@ -312,6 +312,14 @@ class ReportRequest(PathRequest):
 
 
 class ListenEventRequest(PathRequest):
+    specialist_tasks: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(default_factory=list, max_length=3)
+    speech_vad: bool = True
+    speech_alignment: bool = False
+    speech_language: Literal["English", "Spanish", "Portuguese"] | None = None
+    live_session_id: str | None = Field(default=None, max_length=120)
+    live_start_seconds: float | None = Field(default=None, ge=0, le=86400000)
+    model_id: str | None = Field(default=None, min_length=1, max_length=256)
+    listening_mode: str | None = Field(default=None, min_length=1, max_length=100)
     source_admission: SourceAdmission | None = None
     listening_access: dict[str, Any] | None = None
     spectral_request: dict[str, Any] | None = None
@@ -339,11 +347,21 @@ class ListenEventRequest(PathRequest):
 
 
 class GatewayListenRequest(ListenEventRequest):
+    retain_library_audio: bool = False
+    library_parent_sound_id: str | None = Field(default=None, min_length=1, max_length=256)
+    response_mode: Literal["full", "summary"] = "full"
+    ephemeral_delivery: bool = False
+    operation_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     remember: bool = False
     user_notes: str | None = None
     human_listener_id: str | None = None
     human_display_name: str | None = None
     tags: list[str] = Field(default_factory=list)
+
+
+class GatewayWindowRequest(GatewayListenRequest):
+    start_seconds: float = Field(default=0.0, ge=0, le=86400)
+    seconds: float = Field(default=10.0, gt=0, le=60)
 
 
 class GatewayHarnessRequest(OidaRequest):
@@ -405,6 +423,7 @@ class LiveSessionRequest(OidaRequest):
 class LiveCaptureRequest(OidaRequest):
     session_id: str
     seconds: float = Field(default=10.0, gt=0, le=3600)
+    end_seconds: float | None = Field(default=None, gt=0, le=86400000)
     analyze: bool = False
     route_preset: str = "basic"
     enabled_skill_ids: list[str] | None = None
@@ -595,6 +614,8 @@ def create_app(
         ) from FASTAPI_IMPORT_ERROR
 
     config = load_config(profile=profile, host=host, port=port)
+    from oida.owner_journal import OwnerJournal
+    owner_journal = OwnerJournal(config.data_dir / "owner-journal.sqlite3")
     evidence_setting = os.environ.get("OIDA_APPARATUS_EVIDENCE")
     evidence_manifest = Path(evidence_setting).expanduser().resolve() if evidence_setting else None
     local_engine = build_engine(config)
@@ -948,6 +969,9 @@ def create_app(
         return True
 
     source_shutdown_callbacks = []
+    from oida.operation_control import Operations, checkpoint
+    operations = Operations(owner_journal)
+    source_shutdown_callbacks.append(operations.close)
 
     @asynccontextmanager
     async def lifespan(_app: Any):
@@ -973,6 +997,7 @@ def create_app(
                     LOGGER.warning("akousmata watcher startup failed: %s", exc)
             if config.prewarm:
                 start_prewarm()
+            reasoning_workspace.start()
             try:
                 yield
             finally:
@@ -1402,7 +1427,11 @@ def create_app(
                     "listening_context": event.get("listening_context") or {},
                     "listening_provenance": event.get("listening_provenance") or {},
                     "source_admission": (event.get("source") or {}).get("details", {}).get("source_admission"),
+                    "file_window": (segment.get("metadata") or {}).get("file_window"),
+                    "live_window": (segment.get("metadata") or {}).get("live_window"),
                     "pass_provenance": event.get("pass_provenance") or [],
+                    "specialist_evidence": event.get("specialist_evidence") or [],
+                    "listening_task_status": event.get("listening_task_status") or [],
                     "listening_passes": event.get("listening_passes") or [],
                     "route_decisions": event.get("route_decisions") or [],
                     "apparatus": event.get("apparatus") or {},
@@ -1417,6 +1446,13 @@ def create_app(
                     ],
                 }
             }
+            for lane in event.get("specialist_evidence") or []:
+                if lane.get("status") == "complete":
+                    listening["oida.specialist." + lane["task"]] = {
+                        "summary": lane["model"] + ": " + lane["evidence"]["result"]["status"],
+                        "specialist_evidence": lane["evidence"], "analysis_frame": lane["frame"],
+                        "source_sha256": lane["source_sha256"],
+                    }
             for index, route in enumerate(routes):
                 if not isinstance(route, dict):
                     continue
@@ -1499,6 +1535,7 @@ def create_app(
                 ],
             )
             akousma_id = persist_akousma(record)
+            owner_journal.record_reference(akousma_id, event_id=event.get("id"), record=record)
             memory_block["akousma_id"] = akousma_id
             if isinstance(user_notes, str) and user_notes.strip():
                 try:
@@ -1515,6 +1552,7 @@ def create_app(
                         privacy=human_profile["privacy"],
                     )
                     human_akousma_id = persist_akousma(human_record)
+                    owner_journal.record_reference(human_akousma_id, event_id=event.get("id"), record=human_record)
                     memory_block["human_akousma_id"] = human_akousma_id
                 except Exception as exc:
                     human_error = "linked human Akousmata write failed"
@@ -2501,9 +2539,20 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/upload")
-    def upload_endpoint(file: UploadFile = File(...)) -> dict[str, object]:
-        saved = save_upload(file)
-        return saved
+    def upload_endpoint(file: UploadFile = File(...), operation_id: str | None = Form(None)) -> dict[str, object]:
+        return operations.run(operation_id, lambda: save_upload(file))
+
+    @app.get("/operations/{identifier}")
+    def operation_receipt(identifier: str):
+        receipt = owner_journal.get("operation", identifier)
+        if receipt is None:
+            raise HTTPException(404, "unknown operation")
+        return receipt
+
+    @app.post("/operations/{identifier}/cancel")
+    def cancel_operation(identifier: str):
+        return {"cancel_requested": operations.cancel(identifier),
+                "scope": "before publication commit; model computation may finish but late output is discarded"}
 
     @app.get("/sample-tone")
     def sample_tone_endpoint() -> dict[str, object]:
@@ -2570,9 +2619,71 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"analysis": result, "engine": dump_model(engine_result)}
 
+    def validate_listening_selection(model_id, listening_mode):
+        from harness.types import LISTENING_MODES
+        if listening_mode is not None and listening_mode not in LISTENING_MODES:
+            raise HTTPException(400, "Unknown AKOÚŌ listening modality")
+        if model_id is None:
+            return None
+        resolved = resolve_moss_model(model_id)
+        if config.profile == "stub" or resolved is None:
+            raise HTTPException(400, "Selected audio model is unavailable")
+        if config.profile != "cuda-server" and not (Path(resolved) / "config.json").is_file():
+            raise HTTPException(400, "Selected audio model is not installed locally")
+        return resolved
+
+    @app.get("/listening/options")
+    def listening_options():
+        models = []
+        seen = set()
+        descriptors = moss_model_descriptors()
+        for item in descriptors:
+            metadata = item.metadata
+            key = Path(str(metadata.get("path") or item.id)).name
+            if key in seen:
+                continue
+            seen.add(key)
+            checkpoint_meta = next((d.metadata for d in descriptors
+                if d.metadata.get("description") and Path(str(d.metadata.get("path", ""))).name == key), {})
+            models.append(dict(id=item.id, name=key, capabilities=item.capabilities,
+                description=checkpoint_meta.get("description", "Local audio understanding model"),
+                size_gb=checkpoint_meta.get("size_gb"),
+                installed=bool(metadata.get("installed")), loaded=bool(metadata.get("loaded")),
+                available=config.profile != "stub" and bool(metadata.get("available"))))
+        from akouo_contract.listening_tasks import compound_listening_routes
+        return dict(models=models, engine=engine_status(), specialist_tasks=specialists.options(), compound_routes=compound_listening_routes(),
+            route_presets=akouo_manifest()["route_presets"],
+            controls=available_harness_controls())
+
+    # Each owner admits its own future adapters. Existing selections are unchanged.
+    from akousma.resource_admission import admission_status
+    from oida.specialists.runtime import Specialists
+    specialists = Specialists()
+    app.state.model_deployments = specialists.registry
+
+    @app.get("/capabilities")
+    def model_capabilities():
+        return dict(contract="listening-stack/capability-catalog/v1", owner="oida",
+            legacy_models=listening_options()["models"],
+            deployments=app.state.model_deployments.catalog(),
+            admission=admission_status(),
+            legacy_policy="Existing model settings preserved; catalog availability is not deployment validation")
+
     @app.post("/listen-event")
     def listen_event_endpoint(req: ListenEventRequest) -> dict[str, object]:
+        return execute_listen_event(req)
+
+    def execute_listen_event(req: ListenEventRequest, *, file_window=None) -> dict[str, object]:
+        from oida.engine_base import use_listening_model
+        if len(req.specialist_tasks) != len(set(req.specialist_tasks)):
+            raise HTTPException(400, "Duplicate specialist task")
+        model = validate_listening_selection(req.model_id, req.listening_mode)
+        with use_listening_model(model):
+            return run_listen_event(req, file_window=file_window)
+
+    def run_listen_event(req: ListenEventRequest, *, file_window=None) -> dict[str, object]:
         try:
+            checkpoint()
             preset = route_preset(req.route_preset)
             path = _require_existing_path(req.path)
             privacy_mode = _privacy_mode(req.privacy_mode)
@@ -2667,6 +2778,11 @@ def create_app(
                         covenant_rules_applied.append("do_not_retain:raw-audio")
 
             metadata: dict[str, object] = {"raw_audio_policy": raw_audio_policy}
+            if file_window is not None:
+                metadata["file_window"] = file_window
+            if req.live_session_id is not None and req.live_start_seconds is not None:
+                metadata["live_window"] = dict(session_id=req.live_session_id, start_seconds=req.live_start_seconds,
+                                              duration_seconds=req.capture_seconds, clock="session captured-audio time; not wall-clock")
             if capture_info:
                 metadata["capture"] = capture_info
             if location:
@@ -2688,6 +2804,7 @@ def create_app(
                 # Covenants may narrow retention after the first policy check.
                 req.source_admission.check_policy(source_type, raw_audio_policy)
                 segment.source.details["source_admission"] = req.source_admission.receipt(segment)
+            apparatus_decision = None
             if req.spectral_request is not None:
                 try:
                     from oida.apparatus_gate import gate_spectral_request
@@ -2700,6 +2817,7 @@ def create_app(
                     raise HTTPException(503, "Apparatus contracts unavailable; install compatible packaged dependencies") from exc
                 except EvidenceUnavailable as exc:
                     raise HTTPException(503, str(exc)) from exc
+                owner_journal.save("apparatus_decision", apparatus_decision["decision"]["id"], apparatus_decision)
                 broadcaster.publish("listen_decided", {"apparatus_decision": apparatus_decision})
                 if not apparatus_decision["measurement_permitted"]:
                     raise HTTPException(status_code=409, detail={"apparatus_decision": apparatus_decision})
@@ -2707,18 +2825,38 @@ def create_app(
                 "listen_started",
                 {"path": str(path), "route_preset": preset.id, "source": source_type},
             )
-            with engine.request_policy(
+            from contextlib import nullcontext
+            from oida.input_binding import enforce_input_bindings
+            binding_guard = enforce_input_bindings(apparatus_decision["execution_bindings"]) if apparatus_decision and apparatus_decision.get("execution_bindings") else nullcontext()
+            with binding_guard, engine.request_policy(
                 privacy_mode=privacy_mode,
                 covenant_engine=covenant_engine,
             ) as audio_policy:
-                perception = report(
+                from oida.specialists.dispatch import interpret
+                perception, interpretation_status = interpret(
                     engine,
                     str(path),
                     "oida",
                     passes=passes,
+                    partial=bool(req.specialist_tasks),
+                    report_fn=report,
                     chunk_seconds=config.moss_chunk_seconds,
                     overlap_seconds=_chunk_overlap(config),
                 )
+            specialist_evidence = specialists.execute(path, req.specialist_tasks,
+                asset_id=segment.id, covenant=covenant_engine, source_sha256=segment.data_ref.sha256,
+                speech_options={"vad": req.speech_vad, "alignment": req.speech_alignment, "language": req.speech_language}) if req.specialist_tasks else []
+            for lane in specialist_evidence:
+                lane["time_origin"] = metadata.get("file_window") or metadata.get("live_window") or {"start_seconds": 0, "clock": "source asset time"}
+            checkpoint()
+            current_checker = covenant_store.engine(override_name=req.covenant)
+            if current_checker is not None:
+                if current_checker.refuse_source(source_type) or current_checker.refuse_quiet_hours():
+                    raise HTTPException(423, "withheld under current covenant: source no longer permitted")
+                if current_checker.covenant != (covenant_engine.covenant if covenant_engine else None):
+                    raise HTTPException(423, "withheld under current covenant: policy changed during listening")
+            elif covenant_engine is not None:
+                raise HTTPException(423, "withheld under current covenant: policy changed during listening")
             perception_dict = report_to_dict(perception)
             if covenant_engine is not None:
                 perception_dict, perception_withheld = (
@@ -2726,7 +2864,7 @@ def create_app(
                 )
                 covenant_withheld.extend(perception_withheld)
             command_output = build_harness_output(
-                perception_dict, command=preset.akouo_command
+                perception_dict, command=preset.akouo_command, mode=req.listening_mode
             )
             if covenant_engine is not None:
                 command_output, claim_withheld = covenant_engine.redact_command_output(
@@ -2744,6 +2882,11 @@ def create_app(
                 raw_audio_policy=raw_audio_policy,
                 listening_identity=audio_policy.listening_identity_block(passes),
             )
+            if specialist_evidence:
+                event["specialist_evidence"] = specialist_evidence
+                event["listening_task_status"] = [dict(task="dsp",status="complete"), interpretation_status]
+            if apparatus_decision is not None:
+                event["apparatus_decision"] = apparatus_decision
             song_identity_withheld = None
             if (
                 req.song_id
@@ -2770,12 +2913,25 @@ def create_app(
                 event["covenant"] = covenant_engine.event_block(
                     rules_applied=covenant_rules_applied, withheld=covenant_withheld
                 )
+            if apparatus_decision and apparatus_decision.get("measurement_permitted"):
+                refreshed = gate_spectral_request(path, req.listening_access, req.spectral_request,
+                    evidence_manifest=evidence_manifest,
+                    prepare_bindings=lambda source: prepare_report_bindings(engine, str(path), passes, source, config.moss_chunk_seconds))
+                owner_journal.save("apparatus_decision", refreshed["decision"]["id"], refreshed)
+                if not refreshed["measurement_permitted"] or refreshed.get("execution_bindings") != apparatus_decision.get("execution_bindings"):
+                    raise HTTPException(409, "Apparatus approval or prepared input changed during execution")
+            checkpoint(seal=True)
             event = memory.enrich_event(event)
-            background.finish_action(event)
-            broadcaster.publish(
-                "listen_completed",
-                {"listening_event": event, "route_preset": preset.id},
-            )
+            if getattr(req, "ephemeral_delivery", False):
+                # Public delivery may not become history even when an owner opts
+                # into retaining ordinary incognito sessions.
+                background.finish_action(None)
+            else:
+                background.finish_action(event)
+                broadcaster.publish(
+                    "listen_completed",
+                    {"listening_event": event, "route_preset": preset.id},
+                )
         except ValueError as exc:
             broadcaster.publish("listen_failed", {"detail": str(exc)})
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2783,13 +2939,42 @@ def create_app(
             "listening_event": event,
             "perception_report": perception_dict,
             "command_output": command_output,
-            "background": background.status(),
+            "background": background.status() if getattr(req, "response_mode", "full") == "full" else {},
         }
 
     @app.post("/gateway/listen")
     def gateway_listen_endpoint(req: GatewayListenRequest) -> dict[str, object]:
+        return operations.run(req.operation_id, lambda: gateway_listen_impl(req))
+
+    @app.post("/gateway/listen-window")
+    def gateway_window_endpoint(req: GatewayWindowRequest) -> dict[str, object]:
+        def execute_window():
+            from oida.audio_window import audio_window
+            validate_listening_selection(req.model_id, req.listening_mode)
+            if req.source_type != "file" or req.source_admission is not None or req.spectral_request is not None or req.listening_access is not None:
+                raise HTTPException(400, "File windows accept ordinary uploaded-file listening only")
+            source_preflight("file", req.seconds, req.route_preset, req.remember)
+            path = _require_existing_path(req.path)
+            try:
+                with audio_window(path, start_seconds=req.start_seconds, seconds=req.seconds,
+                        temp_dir=config.data_dir / "source-capture-temp") as (window, metadata):
+                    request = GatewayListenRequest.model_validate({
+                        **req.model_dump(exclude={"start_seconds", "seconds"}),
+                        "path": str(window), "raw_audio_policy": "not_stored" if req.ephemeral_delivery else "temp",
+                        "source_label": req.source_label or path.name,
+                        "capture_seconds": metadata["duration_seconds"],
+                        "capture_direction": "past", "capture_trigger": "manual-file-window",
+                    })
+                    return gateway_listen_impl(request, file_window=metadata)
+            except (ValueError, RuntimeError) as exc:
+                raise HTTPException(400, str(exc)) from exc
+        return operations.run(req.operation_id, execute_window)
+
+    def gateway_listen_impl(req: GatewayListenRequest, *, file_window=None) -> dict[str, object]:
+        if req.ephemeral_delivery and (req.remember or req.privacy_mode != "incognito" or req.raw_audio_policy != "not_stored" or req.song_id):
+            raise HTTPException(400, "Ephemeral delivery requires incognito, no storage, no recognition and remember=false")
         try:
-            result = listen_event_endpoint(req)
+            result = execute_listen_event(req, file_window=file_window)
         except HTTPException as exc:
             if exc.status_code != 423:
                 raise
@@ -2815,7 +3000,10 @@ def create_app(
                     "source": source_type,
                 },
             )
-            return {**decision, "background": background.status()}
+            return {
+                **decision,
+                "background": background.status() if req.response_mode == "full" else {},
+            }
         event = result["listening_event"]
         trace = None
         remembered: dict[str, Any] | None = None
@@ -2838,6 +3026,20 @@ def create_app(
                 tags=req.tags,
             )
             trace = remembered["trace"]
+        library_audio = None
+        if req.retain_library_audio:
+            from oida.library_capture import retain_capture
+            checker = covenant_store.engine(override_name=req.covenant)
+            library_audio = retain_capture(Path(req.path), uploads_dir(),
+                record_id=remembered.get("akousma_id") if remembered else None,
+                event_id=str(event.get("id") or ""), label=req.source_label or Path(req.path).name,
+                duration_seconds=(event.get("features") or {}).get("duration_s") or req.capture_seconds,
+                source_type=req.source_type, file_window=file_window, parent_sound_id=req.library_parent_sound_id,
+                blocked=req.privacy_mode == "incognito" or req.raw_audio_policy == "not_stored" or req.ephemeral_delivery or bool(checker and
+                    (checker.forbids_retention("raw-audio") or checker.forbids_retention("memory"))))
+        if req.response_mode == "summary":
+            from oida.listening_response import compact_listening_result
+            return {**compact_listening_result(event, remembered=remembered, remember_requested=req.remember), "library_audio": library_audio}
         earworm = (
             trace.get("earworm")
             if isinstance(trace, dict)
@@ -2848,6 +3050,7 @@ def create_app(
             "perception_path": "oida_owned",
             "status": "complete",
             "outcome": "listened",
+            "library_audio": library_audio,
             **result,
             "earworm": earworm,
             "trace": trace,
@@ -3078,6 +3281,7 @@ def create_app(
                     ],
                 )
                 akousma_id = persist_akousma(record, store=store)
+                owner_journal.record_reference(akousma_id, event_id=event.get("id"), record=record)
                 remote_info["akousma_id"] = akousma_id
                 result["akousma_id"] = akousma_id
                 if uri:
@@ -3096,6 +3300,7 @@ def create_app(
                             privacy=human_profile["privacy"],
                         )
                         human_akousma_id = persist_akousma(human_record, store=store)
+                        owner_journal.record_reference(human_akousma_id, event_id=event.get("id"), record=human_record)
                         remote_info["human_akousma_id"] = human_akousma_id
                         result["human_akousma_id"] = human_akousma_id
                     except Exception as exc:
@@ -3621,7 +3826,8 @@ def create_app(
     @app.post("/live/capture")
     def live_capture_endpoint(req: LiveCaptureRequest) -> dict[str, object]:
         try:
-            capture = live.capture_last(req.session_id, req.seconds)
+            capture = (live.capture_window(req.session_id, end_seconds=req.end_seconds, seconds=req.seconds)
+                       if req.end_seconds is not None else live.capture_last(req.session_id, req.seconds))
             if not req.analyze:
                 return capture
             analyzed = analyze_capture(
@@ -4379,6 +4585,7 @@ def create_app(
                 privacy=human_profile["privacy"],
             )
             human_akousma_id = persist_akousma(human, store=store)
+            owner_journal.record_reference(human_akousma_id, record=human)
             return {
                 "machine_akousma_id": req.machine_akousma_id,
                 "human_akousma_id": human_akousma_id,
@@ -4435,9 +4642,43 @@ def create_app(
         if remember and checker.forbids_retention("memory"):
             raise HTTPException(423, "source remembering withheld by active covenant")
 
+    from oida.transposition import transposition_router
+    def transposition_preflight(source_type, seconds, preset_id, remember):
+        source_preflight(source_type, seconds, preset_id, remember)
+        checker = covenant_store.engine()
+        if checker is not None and checker.forbids_retention("raw-audio"):
+            raise HTTPException(423, "audio derivative retention withheld by active covenant")
+
+    app.include_router(transposition_router(config.data_dir, operations, owner_journal, transposition_preflight))
+
+    from oida.ensemble_runtime import runtime_router
+    app.include_router(runtime_router(operations, owner_journal, source_preflight, reasoning))
+    from oida.record_exchange import exchange_router
+    app.include_router(exchange_router(operations, owner_journal, source_preflight))
+    from oida.reasoning_workspace import Workspace, workspace_router
+    def workspace_event_policy(event):
+        event = apply_current_conversation_covenant(event)
+        if background.config.incognito:
+            event = {**event, "privacy_mode": "incognito"}
+        return event
+    reasoning_workspace = Workspace(owner_journal, conversations, reasoning, reasoning_settings,
+                                    operations, workspace_event_policy)
+    source_shutdown_callbacks.append(reasoning_workspace.close)
+    app.include_router(workspace_router(reasoning_workspace, reasoning_providers_endpoint,
+                                       reasoning_models_endpoint, require_local_admin))
+    from oida.research_bridge import research_router
+    app.include_router(research_router())
+    from oida.agent_reports import retained_report_router
+    app.include_router(retained_report_router(operations, owner_journal, source_preflight))
+    from oida.digital_sectors import sector_router
+    app.include_router(sector_router(operations, owner_journal, source_preflight, os.environ.get("OIDA_MASA_VALIDATOR_MODULE")))
+
+    from oida.device_inputs import input_router
+    app.include_router(input_router(live, source_shutdown_callbacks))
     app.include_router(source_router(config.data_dir,
         lambda payload: gateway_listen_endpoint(GatewayListenRequest.model_validate(payload)),
-        source_preflight, shutdown_callbacks=source_shutdown_callbacks))
+        source_preflight, shutdown_callbacks=source_shutdown_callbacks, journal=owner_journal, operations=operations,
+        validate_listening=validate_listening_selection))
 
     return app
 
@@ -4509,6 +4750,8 @@ def _validated_location(value: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def save_upload(file: UploadFile) -> dict[str, object]:
+    from oida.operation_control import checkpoint, OperationCancelled
+    checkpoint()
     upload_root = uploads_dir()
     upload_root.mkdir(parents=True, exist_ok=True)
     original = sanitize_filename(file.filename or "recording.webm")
@@ -4518,6 +4761,7 @@ def save_upload(file: UploadFile) -> dict[str, object]:
         total = 0
         with raw_path.open("wb") as handle:
             while True:
+                checkpoint()
                 chunk = file.file.read(1024 * 1024)
                 if not chunk:
                     break
@@ -4531,11 +4775,17 @@ def save_upload(file: UploadFile) -> dict[str, object]:
             status_code=413,
             detail=f"upload exceeds the maximum size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB",
         ) from None
-    except OSError:
+    except (OSError, OperationCancelled):
         cleanup_failed_upload(raw_path)
         raise
 
-    normalized_path, normalization_error = normalize_audio(raw_path)
+    try:
+        checkpoint()
+        normalized_path, normalization_error = normalize_audio(raw_path)
+        checkpoint(seal=True)
+    except OperationCancelled:
+        cleanup_failed_upload(raw_path)
+        raise
     if normalization_error:
         cleanup_failed_upload(raw_path)
         raise HTTPException(status_code=422, detail=normalization_error)

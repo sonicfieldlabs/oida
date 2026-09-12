@@ -11,16 +11,13 @@ A nonpermitted spectral request returns HTTP 409 with
 `detail.apparatus_decision`, before a model pass or remembered listening result.
 The decision carries support, undetermined claim status, reasons and attributable
 observe-only authority. It is also published on the existing transient event
-channel. This is not a durable receipt journal. Invalid declarations return 400;
+channel. The owner journal also retains the apparatus decision. Invalid declarations return 400;
 missing compatible packaged contracts return 503. Supply both fields or neither.
 Ordinary requests retain their existing behavior and claim filters.
 
 Client-supplied `resolved_refs` cannot establish resolution. The daemon resolves
 source bytes and can consult an operator-selected local registry for capture and
-sampled-representation evidence (see below). It keeps model spectral support unknown while reporting prepared input identity
-from observable, already-loaded adapters. Reusing the source
-reference for apparatus/model/evidence fields cannot grant support. Spectral
-attempts still abstain; no positive supported-measurement path is claimed.
+sampled-representation evidence (see below). Model support remains unknown unless exact operator-approved model/input and preprocessing evidence resolves against observable, already-loaded adapters. Reusing a source reference cannot grant that approval. Positive requests use enforced prepared-input bindings; unsupported requests still abstain.
 Declaration validity, sampled Nyquist bounds, physical capture support, model
 input and human access remain distinct.
 
@@ -39,8 +36,7 @@ as compact, key-sorted JSON (`sha256-manifest-v1`). It is checked before and aft
 loading and retained with the resident model. This digest identifies the local
 file inventory, not the in-memory tensors, a signature, or a remote weight set.
 Cold loading reads those files twice; later passes reuse the resident inventory.
-Explicit pinned or loaded revisions are recorded separately. Remote cache weight
-resolution is not implemented and remains unknown, even when a revision is known.
+Explicit pinned or loaded revisions are recorded separately. Explicitly enabled remote lookup resolves one immutable snapshot directory before model and processor loading; its local safetensors inventory is checked around loading by the same code. No hosted-provider weight inventory is inferred.
 
 SGLang and hosted adapters retain the returned model and provider. Google model
 version is labelled provider-reported when supplied. Hidden weight bytes,
@@ -54,8 +50,7 @@ hashes in local validation. Editable AKOÚŌ installations can omit bundled sche
 No dependency release bump, provider call, model download or deployment is part
 of this change. Tests cover actual stub HTTP handling and mocked MOSS adapter
 input; full-weight inference, hardware and hosted-provider claims need separate
-evidence. Complete provider/weight provenance and positive spectral-competence authorization
-remain follow-up work. Standalone low-level analysis helpers do not yet add report source links.
+evidence. Standalone transcription, event, caption, speech, music, QA, thinking and direct-analysis helpers reuse the same source-bound wrapper. Opaque provider fields remain unknown.
 
 ## Source and chunk links
 
@@ -87,9 +82,9 @@ at startup; its current contents are rechecked for each spectral request. No
 network fetching, uploads or evidence-writing endpoint is added.
 
 A manifest has exactly `contract: "oida/apparatus-evidence/v1"` and `entries`.
-Each entry has `ref`, `kind` (`capture` or `sampled_representation`), a relative
+Each entry has `ref`, `kind` (`capture`, `sampled_representation` or `model_input`), a relative
 `file`, its lowercase `sha256`, and a timezone-aware `expires_at` timestamp.
-Each evidence JSON has exactly `ref`, `subject_ref`, `kind`, and `declaration`.
+Capture/representation evidence JSON has exactly `ref`, `subject_ref`, `kind`, and `declaration`. Model evidence additionally includes exact `binding_ids` (model-kind to prepared binding ID) and the complete `preprocessing` receipt list.
 The declaration must equal the corresponding submitted access block in full;
 its subject must equal the source SHA-256 reference. A changed subject or claim
 cannot reuse approval for a different declaration.
@@ -106,8 +101,7 @@ expiry, digest mismatch and paths escaping the configured directory are rejected
 Expired or mismatched declarations remain unresolved with an explicit reason.
 Unreadable or malformed configured evidence yields HTTP 503. Registry results
 carry the manifest hash and resolved/unresolved references, with no local paths.
-Registry model and preprocessing references remain excluded until positive
-spectral-competence evidence and declared recipes can be bound to execution. Removing or expiring evidence affects the next request; this is not
+Every model, effective-input, competence-evidence and preprocessing reference must resolve through a matching `model_input` evidence entry. Prepared weights must be known; an opaque model descriptor cannot enable this path. Removing or expiring evidence affects the next request; this is not
 a durable policy journal or recall of earlier exported decisions.
 
 ## Prepared local input and execution binding
@@ -130,8 +124,7 @@ signatures, exact hidden tensor hashes or evidence of semantic comprehension.
 The gate compares declared model/representation references, rate, channels, window
 and Nyquist ceiling with observable prepared input. Contradictions are unsupported.
 Missing local models, opaque provider preprocessing and unavailable routing remain
-unknown. Matching prepared identity still does not grant spectral permission;
-calibrated capture and model spectral-competence evidence remain separate gates.
+unknown. Matching prepared identity alone does not grant permission; separately approved capture and competence declarations are required.
 The source digest is rechecked after preparation, preventing mixed source receipts.
 
 `enforce_input_bindings({model_kind: binding_id})` is a trusted Python execution
@@ -143,10 +136,27 @@ success or failure. Ordinary requests retain their existing routing/fallback rul
 Prepared responses are detached from resident metadata; callers cannot mutate
 cached inventory through them.
 
-The REST spectral path remains an abstention path and does not accept caller-
-chosen binding IDs as authority. Its preflight describes current prepared input;
-the trusted execution context is available for a later authorized positive path.
+The REST spectral path obtains binding IDs from the loaded adapter and requires exact operator files; caller-chosen IDs are not authority. Positive requests enforce those bindings around execution and recheck current approval/input identity before accepting the result.
 Generation receipts carry their `input_binding_id` even outside that context.
 Validation uses an adapter double to exercise the real preparation/generation
-boundary at 24 kHz, plus stub HTTP tests. Full model, provider, calibration and
-physical-device evidence are not claimed by these checks.
+boundary at 24 kHz, plus stub HTTP tests. An additional real local MPS Instruct pass verifies actual weight inventory, 16 kHz mono prepared input and matching generation/source receipts. It does not qualify semantic competence, hosted providers or physical devices.
+
+## Chunk leases and supported scope
+
+Each source-bound invocation obtains a lease from its already-loaded observable
+adapter for the actual submitted chunk. Generation must honor its descriptor ID;
+changed input, weights or adapter selection fails rather than falling back under
+that lease. Whole-source positive spectral authorization remains bounded by the
+configured chunk duration. Longer spectral requests abstain: callers must submit
+individually bounded windows with their own exact approval. Ordinary chunked reports
+retain all actual source windows/pass receipts and acquire per-chunk leases when
+preparation is observable. Cold preparation does not load a model.
+
+Operator-approved files are authorization records, not independent verification of
+calibration or semantic competence. The positive acceptance matrix uses synthetic
+fixtures and adapter doubles. The local full-model run establishes execution and
+identity only. External provider revisions, preprocessing and weights are reported
+only to the extent actually exposed; hidden fields remain unknown.
+
+See [digital sectors and structured reports](digital-sectors.md) for measurement
+and rendering paths that do not require a model competence claim.

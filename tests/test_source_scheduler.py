@@ -116,9 +116,6 @@ def test_queue_bounds_fifo_and_control_while_listening_blocks(harness):
     assert submit(client, "overflow").status_code == 429
     assert client.get("/sources/scheduler").json()["queued"] == 2
     assert time.perf_counter() - started < 1
-    assert not client.post("/sources/acquisitions/first/cancel").json()[
-        "cancel_requested"
-    ]
     # Synchronous route shares the same execution lock and cannot bypass the worker.
     assert (
         client.post(
@@ -153,7 +150,7 @@ def test_expiry_monitor_runs_while_model_is_busy_and_cancel_is_responsive(harnes
     wait_receipt(client, "blocker", {"complete"})
 
 
-def test_shutdown_cancels_queue_without_claiming_model_cancel(harness):
+def test_shutdown_cancels_queue_and_discards_late_model_output(harness):
     client, entered, release, _, callbacks = harness
     submit(client, "running")
     assert entered.wait(2)
@@ -163,7 +160,7 @@ def test_shutdown_cancels_queue_without_claiming_model_cancel(harness):
     assert client.get("/sources/scheduler").json()["accepting"] is False
     assert submit(client, "late").status_code == 429
     release.set()
-    assert wait_receipt(client, "running", {"complete"})
+    assert wait_receipt(client, "running", {"cancelled"})
 
 
 def test_expiry_during_acquisition_never_listens(harness):
@@ -177,7 +174,7 @@ def test_expiry_during_acquisition_never_listens(harness):
         assert submit(client, "expiring", ttl=0.08).status_code == 202
         assert (
             wait_receipt(client, "expiring", {"expired"})["reason"]
-            == "deadline elapsed before listening"
+            == "deadline elapsed before publication"
         )
 
 
@@ -262,3 +259,27 @@ def test_restart_expires_stale_queue_and_leaves_completed_receipts(tmp_path):
     AcquisitionReceipts(receipts.root)
     assert json.loads((receipts.root / "stale.json").read_text())["status"] == "expired"
     assert json.loads((receipts.root / "done.json").read_text()) == complete
+
+
+def test_active_listening_cancellation_and_policy_change_discard_late_results(harness):
+    client, entered, release, _, _ = harness
+    submit(client, "late-result")
+    assert entered.wait(2)
+    assert client.post("/sources/acquisitions/late-result/cancel").json()["cancel_requested"]
+    assert client.post("/sources/acquisitions/late-result/cancel").json()["cancel_requested"]
+    release.set()
+    deadline=time.monotonic()+3
+    while client.get('/sources/scheduler').json()['active_id'] and time.monotonic()<deadline:
+        time.sleep(.01)
+    receipt=client.get('/sources/acquisitions/late-result').json()
+    assert receipt['status']=='cancelled' and 'event_id' not in receipt
+
+
+def test_policy_refusal_after_listening_discards_result(harness):
+    client, entered, release, _, _ = harness
+    submit(client, 'policy-change')
+    assert entered.wait(2)
+    client.app.state.refuse=True
+    release.set()
+    receipt=wait_receipt(client,'policy-change',{'refused'})
+    assert 'event_id' not in receipt and 'akousma_id' not in receipt

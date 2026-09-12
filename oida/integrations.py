@@ -12,7 +12,24 @@ from typing import Any
 from oida.config import REPO_ROOT, data_dir
 from oida.storage import write_json_atomic
 
-TARGETS = ("hermes", "codex", "claude", "openclaw", "opencode")
+TARGETS = ("hermes", "codex", "claude", "openclaw", "opencode", "pi")
+
+
+# Persist only selected local runtime configuration, never arbitrary env or credentials.
+RUNTIME_ENV_KEYS = (
+    "OIDA_DATA_DIR", "OIDA_AUDIO_DIR", "OIDA_HOST", "OIDA_PORT", "OIDA_SERVER_URL",
+    "OIDA_ENGINE_PROFILE", "OIDA_ALLOW_HF_HUB", "OIDA_MOSS_AUDIO_REPO",
+    "OIDA_MOSS_INSTRUCT_MODEL", "OIDA_MOSS_THINKING_MODEL", "OIDA_REQUIRE_MODEL",
+    "OIDA_MOSS_RESIDENT", "OIDA_GERM_URL", "HF_HOME", "AKOUSMATA_PATH",
+    "OIDA_CAPTURE_SOURCES", "OIDA_APPARATUS_EVIDENCE",
+)
+
+
+def runtime_environment() -> dict[str, str]:
+    environment = {key: os.environ[key] for key in RUNTIME_ENV_KEYS if key in os.environ}
+    environment.setdefault("OIDA_DATA_DIR", str(data_dir()))
+    environment.update(OIDA_MCP_ENSURE_DAEMON="1", OIDA_MOSS_PREWARM="0")
+    return environment
 
 
 def assets_root() -> Path:
@@ -29,6 +46,8 @@ def install(target: str) -> dict[str, Any]:
             "target": "all",
             "results": [install(name) for name in TARGETS],
         }
+    if target == "pi":
+        return _install_pi()
     if target == "hermes":
         return _install_hermes()
     if target == "codex":
@@ -50,6 +69,7 @@ def inspect_integrations() -> dict[str, Any]:
             "plugin": str(hermes_home / "plugins" / "oida"),
             "installed": (hermes_home / "plugins" / "oida" / "plugin.yaml").exists(),
         },
+        "pi": {"available": bool(shutil.which("pi")), "mode": "explicit extension launch"},
         "codex": {"available": bool(shutil.which("codex"))},
         "claude": {"available": bool(shutil.which("claude"))},
         "openclaw": {"available": bool(shutil.which("openclaw"))},
@@ -72,11 +92,12 @@ def _install_hermes() -> dict[str, Any]:
     shutil.copytree(source, destination, dirs_exist_ok=True)
     write_json_atomic(
         destination / "runtime.json",
-        {"command": sys.executable, "args_prefix": ["-m", "oida.cli"]},
+        {"command": sys.executable, "args_prefix": ["-m", "oida.cli"], "environment": runtime_environment()},
     )
     enable = _run([executable, "plugins", "enable", "oida", "--no-allow-tool-override"])
     # Add is discovery-first and idempotent enough for installers: a duplicate
     # reports non-zero but leaves the existing server untouched.
+    mcp_environment = [f"{key}={value}" for key, value in runtime_environment().items()]
     mcp = _run(
         [
             executable,
@@ -88,8 +109,7 @@ def _install_hermes() -> dict[str, Any]:
             "--connect-timeout",
             "45",
             "--env",
-            "OIDA_MCP_ENSURE_DAEMON=1",
-            "OIDA_MOSS_PREWARM=0",
+            *mcp_environment,
             "--args",
             "-m",
             "oida.cli",
@@ -245,7 +265,7 @@ def _install_opencode() -> dict[str, Any]:
     mcp["oida"] = {
         "type": "local",
         "command": [sys.executable, "-m", "oida.cli", "gateway", "--stdio", "--ensure-daemon"],
-        "environment": {"OIDA_MCP_ENSURE_DAEMON": "1", "OIDA_MOSS_PREWARM": "0"},
+        "environment": runtime_environment(),
         "enabled": True,
         "timeout": 45000,
     }
@@ -304,7 +324,7 @@ def _stage_marketplace(target: str) -> Path:
         "--ensure-daemon",
     ]
     environment = server.get("env") if isinstance(server.get("env"), dict) else {}
-    environment.update({"OIDA_MCP_ENSURE_DAEMON": "1", "OIDA_MOSS_PREWARM": "0"})
+    environment.update(runtime_environment())
     server["env"] = environment
     write_json_atomic(config_path, config)
     return destination
@@ -329,3 +349,21 @@ def _run(
         return {"ok": False, "status": None, "output": str(exc), "command": command}
     output = "\n".join(part.strip() for part in (completed.stdout, completed.stderr) if part.strip())
     return {"ok": completed.returncode == 0, "status": completed.returncode, "output": output, "command": command}
+
+
+def _install_pi() -> dict[str, Any]:
+    from urllib.parse import urlsplit
+    origin = os.getenv("OIDA_SERVER_URL", "http://127.0.0.1:" + os.getenv("OIDA_PORT", "8766"))
+    parsed = urlsplit(origin)
+    if (parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1", "::1")
+            or not parsed.port or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or parsed.path not in ("", "/")):
+        raise ValueError("Pi requires an explicit loopback Oida origin")
+    destination = data_dir() / "integrations" / "pi"
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(assets_root() / "pi" / "index.mjs", destination / "index.mjs")
+    write_json_atomic(destination / "runtime.json", {"origin": origin.rstrip("/")})
+    return {"target": "pi", "installed": True, "staged_only": True,
+            "launch": [shutil.which("pi") or "pi", "--extension", str(destination / "index.mjs")],
+            "auth_policy": "Pi owns credentials and conversation history; no Pi configuration was changed.",
+            "daemon": "Start Oida explicitly before invoking the extension tools."}

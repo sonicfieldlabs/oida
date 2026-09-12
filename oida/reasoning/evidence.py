@@ -50,6 +50,7 @@ class EvidencePacketBuilder:
         memory_context: Iterable[dict[str, Any]] | None = None,
         include_transcript: bool = False,
         include_memory_content: bool = False,
+        references: Iterable[dict[str, Any]] | None = None,
     ) -> EvidencePacket:
         question = _bounded_text(question, limit=16_000) or ""
         if not question:
@@ -96,6 +97,17 @@ class EvidencePacketBuilder:
                 and not covenant_blocks_untyped_prose(event.get("covenant"))
             ),
         )
+        if not covenant_blocks_untyped_prose(event.get("covenant")):
+            for index, reference in enumerate(list(references or [])[:12]):
+                kind = reference.get("kind")
+                if kind not in {"wiki", "web", "memory"}:
+                    continue
+                self._append(EvidenceItem(
+                    ref=f"context:{kind}:{index}", kind="reference", source=kind,
+                    value={"title": _bounded_text(reference.get("title"), limit=300),
+                           "excerpt": _bounded_text(reference.get("text"), limit=2400)},
+                    basis="Untrusted contextual reference, not evidence of what the recording contains",
+                ), items, refs)
         covenant = _safe_covenant(event.get("covenant"))
         return EvidencePacket(
             primary_event_id=primary_id,
@@ -279,6 +291,22 @@ class EvidencePacketBuilder:
                     items,
                     refs,
                 )
+        if not covenant_blocks_untyped_prose(event.get("covenant")) and not output_subjects:
+            for index, observation in enumerate(event.get("specialist_observations", [])[:12]):
+                if not isinstance(observation, dict):
+                    continue
+                from oida.reasoning.specialist_context import project
+                cleaned = project([dict(status="complete", task=observation.get("task"), evidence={**observation, "result": {**(observation.get("result") or {}), "status": observation.get("status")}})])
+                if not cleaned:
+                    continue
+                observation = cleaned[0]
+                speech = observation.get("task") == "transcribe"
+                if speech and not include_transcript:
+                    continue
+                self._append(EvidenceItem(ref=f"event:{ref_event_id}:specialist:{index}", kind="transcript" if speech else "feature",
+                    event_id=event_id, source=observation.get("deployment_id"), category="interpreted",
+                    basis="Retained specialist hypothesis, not a new measurement", value=observation), items, refs)
+                transcript_added = transcript_added or speech
         return transcript_added
 
     def _append_aggregate_claims(

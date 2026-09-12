@@ -23,20 +23,30 @@ listening, routing, follow-up, live, and sonic-memory tools.
 
 
 def _run(*args: str) -> str:
-    executable = os.getenv("OIDA_COMMAND") or shutil.which("oida")
+    executable = os.getenv("OIDA_COMMAND")
     prefix: list[str] = []
+    runtime_environment: dict[str, str] = {}
     runtime_path = _ROOT / "runtime.json"
     if not executable and runtime_path.exists():
         try:
             runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
             executable = str(runtime.get("command") or "")
             prefix = [str(item) for item in runtime.get("args_prefix") or []]
-        except (OSError, json.JSONDecodeError):
-            executable = None
+            runtime_environment = {
+                str(key): value for key, value in runtime.get("environment", {}).items()
+                if isinstance(value, str)
+            }
+        except (OSError, ValueError, AttributeError, TypeError):
+            return "Oída's recorded runtime is invalid; reinstall the Hermes adapter."
+        if not executable:
+            return "Oída's recorded runtime has no executable; reinstall the Hermes adapter."
+    if not executable:
+        executable = shutil.which("oida")
     if not executable:
         return "Oída is not installed on PATH. Install the oida package, then run: oida integrate hermes"
     try:
         environment = os.environ.copy()
+        environment.update(runtime_environment)
         environment.setdefault("OIDA_MOSS_PREWARM", "0")
         completed = subprocess.run(
             [executable, *prefix, *args],

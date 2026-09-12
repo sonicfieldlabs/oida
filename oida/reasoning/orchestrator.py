@@ -50,6 +50,7 @@ class TurnOptions:
     include_transcript: bool | None = None
     include_memory_content: bool | None = None
     allow_targeted_relisten: bool | None = None
+    research: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -136,6 +137,50 @@ class ReasoningOrchestrator:
         response, execution = self._execute(context)
         return self._commit_context(context, response, execution=execution)
 
+    def evaluate_retained(
+        self, *, event, question, provider_id=None, require_model=True
+    ):
+        """Execute existing reasoning policy/validation without committing a turn.
+
+        The caller owns cancellation and canonical report retention. This local
+        route never opens raw audio or silently promotes deterministic fallback.
+        """
+        context = self._context(
+            event=event,
+            question=question,
+            options=TurnOptions(
+                provider_id=provider_id,
+                include_memory=False,
+                include_transcript=True,
+                include_memory_content=False,
+                allow_targeted_relisten=False,
+            ),
+        )
+        if context.locality != ProviderLocality.LOCAL:
+            raise ValueError(
+                "Second-report execution requires a configured local provider"
+            )
+        if require_model and (
+            context.provider_id == "local_structured" or context.forced_fallback_reason
+        ):
+            raise ValueError(
+                "No configured local text model is available for this second-report pass"
+            )
+        response, execution = self._execute(context)
+        if require_model and (
+            execution.get("provider_id") == "local_structured"
+            or execution.get("fallback")
+        ):
+            raise ValueError(
+                "Second-report model failed; deterministic fallback is not a model pass"
+            )
+        return dict(
+            response=response.model_dump(mode="json"),
+            execution=execution,
+            evidence_packet=context.packet.model_dump(mode="json"),
+            pass_id=context.turn_id,
+        )
+
     def prepare(
         self,
         *,
@@ -185,6 +230,7 @@ class ReasoningOrchestrator:
                     conversation_history=self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
+                        context.options.research.get("scope"),
                     ),
                 )
                 next_token = self._issue_token(context, stage=1)
@@ -269,8 +315,9 @@ class ReasoningOrchestrator:
             memory_context=memory_context,
             include_transcript=include_transcript,
             include_memory_content=include_memory_content,
+            references=[] if incognito else options.research.get("sources", []),
         )
-        history = [] if incognito else self._history_for_packet(options.conversation_id, packet)
+        history = [] if incognito else self._history_for_packet(options.conversation_id, packet, options.research.get("scope"))
         route_instructions = trusted_route_instructions(event)
         listening_identity_snapshot = self._listening_identity_snapshot()
         listening_identity = listening_identity_snapshot.text.strip()
@@ -364,6 +411,7 @@ class ReasoningOrchestrator:
                     conversation_history=self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
+                        context.options.research.get("scope"),
                     ),
                 )
                 response, final_result, final_repaired, errors, final_attempts = self._complete_with_repair(
@@ -581,6 +629,10 @@ class ReasoningOrchestrator:
                 ),
             },
         }
+        if context.options.research:
+            turn["research"] = context.options.research
+        from oida.operation_control import checkpoint
+        checkpoint(seal=True)
         prepared = context.conversation_prepared
         result = self.conversations.append_turn(
             event=context.event,
@@ -627,6 +679,7 @@ class ReasoningOrchestrator:
         *,
         allow_transcript: bool,
         allow_memory_content: bool,
+        context_scope: dict | None = None,
     ) -> list[dict[str, str]]:
         if not conversation_id:
             return []
@@ -637,6 +690,9 @@ class ReasoningOrchestrator:
         history: list[dict[str, str]] = []
         for turn in list(conversation.get("turns") or [])[-6:]:
             if not isinstance(turn, dict):
+                continue
+            previous_scope = (turn.get("research") or {}).get("scope", {})
+            if any(previous_scope.get(key) and not (context_scope or {}).get(key) for key in ("web", "wiki", "memories")):
                 continue
             audit = turn.get("audit") if isinstance(turn.get("audit"), dict) else None
             if audit is None and (not allow_transcript or not allow_memory_content):
@@ -660,6 +716,7 @@ class ReasoningOrchestrator:
         self,
         conversation_id: str | None,
         packet: EvidencePacket,
+        context_scope: dict | None = None,
     ) -> list[dict[str, str]]:
         if covenant_blocks_untyped_prose(packet.covenant):
             return []
@@ -667,6 +724,7 @@ class ReasoningOrchestrator:
             conversation_id,
             allow_transcript=packet.permissions.transcript_included,
             allow_memory_content=packet.permissions.memory_content_included,
+            context_scope=context_scope,
         )
 
     def _issue_token(self, context: _TurnContext, *, stage: int) -> str:

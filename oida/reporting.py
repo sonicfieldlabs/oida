@@ -136,19 +136,29 @@ def source_info(path: str | Path, dsp: dict[str, object]) -> SourceInfo:
     )
 
 
+def _bound_helper(engine, path):
+    if isinstance(engine, SourceBoundEngine):
+        return engine
+    try:
+        inspected = inspect_path(path)
+    except (EOFError, OSError, RuntimeError) as exc:
+        raise ValueError("Source audio could not be decoded for provenance") from exc
+    return SourceBoundEngine(engine, path, str(inspected["sha256"]), float(inspected["durationSeconds"]))
+
+
 def transcribe(engine: MossEngine, path: str, timestamps: str = "sentence") -> tuple[object, EngineResult]:
     if timestamps not in TRANSCRIPTION_TASKS:
         valid = ", ".join(TRANSCRIPTION_TASKS)
         raise ValueError(f"unknown timestamp mode: {timestamps}. Valid modes: {valid}")
     task = TRANSCRIPTION_TASKS[timestamps]
     recipe = get_recipe(task)
-    result = engine.generate(path, recipe.prompt, recipe.settings)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings)
     return parse_transcript(result.text), result
 
 
 def events(engine: MossEngine, path: str, dsp_features: dict[str, object] | None = None) -> tuple[list[Event], EngineResult]:
     recipe = get_recipe("events")
-    result = engine.generate(path, recipe.prompt, recipe.settings)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings)
     parsed = parse_events(result.text)
     return corroborate_events(parsed, dsp_features or {}), result
 
@@ -160,21 +170,21 @@ def caption(engine: MossEngine, path: str, detail: str = "dense") -> tuple[Capti
     brief_recipe = get_recipe("caption_brief")
     dense_recipe = get_recipe("caption_dense")
     if detail == "brief":
-        brief = engine.generate(path, brief_recipe.prompt, brief_recipe.settings)
+        brief = _bound_helper(engine, path).generate(path, brief_recipe.prompt, brief_recipe.settings)
         return Caption(brief=brief.text or None, dense=None), brief
-    dense = engine.generate(path, dense_recipe.prompt, dense_recipe.settings)
+    dense = _bound_helper(engine, path).generate(path, dense_recipe.prompt, dense_recipe.settings)
     return Caption(brief=None, dense=dense.text or None), dense
 
 
 def speech(engine: MossEngine, path: str) -> tuple[object, EngineResult]:
     recipe = get_recipe("speech")
-    result = engine.generate(path, recipe.prompt, recipe.settings)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings)
     return parse_speech(result.text), result
 
 
 def music(engine: MossEngine, path: str, dsp_bpm: float | None = None) -> tuple[Music, EngineResult]:
     recipe = get_recipe("music")
-    result = engine.generate(path, recipe.prompt, recipe.settings)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings)
     text = result.text.strip()
     present = bool(text and "present: false" not in text.lower() and not result.unavailable_reason)
     return (
@@ -197,7 +207,7 @@ def direct_analysis(engine: MossEngine, path: str, mode: str = "environment", th
     if mode not in DIRECT_ANALYSIS_MODES:
         raise ValueError(f"unknown direct MOSS analysis mode: {mode}")
     recipe = get_recipe(mode)
-    result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
     analysis_text, sanity_note = _guard_prose(result.text)
     analysis = {
         "mode": mode,
@@ -217,14 +227,14 @@ def direct_analysis(engine: MossEngine, path: str, mode: str = "environment", th
 def qa(engine: MossEngine, path: str, question: str, thinking_budget: int | None = None, context: str | None = None) -> tuple[QaItem, EngineResult]:
     context_block = f"\nConversation context:\n{context.strip()}\n" if context and context.strip() else ""
     recipe = get_recipe("qa", question=question, context_block=context_block)
-    result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
     answer, sanity_note = _guard_prose(result.text)
     return QaItem(question=question, answer=answer or (sanity_note or ""), reasoning_trace=result.reasoning_trace, thinking_budget=thinking_budget), result
 
 
 def think(engine: MossEngine, path: str, instruction: str, thinking_budget: int | None = None) -> tuple[QaItem, EngineResult]:
     recipe = get_recipe("think", instruction=instruction)
-    result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
     return QaItem(question=instruction, answer=result.text, reasoning_trace=result.reasoning_trace, thinking_budget=thinking_budget), result
 
 

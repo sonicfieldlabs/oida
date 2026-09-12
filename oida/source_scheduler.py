@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from collections import deque
@@ -31,7 +30,7 @@ class SourceScheduler:
         self.closed = False
 
     def read(self, identifier):
-        return json.loads((self.receipts.root / (identifier + ".json")).read_text())
+        return self.receipts.get(identifier)
 
     def terminal_queued(self, identifier, status, reason):
         with self.receipts.lock:
@@ -62,7 +61,7 @@ class SourceScheduler:
                 requested_seconds=request.seconds,
             )
             with self.receipts.lock:
-                if (self.receipts.root / (identifier + ".json")).exists():
+                if self.receipts.get(identifier) is not None:
                     raise ValueError("acquisition id already exists")
                 self.receipts.save(item)
             self.pending.append((source_id, request, deadline))
@@ -95,8 +94,9 @@ class SourceScheduler:
             if not self.terminal_queued(
                 identifier, "expired", "deadline elapsed waiting for acquisition"
             ):
-                # Cancellation is accepted only during acquisition, never after listening starts.
-                self.receipts.cancel(identifier)
+                # Queue deadline still means start-listening deadline, not model runtime.
+                if self.read(identifier)["status"] == "acquiring":
+                    self.receipts.cancel(identifier)
 
     def watch(self):
         with self.condition:
@@ -190,7 +190,9 @@ class SourceScheduler:
                 capacity=self.capacity,
                 queued=len(self.pending),
                 active_id=executing,
-                reserved_job_id=self.running[1].acquisition_id if self.running else None,
+                reserved_job_id=self.running[1].acquisition_id
+                if self.running
+                else None,
                 accepting=not self.closed,
                 concurrency=1,
                 model_residency="managed by existing engine configuration; scheduler does not tune it",
@@ -212,4 +214,9 @@ class SourceScheduler:
                     identifier, "cancelled", "owner shutdown before acquisition"
                 ):
                     self.receipts.cancel(identifier)
+            # Direct synchronous captures share the owner and must stop too.
+            with self.receipts.lock:
+                active_ids = list(self.receipts.active)
+            for identifier in active_ids:
+                self.receipts.cancel(identifier)
             self.condition.notify_all()

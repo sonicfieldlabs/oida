@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -21,7 +20,10 @@ class ObservationRequest(BaseModel):
     producer_id: str = Field(min_length=1, max_length=256)
     consent: Literal["granted", "denied", "unknown"]
     consent_ref: str = Field(min_length=1, max_length=512)
+    operation_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     remember: bool = False
+    claim_validity: dict[str, Any] | None = None
+    claim_retention: dict[str, Any] | None = None
 
 
 class ObservationUnavailable(RuntimeError):
@@ -30,52 +32,14 @@ class ObservationUnavailable(RuntimeError):
 
 def validator(module: str | None):
     if not module or not Path(module).is_file():
-        raise ObservationUnavailable(
-            "configure OIDA_MASA_VALIDATOR_MODULE with the installed MASA validator entry"
-        )
-    uri = Path(module).resolve().as_uri()
-    cache: dict[str, list[str]] = {}
-
-    def validate(record):
-        raw = json.dumps(record, allow_nan=False)
-        if len(raw.encode()) > 2 * 1024 * 1024:
-            return ["MASA snapshot exceeds 2 MiB"]
-        key = hashlib.sha256(raw.encode()).hexdigest()
-        if key not in cache:
-            # Import only the owner-selected module, never a URL supplied in a record.
-            code = """import {readFileSync} from 'node:fs';
-const {validateMatterRecord} = await import(process.argv[1]);
-const result = validateMatterRecord(JSON.parse(readFileSync(0, 'utf8')));
-process.stdout.write(JSON.stringify({valid: result.valid === true}));"""
-            try:
-                result = subprocess.run(
-                    ["node", "--input-type=module", "-e", code, uri],
-                    input=raw,
-                    text=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    timeout=15,
-                    check=True,
-                )
-                valid = json.loads(result.stdout).get("valid") is True
-            except (
-                OSError,
-                subprocess.SubprocessError,
-                ValueError,
-                AttributeError,
-            ) as exc:
-                raise ObservationUnavailable(
-                    "MASA validator unavailable or failed"
-                ) from exc
-            cache[key] = (
-                [] if valid else ["MASA structural or semantic validation failed"]
-            )
-        return cache[key]
-
-    return validate
+        raise ObservationUnavailable("configure OIDA_MASA_VALIDATOR_MODULE with the installed MASA validator entry")
+    from akousma.masa_runtime import masa_validator
+    return masa_validator(module)
 
 
-def receive_observation(req: ObservationRequest, module: str | None) -> dict:
+def receive_observation(
+    req: ObservationRequest, module: str | None, *, before_commit=None
+) -> dict:
     if req.consent != "granted":
         raise ValueError("observation source requires declared granted consent")
     from akouo_contract.masa_observations import (
@@ -139,23 +103,6 @@ def receive_observation(req: ObservationRequest, module: str | None) -> dict:
         originating_app="oida",
         listening_id=listening_id,
         matter_context_id=identifier("matter"),
-        route_decision=dict(
-            gate="inference",
-            outcome="proceed",
-            subject=req.observation_ref,
-            reason="Retain source attribution only; no new measurement or action.",
-            decided_at=timestamp,
-            authority=dict(
-                mode="observe_only",
-                actor=listener,
-                requires_confirmation=True,
-                reversible=True,
-            ),
-            decision_id=decision_id,
-            listening_id=listening_id,
-            producer_contract="akouo/agent-route/v0.1",
-            producer_decision_ref=decision_id,
-        ),
         access=dict(
             contract="earworm/listening-access/v1",
             declaration_id=access_id,
@@ -173,10 +120,84 @@ def receive_observation(req: ObservationRequest, module: str | None) -> dict:
         ),
         temporal_scope=unknown,
     )
+    from akouo_contract.agent_routes import plan_agent_route, agent_route_report_errors
+    from akousma.listening_contracts import listening_access_errors
+
+    report = mapping["report"]
+    source_observation = next(
+        o for o in req.source_record["observations"] if o["id"] == req.observation_ref
+    )
+    route_request = dict(
+        contract="akouo/agent-route/v0.1",
+        request_id=decision_id,
+        profile="agent",
+        supported_contracts=[
+            "akouo/agent-route/v0.1",
+            "akouo/agent-report/v0.1",
+            "earworm/listening-access/v1",
+        ],
+        relation=dict(of="observation", ref=req.observation_ref),
+        requested_categories=["undetermined"],
+        resolved_refs=[
+            req.source_record["id"],
+            req.observation_ref,
+            source_observation["sourceRef"],
+            access_id,
+            listener,
+        ],
+        permission_overrides=dict(
+            heard_allowed=False,
+            measured_allowed=False,
+            inferred_allowed=False,
+            interpreted_allowed=False,
+            speculative_allowed=False,
+            must_include_undetermined=True,
+        ),
+        **{
+            key: report[key]
+            for key in (
+                "report_id",
+                "listener_id",
+                "listening_pass_id",
+                "input_refs",
+                "report_of_refs",
+                "apparatus_ref",
+                "recipients",
+            )
+        },
+    )
+    route = plan_agent_route(
+        route_request, options["access"], validate_access=listening_access_errors
+    )
+    if route["decision"]["outcome"] != "proceed":
+        raise ValueError(route["decision"]["reason"])
+    # An omitted/deleted value has no receiving claim; never invent one to fill a report.
+    if report["features"]:
+        errors = agent_route_report_errors(report, route)
+        if errors:
+            raise ValueError("; ".join(errors))
+    decision = dict(route["decision"])
+    options["created_at"] = decision["decided_at"]
+    decision_ref = decision.pop("id")
+    options["route_decision"] = dict(
+        decision,
+        decision_id=decision_ref,
+        listening_id=listening_id,
+        producer_contract=route["contract"],
+        producer_decision_ref=decision_ref,
+    )
     record = create_observation_account(
         mapping,
         options,
         lambda value: masa_observation_report_errors(value, validate_masa=validate),
+    )
+    record["listening"]["oida.observation-route"] = dict(
+        contract=route["contract"], payload=route
+    )
+    from oida.claim_lifecycle import apply_declaration
+
+    claim_evaluation = apply_declaration(
+        record, req.claim_validity, req.claim_retention
     )
     record["listening"]["oida.source"] = dict(
         contract="oida/observation-admission/v1",
@@ -201,6 +222,11 @@ def receive_observation(req: ObservationRequest, module: str | None) -> dict:
     errors = next_record_errors(record)
     if errors:
         raise ValueError("; ".join(errors))
+    from oida.operation_control import checkpoint
+
+    if before_commit is not None:
+        before_commit()
+    checkpoint(seal=True)
     if req.remember:
         from akousma import AkousmataStore
 
@@ -213,6 +239,7 @@ def receive_observation(req: ObservationRequest, module: str | None) -> dict:
         contract="oida/observation-reception/v1",
         status="received",
         record=record,
+        claim_evaluation=claim_evaluation,
         akousma_id=record["akousma_id"] if req.remember else None,
         execution="not_requested",
     )
