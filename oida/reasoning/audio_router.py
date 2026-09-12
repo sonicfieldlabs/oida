@@ -5,6 +5,7 @@ from __future__ import annotations
 from oida.pass_provenance import pass_receipt
 
 import base64
+import hashlib
 import json
 import mimetypes
 import threading
@@ -25,7 +26,8 @@ from oida.listening_identity import (
     ListeningIdentitySnapshot,
     ListeningIdentityStore,
 )
-from oida.reasoning.contracts import ModelRole, ProviderLocality, ReasoningSettings
+from oida.reasoning.contracts import ModelRole, ProviderLocality, ReasoningSettings, RoleAssignment
+from oida.reasoning.audio_selection import selected_audio_model, resolve, validate_endpoint
 from oida.reasoning.model_catalog import find_model_spec
 from oida.reasoning.providers.base import (
     MAX_CAPTURE_CHARS,
@@ -164,12 +166,30 @@ class RoutedAudioEngine(MossEngine):
         finally:
             self._policy.reset(token)
 
+    def _assignment(self, configured, role):
+        selection = selected_audio_model()
+        if selection is None:
+            return configured.roles[role]
+        spec = resolve(selection)
+        if role.value not in spec.roles:
+            raise EngineUnavailable("Selected audio model does not support this listening role")
+        if spec.provider_id != "oida_moss":
+            provider = configured.providers.get(spec.provider_id)
+            if provider is None:
+                raise EngineUnavailable("Selected provider is not configured")
+            validate_endpoint(spec.provider_id, provider.base_url)
+            # M2 supplies durable budget admission. Production transports stay closed
+            # for explicit external selections until that boundary exists.
+            if self._provider_locality(provider) == ProviderLocality.EXTERNAL and isinstance(self._transport, UrllibJsonTransport):
+                raise EngineUnavailable("Cloud trial admission pending M2; paid calls disabled")
+        return RoleAssignment(provider_id=spec.provider_id, model_id=spec.id)
+
     def prepare_input_binding(self, audio_path: str, model_kind: str = "instruct") -> dict:
         from oida.input_binding import unknown_binding
         role = _ROLE_FOR_MODEL_KIND.get(model_kind)
         if role is not None:
             try:
-                assignment = self.settings_store.load().roles[role]
+                assignment = self._assignment(self.settings_store.load(), role)
             except ValueError:
                 return unknown_binding("Audio routing settings are unavailable")
             if assignment.provider_id != "oida_moss":
@@ -184,6 +204,8 @@ class RoutedAudioEngine(MossEngine):
         thinking_budget: int | None = None,
     ) -> EngineResult:
         role = _ROLE_FOR_MODEL_KIND.get(settings.model_kind)
+        if role is None and selected_audio_model() is not None:
+            raise EngineUnavailable("Unknown role for explicit audio model")
         if role is None:
             return self.local_engine.generate(audio_path, prompt, settings, thinking_budget)
         if role != ModelRole.TRANSCRIPTION:
@@ -201,7 +223,7 @@ class RoutedAudioEngine(MossEngine):
                 thinking_budget,
                 f"reasoning settings unavailable: {exc}",
             )
-        assignment = configured.roles[role]
+        assignment = self._assignment(configured, role)
         provider = configured.providers.get(assignment.provider_id)
         model_id = assignment.model_id or (provider.default_model if provider else None)
 
@@ -210,7 +232,17 @@ class RoutedAudioEngine(MossEngine):
             reject_unobservable_binding()
         if assignment.provider_id == "oida_moss":
             self._record_route(role, assignment.provider_id, model_id, "embedded")
-            return self.local_engine.generate(audio_path, prompt, settings, thinking_budget)
+            result = self.local_engine.generate(audio_path, prompt, settings, thinking_budget)
+            selection = selected_audio_model()
+            if selection is not None:
+                actual = find_model_spec("oida_moss", result.model)
+                if result.unavailable_reason or actual is None or actual.id != selection.model_id:
+                    raise EngineUnavailable("Local engine did not return the selected audio model")
+                result = replace(result, reasoning_trace=None)
+                for receipt in result.pass_provenance:
+                    receipt.update(requested_audio_model=selection.model_dump(),
+                        actual_audio_model=selection.model_dump(), usage=result.usage)
+            return result
         if provider is None or not provider.enabled:
             return self._fallback(
                 audio_path,
@@ -251,6 +283,7 @@ class RoutedAudioEngine(MossEngine):
                 return self._fallback(audio_path, prompt, settings, thinking_budget, blocked)
 
         try:
+            submitted_hash = hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() if selected_audio_model() else None
             result = self._generate_provider_audio(
                 provider_id=assignment.provider_id,
                 model_id=model_id,
@@ -261,6 +294,19 @@ class RoutedAudioEngine(MossEngine):
                 settings=settings,
                 thinking_budget=thinking_budget,
             )
+            selection = selected_audio_model()
+            if selection is not None:
+                if hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() != submitted_hash:
+                    raise EngineUnavailable("Audio changed during selected model inference")
+                if result.model != model_id:
+                    raise EngineUnavailable("Provider returned a different model than the selected deployment")
+                result = replace(result, reasoning_trace=None)
+                for receipt in result.pass_provenance:
+                    receipt.update(requested_audio_model=selection.model_dump(),
+                        actual_audio_model=selection.model_dump(),
+                        submitted_audio_sha256=submitted_hash,
+                        prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
+                        usage=result.usage)
             self._record_route(role, assignment.provider_id, model_id, "completed")
             return result
         except (EngineUnavailable, ProviderTransportError, OSError, ValueError) as exc:
@@ -276,7 +322,7 @@ class RoutedAudioEngine(MossEngine):
         try:
             settings = self.settings_store.load()
             role = _ROLE_FOR_MODEL_KIND.get(model_kind, ModelRole.FAST_PERCEPTION)
-            if settings.roles[role].provider_id != "oida_moss":
+            if self._assignment(settings, role).provider_id != "oida_moss":
                 return
         except (KeyError, ValueError):
             pass
@@ -332,6 +378,8 @@ class RoutedAudioEngine(MossEngine):
         thinking_budget: int | None,
         reason: str,
     ) -> EngineResult:
+        if selected_audio_model() is not None:
+            raise EngineUnavailable(reason)
         local_kind = _LOCAL_FALLBACK_KIND.get(settings.model_kind, settings.model_kind)
         local_settings = replace(settings, model_kind=local_kind)
         with self._status_lock:
@@ -583,6 +631,8 @@ class RoutedAudioEngine(MossEngine):
                 headers=headers,
                 timeout=600,
             )
+            if response.status >= 400:
+                raise ProviderTransportError(f"Audio provider HTTP {response.status}")
             data = response.data if isinstance(response.data, dict) else {}
             choices = data.get("choices") if isinstance(data.get("choices"), list) else []
             message = choices[0].get("message") if choices and isinstance(choices[0], dict) else {}
@@ -599,6 +649,7 @@ class RoutedAudioEngine(MossEngine):
                     else f"{provider_id}-api"
                 ),
                 settings=settings,
+                usage=_usage(data.get("usage")),
                 reasoning_trace=(
                     _content_text(message.get("reasoning_content")).strip() or None
                     if isinstance(message, dict)
@@ -701,12 +752,14 @@ class RoutedAudioEngine(MossEngine):
             headers={"x-goog-api-key": key},
             timeout=600,
         )
+        if response.status >= 400:
+            raise ProviderTransportError(f"Gemini audio HTTP {response.status}")
         data = response.data if isinstance(response.data, dict) else {}
         candidates = data.get("candidates") if isinstance(data.get("candidates"), list) else []
         candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
         content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
         parts = content.get("parts") if isinstance(content.get("parts"), list) else []
-        text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
+        text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict) and not part.get("thought", False))
         if not text:
             raise ProviderTransportError("Gemini audio response did not contain text")
         return EngineResult(
@@ -714,6 +767,7 @@ class RoutedAudioEngine(MossEngine):
             model=model_id,
             profile="google-api",
             settings=settings,
+            usage=_usage(data.get("usageMetadata"), gemini=True),
             pass_provenance=[pass_receipt(model=model_id, provider="google",
                 model_kind=settings.model_kind,
                 revision=data.get("modelVersion") if isinstance(data.get("modelVersion"), str) else None,
@@ -945,3 +999,14 @@ def _multipart_request(
         raise ProviderTransportError(f"HTTP connection failed: {exc.reason}") from exc
     except (TimeoutError, UnicodeError, json.JSONDecodeError) as exc:
         raise ProviderTransportError(f"invalid or timed-out transcription response: {exc}") from exc
+
+
+def _usage(value, *, gemini=False):
+    """Retain unknown counts as null; never coerce missing usage to zero."""
+    value = value if isinstance(value, dict) else {}
+    keys = ("promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount", "totalTokenCount") if gemini else ("prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens")
+    result = {}
+    for name, key in zip(("input_tokens", "output_tokens", "reasoning_tokens", "total_tokens"), keys):
+        number = value.get(key)
+        result[name] = number if type(number) is int and number >= 0 else None
+    return result

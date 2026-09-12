@@ -30,6 +30,9 @@ class FallbackEngine(MossEngine):
         try:
             return self.primary.generate(*args, **kwargs)
         except EngineUnavailable as exc:
+            from oida.reasoning.audio_selection import selected_audio_model
+            if selected_audio_model() is not None:
+                raise
             result = self.fallback.generate(*args, **kwargs)
             return result.__class__(
                 text=result.text,

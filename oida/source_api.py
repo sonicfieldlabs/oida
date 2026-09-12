@@ -33,7 +33,11 @@ from oida.capture_registry import CaptureRegistry, Registration
 from oida.station_aperture import Aperture, admit as admit_aperture
 
 
+from oida.reasoning.audio_selection import AudioModel
+
+
 class AcquisitionRequest(BaseModel):
+    audio_model: AudioModel | None = None
     aperture: Aperture | None = None
     specialist_tasks: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(default_factory=list, max_length=3)
     speech_vad: bool = True
@@ -173,7 +177,7 @@ def source_router(
             if source.consent != "granted" or req.seconds > source.max_seconds:
                 raise ValueError("source consent or duration refused")
             if validate_listening is not None:
-                validate_listening(req.model_id, req.listening_mode)
+                validate_listening(req.model_id, req.listening_mode, **({"audio_model": req.audio_model, "route_preset_id": req.route_preset} if req.audio_model is not None else {}))
             preflight(source.source_type, req.seconds, req.route_preset, req.remember)
             if deadline is not None and time.time() >= deadline:
                 scheduler.terminal_queued(
@@ -253,6 +257,7 @@ def source_router(
                             route_preset=req.route_preset,
                             response_mode=req.response_mode,
                             model_id=req.model_id,
+                            **({"audio_model": req.audio_model.model_dump()} if req.audio_model is not None else {}),
                             listening_mode=req.listening_mode,
                             specialist_tasks=req.specialist_tasks,
                             speech_vad=req.speech_vad,
@@ -360,7 +365,7 @@ def source_router(
             if source.consent != "granted" or req.seconds > source.max_seconds:
                 raise ValueError("source consent or duration refused")
             if validate_listening is not None:
-                validate_listening(req.model_id, req.listening_mode)
+                validate_listening(req.model_id, req.listening_mode, **({"audio_model": req.audio_model, "route_preset_id": req.route_preset} if req.audio_model is not None else {}))
             preflight(source.source_type, req.seconds, req.route_preset, req.remember)
             return scheduler.submit(source_id, req)
         except QueueFull as exc:

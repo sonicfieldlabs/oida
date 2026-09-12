@@ -38,6 +38,7 @@ class EngineResult:
     wall_ms: int | None = None
     unavailable_reason: str | None = None
     pass_provenance: list[dict] = field(default_factory=list)
+    usage: dict | None = None
 
 
 class MossEngine:

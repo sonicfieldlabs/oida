@@ -265,3 +265,18 @@ def test_expiry_during_model_is_refused_before_publication(
     response = client.post("/gateway/listen", json=body)
     assert response.status_code == 423, response.text
     assert not list((tmp_path / "store").rglob("*.npy"))
+
+
+def test_explicit_cloud_selection_catalog_and_pre_capture_refusal(client, tmp_path, monkeypatch):
+    models = client.get('/listening/options').json()['models']
+    row = next(m for m in models if m.get('audio_model', {}).get('model_id') == 'gemini-3.5-flash-lite')
+    assert row['catalogued'] and not row['available']
+    assert row['inference_tested'] is False and row['reachable'] is None
+    monkeypatch.setattr('oida.server.report', lambda *a, **kw: pytest.fail('must not infer'))
+    body = request(tmp_path, audio_model=row['audio_model'])
+    for endpoint in ['/gateway/listen', '/gateway/listen-window']:
+        response = client.post(endpoint, json=body)
+        assert response.status_code == 400, response.text
+        assert 'pending M2' in response.text
+    body['model_id'] = 'thinking'
+    assert 'not both' in client.post('/gateway/listen', json=body).text
