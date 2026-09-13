@@ -116,6 +116,7 @@ from oida.reportschema import dump_model
 from oida.route_comparison import compare_route_events
 from oida.reasoning.contracts import ModelDescriptor, ModelRole
 from oida.reasoning.audio_router import RoutedAudioEngine
+from oida.reasoning.budget import BudgetLedger
 from oida.reasoning.audio_selection import AudioModel, resolve as resolve_audio_model, selector as audio_selector, use_audio_model
 from oida.reasoning.model_catalog import find_model_spec
 from oida.reasoning.oauth import OpenRouterOAuth
@@ -335,6 +336,7 @@ class ListenEventRequest(PathRequest):
     source_label: str | None = None
     device_id: str | None = None
     raw_audio_policy: str | None = None
+    allow_external_audio: bool = False
     # spec v1.2 capture semantics: how this listen was triggered relative to
     # time (past = ring-buffer slice before the trigger, future = window
     # recorded after it, live = open-ended) and where it was heard.
@@ -348,6 +350,13 @@ class ListenEventRequest(PathRequest):
     # Opt-in only. The UI exposes this beside Music mode; other routes ignore
     # it so recognition cannot be enabled accidentally by a stale client.
     song_id: bool = False
+    passes: list[Literal["transcribe", "events", "caption", "speech", "music"]] | None = None
+    context_refs: list[str] | None = None
+    focus_question: str | None = None
+
+
+class AudioProbeRequest(BaseModel):
+    model_id: str | None = None
 
 
 class GatewayListenRequest(ListenEventRequest):
@@ -395,6 +404,7 @@ class ListenEventRerunRequest(OidaRequest):
     disabled_skill_ids: list[str] | None = None
     privacy_mode: str | None = None
     raw_audio_policy: str | None = None
+    allow_external_audio: bool = False
     remember: bool = False
     comparison_signal_fields: list[str] | None = None
     comparison_min_abs_signal_delta: float | None = Field(default=None, ge=0)
@@ -634,6 +644,7 @@ def create_app(
         config.data_dir / "settings" / "reasoning.json"
     )
     reasoning_secrets = default_secret_store()
+    reasoning_budget = BudgetLedger(config.data_dir / "budget")
     engine = RoutedAudioEngine(
         local_engine,
         settings_store=reasoning_settings,
@@ -641,6 +652,7 @@ def create_app(
         covenant_store=covenant_store,
         listening_identity_store=listening_identity_store,
         incognito_getter=lambda: bool(background.config.incognito),
+        budget_ledger=reasoning_budget,
     )
     generations = GenerationStore()
     broadcaster = EventBroadcaster()
@@ -2629,7 +2641,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"analysis": result, "engine": dump_model(engine_result)}
 
-    def validate_listening_selection(model_id, listening_mode, audio_model=None, route_preset_id="basic"):
+    def validate_listening_selection(model_id, listening_mode, audio_model=None, route_preset_id="basic", explicit_passes=None):
         from harness.types import LISTENING_MODES
         if listening_mode is not None and listening_mode not in LISTENING_MODES:
             raise HTTPException(400, "Unknown AKOÚŌ listening modality")
@@ -2639,9 +2651,10 @@ def create_app(
             try:
                 spec = resolve_audio_model(audio_model)
                 preset = route_preset(route_preset_id)
+                target_passes = explicit_passes if explicit_passes is not None else preset.moss_passes
                 required = {"transcribe": "transcription", "music": "music_analysis"}
-                roles = {required.get(name, "fast_perception") for name in preset.moss_passes}
-                if preset.direct_moss_modes:
+                roles = {required.get(name, "fast_perception") for name in target_passes}
+                if preset.direct_moss_modes and explicit_passes is None:
                     roles.add("deep_perception")
                 if not roles.issubset(spec.roles):
                     raise ValueError("Selected model does not support all listening route roles")
@@ -2679,8 +2692,10 @@ def create_app(
                 description=checkpoint_meta.get("description", "Local audio understanding model"),
                 size_gb=checkpoint_meta.get("size_gb"),
                 installed=bool(metadata.get("installed")), loaded=bool(metadata.get("loaded")),
-                available=config.profile != "stub" and bool(metadata.get("available"))))
+                available=config.profile != "stub" and bool(metadata.get("available")),
+                qualification_level="qualified_local_inprocess"))
         from oida.reasoning.model_catalog import MODEL_SPECS, find_model_spec
+        from oida.reasoning.contracts import ProviderLocality
         # Preserve legacy IDs while advertising the equivalent explicit selector.
         for row in models:
             spec = find_model_spec("oida_moss", row["id"])
@@ -2688,16 +2703,66 @@ def create_app(
                 row["audio_model"] = audio_selector(spec).model_dump()
                 row["catalogued"] = True
         configured = reasoning_settings.load()
+        budget_state = reasoning_budget.state()
+        budget_enabled = bool(budget_state.get("enabled", False) or budget_state.get("config", {}).get("enabled", False))
+        import sys
+        is_mac = sys.platform == "darwin"
         for spec in MODEL_SPECS:
-            if spec.provider_id not in {"google", "alibaba", "local_audio"} or not spec.audio_transport or not spec.selectable:
+            if spec.provider_id not in {"google", "alibaba", "local_audio", "stepfun", "groq", "oida_moss"} or not spec.audio_transport or not spec.selectable:
+                continue
+            if spec.id in seen or spec.name in seen or (spec.provider_id == "oida_moss" and any(m.get("id") == spec.id for m in models)):
                 continue
             provider = configured.providers.get(spec.provider_id)
-            models.append(dict(id=audio_selector(spec).deployment_id, name=spec.name,
-                audio_model=audio_selector(spec).model_dump(), capabilities=spec.capabilities,
-                description=spec.notes or "Registered audio deployment", installed=None, loaded=False,
-                available=False, catalogued=True, configured=bool(provider and provider.enabled),
-                reachable=None, inference_tested=False,
-                unavailable_reason="Cloud listening trial is not enabled" if spec.provider_id != "local_audio" else "Local deployment qualification pending"))
+            has_cred = bool(engine._credential(spec.provider_id, provider)) if provider else False
+            probed = engine.is_model_probed(spec.provider_id, spec.id)
+            prov_enabled = bool(provider and provider.enabled)
+
+            if spec.provider_id in {"local_audio", "oida_moss"} or spec.locality == ProviderLocality.LOCAL:
+                if is_mac and any(p in spec.platforms for p in ("linux-cuda12", "cuda-sglang", "linux-cuda-sglang")):
+                    avail = False
+                    unavail_reason = "Requires dedicated Linux/CUDA host running SGLang; unsupported on macOS MPS"
+                else:
+                    avail = False
+                    unavail_reason = "Local deployment qualification pending"
+            elif not budget_enabled:
+                avail = False
+                unavail_reason = "Cloud listening trial is not enabled"
+            elif not prov_enabled:
+                avail = False
+                unavail_reason = f"{spec.provider_id} provider is disabled"
+            elif not has_cred:
+                avail = False
+                unavail_reason = f"{spec.provider_id} API key is not configured"
+            elif not probed:
+                avail = False
+                unavail_reason = "Model probe pending"
+            else:
+                avail = True
+                unavail_reason = None
+
+            models.append(dict(
+                id=audio_selector(spec).deployment_id,
+                name=spec.name,
+                audio_model=audio_selector(spec).model_dump(),
+                capabilities=spec.capabilities,
+                description=spec.notes or "Registered audio deployment",
+                installed=False if spec.locality == ProviderLocality.LOCAL else None,
+                loaded=False,
+                available=avail,
+                catalogued=True,
+                configured=prov_enabled,
+                reachable=True if has_cred else None,
+                inference_tested=probed,
+                unavailable_reason=unavail_reason,
+                qualification_level=spec.integration_status,
+                license=spec.license,
+                revision=spec.revision,
+                sample_rate_hz=spec.sample_rate_hz,
+                input_representation={
+                    "sample_rate_hz": spec.sample_rate_hz or 16000,
+                    "channels": 2 if "music" in spec.id.lower() else 1,
+                },
+            ))
         from akouo_contract.listening_tasks import compound_listening_routes
         return dict(models=models, engine=engine_status(), specialist_tasks=specialists.options(), compound_routes=compound_listening_routes(),
             route_presets=akouo_manifest()["route_presets"],
@@ -2727,7 +2792,7 @@ def create_app(
         from oida.engine_base import use_listening_model
         if len(req.specialist_tasks) != len(set(req.specialist_tasks)):
             raise HTTPException(400, "Duplicate specialist task")
-        model = validate_listening_selection(req.model_id, req.listening_mode, req.audio_model, req.route_preset)
+        model = validate_listening_selection(req.model_id, req.listening_mode, req.audio_model, req.route_preset, explicit_passes=req.passes)
         with use_listening_model(model), use_audio_model(req.audio_model):
             return run_listen_event(req, file_window=file_window, native_analysis=native_analysis)
 
@@ -2764,7 +2829,7 @@ def create_app(
                 raise ValueError(str(exc)) from exc
             covenant_rules_applied: list[str] = []
             covenant_withheld: list[dict[str, object]] = []
-            passes = list(preset.moss_passes)
+            passes = list(req.passes) if req.passes is not None else list(preset.moss_passes)
             if covenant_engine is not None:
                 refusal = (
                     covenant_engine.refuse_source(source_type)
@@ -2881,6 +2946,8 @@ def create_app(
             with binding_guard, engine.request_policy(
                 privacy_mode=privacy_mode,
                 covenant_engine=covenant_engine,
+                source_type=source_type,
+                allow_external_source=bool(getattr(req, "allow_external_audio", False)),
             ) as audio_policy:
                 from oida.specialists.dispatch import interpret
                 perception, interpretation_status = interpret(
@@ -3028,7 +3095,7 @@ def create_app(
     def gateway_window_endpoint(req: GatewayWindowRequest) -> dict[str, object]:
         def execute_window():
             from oida.audio_window import audio_window
-            validate_listening_selection(req.model_id, req.listening_mode, req.audio_model, req.route_preset)
+            validate_listening_selection(req.model_id, req.listening_mode, req.audio_model, req.route_preset, explicit_passes=req.passes)
             if req.source_type != "file" or req.source_admission is not None or req.spectral_request is not None or req.listening_access is not None:
                 raise HTTPException(400, "File windows accept ordinary uploaded-file listening only")
             source_preflight("file", req.seconds, req.route_preset, req.remember)
@@ -3052,7 +3119,7 @@ def create_app(
         if req.aperture is None:
             return gateway_listen_prepared(req, file_window=file_window)
         from oida.station_aperture import prepare
-        validate_listening_selection(req.model_id, req.listening_mode, req.audio_model, req.route_preset)
+        validate_listening_selection(req.model_id, req.listening_mode, req.audio_model, req.route_preset, explicit_passes=req.passes)
         initial_policy = covenant_store.engine(override_name=req.covenant)
         def preflight(path):
             checker = covenant_store.engine(override_name=req.covenant)
@@ -4238,6 +4305,33 @@ def create_app(
             "<!doctype html><meta charset='utf-8'><title>Oída · OpenRouter</title>"
             "<h1>OpenRouter connected</h1><p>The credential is stored securely. You can close this window.</p>"
         )
+
+    @app.get("/reasoning/budget")
+    def reasoning_budget_get_endpoint() -> dict[str, Any]:
+        return reasoning_budget.state()
+
+    @app.put("/reasoning/budget")
+    def reasoning_budget_update_endpoint(body: dict[str, Any], request: Request) -> dict[str, Any]:
+        require_local_admin(request)
+        try:
+            return reasoning_budget.update_config(body)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/reasoning/providers/{provider_id}/probe-audio")
+    def reasoning_provider_probe_audio_endpoint(
+        provider_id: str,
+        request: Request,
+        body: AudioProbeRequest | None = None,
+    ) -> dict[str, Any]:
+        if request is not None:
+            require_local_admin(request)
+        model_id = body.model_id if body else None
+        res = engine.probe_audio(provider_id, model_id)
+        if not res.get("ok"):
+            raise HTTPException(status_code=400, detail=res)
+        return res
+
 
     @app.get("/conversation")
     def conversation_list_endpoint(

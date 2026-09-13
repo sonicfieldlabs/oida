@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from oida.contracts import now_iso
 from oida.owner_journal import canonical
 from oida.reasoning.contracts import ProviderRequest
+from oida.reasoning.audio_selection import AudioModel
 from oida.reasoning.evidence import covenant_blocks_untyped_prose, safe_external_text
 from oida.reasoning_context import retained_event
 
@@ -82,18 +83,40 @@ class Boundaries(Strict):
     max_output_tokens: int = Field(default=2200, ge=256, le=4096)
 
 
+class RelisteningStep(Strict):
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
+    route_preset: str = Field(default="basic", min_length=1, max_length=80)
+    listening_mode: str | None = Field(default=None, max_length=100)
+    model_id: str | None = Field(default=None, max_length=256)
+    audio_model: AudioModel | None = None
+    context_policy: Literal["independent", "informed"] = "independent"
+    context_steps: list[str] = Field(default_factory=list, max_length=7)
+    focus: str | None = Field(default=None, max_length=4096)
+
+
 class Relistening(Strict):
     enabled: bool = False
     modalities: list[str] = Field(
-        default_factory=lambda: ["deep"], min_length=1, max_length=4
+        default_factory=lambda: ["deep"], max_length=8
     )
+    steps: list[RelisteningStep] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
-    def unique_routes(self):
-        if len(set(self.modalities)) != len(self.modalities) or any(
-            not 1 <= len(m) <= 80 for m in self.modalities
-        ):
-            raise ValueError("Choose distinct listening modalities")
+    def compile_steps(self):
+        if not self.steps and self.modalities:
+            self.steps = [
+                RelisteningStep(
+                    id=f"step-{idx + 1}",
+                    route_preset=mod,
+                    context_policy="independent",
+                )
+                for idx, mod in enumerate(self.modalities)
+            ]
+        elif self.steps and not self.modalities:
+            self.modalities = [s.route_preset for s in self.steps]
+        step_ids = [s.id for s in self.steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("Relistening step IDs must be unique")
         return self
 
 

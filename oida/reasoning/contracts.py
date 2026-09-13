@@ -234,6 +234,22 @@ def default_provider_settings() -> dict[str, ProviderSettings]:
                 "supports_json_schema": False,
             },
         ),
+        "stepfun": ProviderSettings(
+            kind=ProviderKind.OPENAI_COMPATIBLE,
+            enabled=False,
+            locality=ProviderLocality.EXTERNAL,
+            base_url="https://api.stepfun.com/v1",
+            default_model="stepfun-ai/Step-Audio-2-mini",
+            options={"audio_capable": True, "audio_transport": "catalog"},
+        ),
+        "groq": ProviderSettings(
+            kind=ProviderKind.OPENAI_COMPATIBLE,
+            enabled=False,
+            locality=ProviderLocality.EXTERNAL,
+            base_url="https://api.groq.com/openai/v1",
+            default_model="whisper-large-v3-turbo",
+            options={"audio_capable": True, "audio_transport": "openai_transcription"},
+        ),
     }
     for provider_id in ("codex", "claude", "hermes", "openclaw", "opencode"):
         providers[provider_id] = ProviderSettings(

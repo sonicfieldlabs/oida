@@ -81,6 +81,20 @@ def validate_endpoint(provider_id, base_url):
             "127.0.0.1",
             "::1",
         }
+    elif provider_id == "stepfun":
+        valid = (
+            url.scheme == "https"
+            and host == "api.stepfun.com"
+            and url.port in (None, 443)
+            and url.path.rstrip("/") == "/v1"
+        )
+    elif provider_id == "groq":
+        valid = (
+            url.scheme == "https"
+            and host == "api.groq.com"
+            and url.port in (None, 443)
+            and url.path.rstrip("/") == "/openai/v1"
+        )
     else:
         valid = False
     if not valid:
