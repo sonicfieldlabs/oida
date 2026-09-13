@@ -43,6 +43,7 @@ class _RegisteredProvider:
 class ProviderRegistry:
     def __init__(self) -> None:
         self._providers: dict[str, _RegisteredProvider] = {}
+        self.trial_budget = None
 
     def register(
         self,
@@ -192,6 +193,11 @@ class ProviderRegistry:
         entry = self._providers.get(request.provider_id)
         if entry is None:
             return error_result(request, f"Unknown reasoning provider: {request.provider_id}")
+        if self.trial_budget is not None and self.trial_budget.config.enabled:
+            endpoint = getattr(entry.adapter, "base_url", None)
+            local = request.provider_id == "local_structured" or (endpoint and endpoint_locality(endpoint) == "local")
+            if not local:
+                return error_result(request, "Cloud report reasoning is disabled during the bounded audio trial; use local report comparison")
         if not entry.enabled:
             return error_result(request, f"Reasoning provider {request.provider_id!r} is disabled")
         if request.model_id is None and entry.configured and entry.configured.default_model:

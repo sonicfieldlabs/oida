@@ -351,8 +351,9 @@ class ListenEventRequest(PathRequest):
     # it so recognition cannot be enabled accidentally by a stale client.
     song_id: bool = False
     passes: list[Literal["transcribe", "events", "caption", "speech", "music"]] | None = None
-    context_refs: list[str] | None = None
-    focus_question: str | None = None
+    context_refs: list[str] | None = Field(default=None, max_length=7)
+    focus_question: str | None = Field(default=None, max_length=4096)
+    expected_source_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class AudioProbeRequest(BaseModel):
@@ -865,7 +866,7 @@ def create_app(
 
     def reasoning_registry(settings=None):
         selected_settings = settings or reasoning_settings.load()
-        return build_provider_registry(
+        registry = build_provider_registry(
             selected_settings,
             secret_store=reasoning_secrets,
             moss_models=moss_model_descriptors(),
@@ -874,6 +875,8 @@ def create_app(
                 or (config.profile != "stub" and bool(available_models))
             ),
         )
+        registry.trial_budget = reasoning_budget
+        return registry
 
     reasoning = ReasoningOrchestrator(
         settings_store=reasoning_settings,
@@ -2661,7 +2664,7 @@ def create_app(
                 if spec.provider_id != "oida_moss":
                     with use_audio_model(audio_model):
                         from oida.reasoning.contracts import ModelRole
-                        engine._assignment(reasoning_settings.load(), ModelRole.FAST_PERCEPTION)
+                        engine._assignment(reasoning_settings.load(), ModelRole(next(iter(roles), "fast_perception")))
                     return None
                 model_id = spec.id
             except (ValueError, EngineUnavailable) as exc:
@@ -2693,12 +2696,14 @@ def create_app(
                 size_gb=checkpoint_meta.get("size_gb"),
                 installed=bool(metadata.get("installed")), loaded=bool(metadata.get("loaded")),
                 available=config.profile != "stub" and bool(metadata.get("available")),
-                qualification_level="qualified_local_inprocess"))
+                qualification_level="local_runtime_detected"))
         from oida.reasoning.model_catalog import MODEL_SPECS, find_model_spec
         from oida.reasoning.contracts import ProviderLocality
         # Preserve legacy IDs while advertising the equivalent explicit selector.
         for row in models:
             spec = find_model_spec("oida_moss", row["id"])
+            if spec is not None and not spec.selectable:
+                row.update(available=False, qualification_level="experimental_unqualified", unavailable_reason="Model runtime qualification pending")
             if spec is not None and spec.selectable:
                 row["audio_model"] = audio_selector(spec).model_dump()
                 row["catalogued"] = True
@@ -2708,16 +2713,19 @@ def create_app(
         import sys
         is_mac = sys.platform == "darwin"
         for spec in MODEL_SPECS:
-            if spec.provider_id not in {"google", "alibaba", "local_audio", "stepfun", "groq", "oida_moss"} or not spec.audio_transport or not spec.selectable:
+            if spec.provider_id not in {"google", "alibaba", "local_audio", "stepfun", "groq", "oida_moss"} or not spec.audio_transport:
                 continue
             if spec.id in seen or spec.name in seen or (spec.provider_id == "oida_moss" and any(m.get("id") == spec.id for m in models)):
                 continue
             provider = configured.providers.get(spec.provider_id)
-            has_cred = bool(engine._credential(spec.provider_id, provider)) if provider else False
+            has_cred = None
             probed = engine.is_model_probed(spec.provider_id, spec.id)
             prov_enabled = bool(provider and provider.enabled)
 
-            if spec.provider_id in {"local_audio", "oida_moss"} or spec.locality == ProviderLocality.LOCAL:
+            if not spec.selectable:
+                avail = False
+                unavail_reason = "Adapter or model runtime qualification pending"
+            elif spec.provider_id in {"local_audio", "oida_moss"} or spec.locality == ProviderLocality.LOCAL:
                 if is_mac and any(p in spec.platforms for p in ("linux-cuda12", "cuda-sglang", "linux-cuda-sglang")):
                     avail = False
                     unavail_reason = "Requires dedicated Linux/CUDA host running SGLang; unsupported on macOS MPS"
@@ -2730,7 +2738,7 @@ def create_app(
             elif not prov_enabled:
                 avail = False
                 unavail_reason = f"{spec.provider_id} provider is disabled"
-            elif not has_cred:
+            elif has_cred is False:
                 avail = False
                 unavail_reason = f"{spec.provider_id} API key is not configured"
             elif not probed:
@@ -2751,7 +2759,7 @@ def create_app(
                 available=avail,
                 catalogued=True,
                 configured=prov_enabled,
-                reachable=True if has_cred else None,
+                reachable=None,  # A past probe is not a current reachability check.
                 inference_tested=probed,
                 unavailable_reason=unavail_reason,
                 qualification_level=spec.integration_status,
@@ -2759,8 +2767,9 @@ def create_app(
                 revision=spec.revision,
                 sample_rate_hz=spec.sample_rate_hz,
                 input_representation={
-                    "sample_rate_hz": spec.sample_rate_hz or 16000,
-                    "channels": 2 if "music" in spec.id.lower() else 1,
+                    "sample_rate_hz": spec.sample_rate_hz,
+                    "channels": None,
+                    "status": "unverified_provider_preprocessing",
                 },
             ))
         from akouo_contract.listening_tasks import compound_listening_routes
@@ -2790,6 +2799,8 @@ def create_app(
 
     def execute_listen_event(req: ListenEventRequest, *, file_window=None, native_analysis=None) -> dict[str, object]:
         from oida.engine_base import use_listening_model
+        if req.passes is not None and len(set(req.passes)) != len(req.passes):
+            raise HTTPException(400, "Duplicate explicit pass")
         if len(req.specialist_tasks) != len(set(req.specialist_tasks)):
             raise HTTPException(400, "Duplicate specialist task")
         model = validate_listening_selection(req.model_id, req.listening_mode, req.audio_model, req.route_preset, explicit_passes=req.passes)
@@ -2801,6 +2812,10 @@ def create_app(
             checkpoint()
             preset = route_preset(req.route_preset)
             path = _require_existing_path(req.path)
+            if req.expected_source_sha256:
+                from oida.pass_provenance import audio_fingerprint
+                if audio_fingerprint(Path(path))["sha256"] != req.expected_source_sha256:
+                    raise ValueError("Retained excerpt content changed")
             privacy_mode = _privacy_mode(req.privacy_mode)
             source_type = _audio_source_type(req.source_type)
             raw_audio_policy = _raw_audio_policy(
@@ -2943,11 +2958,19 @@ def create_app(
             from contextlib import nullcontext
             from oida.input_binding import enforce_input_bindings
             binding_guard = enforce_input_bindings(apparatus_decision["execution_bindings"]) if apparatus_decision and apparatus_decision.get("execution_bindings") else nullcontext()
+            focus = req.focus_question or ""
+            if req.context_refs:
+                if privacy_mode == "incognito":
+                    raise ValueError("Incognito refuses retained account context")
+                notes = [retained_account(ref) for ref in req.context_refs]
+                focus += "\nPrior accounts (model interpretations, not ground truth):\n" + json.dumps(notes, ensure_ascii=False)
             with binding_guard, engine.request_policy(
                 privacy_mode=privacy_mode,
                 covenant_engine=covenant_engine,
                 source_type=source_type,
                 allow_external_source=bool(getattr(req, "allow_external_audio", False)),
+                deadline=time.monotonic() + 120,
+                focus=focus,
             ) as audio_policy:
                 from oida.specialists.dispatch import interpret
                 perception, interpretation_status = interpret(
@@ -3098,13 +3121,19 @@ def create_app(
             validate_listening_selection(req.model_id, req.listening_mode, req.audio_model, req.route_preset, explicit_passes=req.passes)
             if req.source_type != "file" or req.source_admission is not None or req.spectral_request is not None or req.listening_access is not None:
                 raise HTTPException(400, "File windows accept ordinary uploaded-file listening only")
+            if req.expected_source_sha256:
+                from oida.pass_provenance import audio_fingerprint
+                if audio_fingerprint(Path(req.path))["sha256"] != req.expected_source_sha256:
+                    raise HTTPException(409, "Retained excerpt content changed")
             source_preflight("file", req.seconds, req.route_preset, req.remember)
             path = _require_existing_path(req.path)
             try:
                 with audio_window(path, start_seconds=req.start_seconds, seconds=req.seconds,
                         temp_dir=config.data_dir / "source-capture-temp") as (window, metadata):
+                    if req.expected_source_sha256 and metadata["source_sha256"] != req.expected_source_sha256:
+                        raise HTTPException(409, "Retained excerpt content changed")
                     request = GatewayListenRequest.model_validate({
-                        **req.model_dump(exclude={"start_seconds", "seconds"}),
+                        **req.model_dump(exclude={"start_seconds", "seconds", "expected_source_sha256"}),
                         "path": str(window), "raw_audio_policy": "not_stored" if req.ephemeral_delivery else "temp",
                         "source_label": req.source_label or path.name,
                         "capture_seconds": metadata["duration_seconds"],
@@ -4305,6 +4334,18 @@ def create_app(
             "<!doctype html><meta charset='utf-8'><title>Oída · OpenRouter</title>"
             "<h1>OpenRouter connected</h1><p>The credential is stored securely. You can close this window.</p>"
         )
+
+    def retained_account(identifier):
+        from oida.reasoning_context import read_record, retained_event
+        from oida.reasoning.evidence import covenant_blocks_untyped_prose
+        account = retained_event(read_record(identifier))
+        if covenant_blocks_untyped_prose(account.get("covenant")):
+            raise HTTPException(423, "Retained account is withheld by covenant")
+        return account
+
+    @app.get("/reasoning/accounts/{identifier}")
+    def retained_account_endpoint(identifier: str):
+        return retained_account(identifier)
 
     @app.get("/reasoning/budget")
     def reasoning_budget_get_endpoint() -> dict[str, Any]:

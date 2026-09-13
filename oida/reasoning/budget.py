@@ -14,6 +14,9 @@ numbers. The ledger never claims to predict a provider's final invoice.
 from __future__ import annotations
 
 import json
+import math
+from datetime import date
+from contextlib import contextmanager
 import re
 import sqlite3
 import threading
@@ -80,7 +83,7 @@ PRICING: tuple[PricingRow, ...] = (
         model_id="gemini-3.1-pro-preview",
         audio_tokens_per_second=32.0,
         audio_input_usd_per_mtok=2.00,
-        output_usd_per_mtok=10.00,
+        output_usd_per_mtok=12.00,
         region="global",
         basis="Google AI Studio documented audio tokenization and Pro Preview pricing (preview designation)",
         effective="2026-09-12",
@@ -105,36 +108,7 @@ PRICING: tuple[PricingRow, ...] = (
         basis="Alibaba Model Studio Omni guide (seven audio-input tokens/second) and Model Studio pricing",
         effective="2026-09-12",
     ),
-    PricingRow(
-        provider_id="stepfun",
-        model_id="stepfun-ai/Step-Audio-2-mini",
-        audio_tokens_per_second=25.0,
-        audio_input_usd_per_mtok=2.00,
-        output_usd_per_mtok=2.00,
-        region="global",
-        basis="StepFun Open Platform Step-Audio audio input and text generation tariff",
-        effective="2026-09-12",
-    ),
-    PricingRow(
-        provider_id="stepfun",
-        model_id="stepfun-ai/Step-Audio-2-mini-Think",
-        audio_tokens_per_second=25.0,
-        audio_input_usd_per_mtok=2.00,
-        output_usd_per_mtok=2.00,
-        region="global",
-        basis="StepFun Open Platform Step-Audio Think audio input and text generation tariff",
-        effective="2026-09-12",
-    ),
-    PricingRow(
-        provider_id="groq",
-        model_id="whisper-large-v3-turbo",
-        audio_tokens_per_second=100.0,
-        audio_input_usd_per_mtok=0.1111,
-        output_usd_per_mtok=0.01,
-        region="global",
-        basis="Groq Cloud Whisper Large v3 Turbo documented rate ($0.04 per audio hour)",
-        effective="2026-09-12",
-    ),
+
 )
 
 
@@ -142,7 +116,7 @@ class BudgetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     contract: str = TRIAL_BUDGET_CONTRACT
     enabled: bool = False
-    total_ceiling_usd: float = Field(default=5.0, ge=0)
+    total_ceiling_usd: float = Field(default=5.0, ge=0, le=5.0)
     per_provider_cap_usd: dict[str, float] = Field(default_factory=dict)
     max_calls: int = Field(default=64, ge=1, le=10_000)
     max_output_tokens_per_call: int = Field(default=4096, ge=16, le=1_000_000)
@@ -154,6 +128,7 @@ def quote_cost(
     *,
     audio_seconds: float,
     max_output_tokens: int,
+    text_input_tokens: int = 0,
     pricing: tuple[PricingRow, ...] = PRICING,
 ) -> dict[str, Any] | None:
     """Worst-case planning cost for one call, or None without a price basis."""
@@ -170,12 +145,16 @@ def quote_cost(
         ),
         None,
     )
-    if row is None:
+    if row is None or (row.expires and date.today().isoformat() > row.expires):
         return None
+    if not math.isfinite(audio_seconds) or not 0 < audio_seconds <= 60:
+        raise BudgetDenied("Audio duration must be verified within 0..60 seconds")
+    if type(max_output_tokens) is not int or max_output_tokens <= 0 or type(text_input_tokens) is not int or text_input_tokens < 0:
+        raise BudgetDenied("Invalid token bound")
     audio_tokens = max(0.0, float(audio_seconds)) * row.audio_tokens_per_second
     output_tokens = max(0, int(max_output_tokens))
     cost = (
-        audio_tokens * row.audio_input_usd_per_mtok / 1_000_000
+        (audio_tokens + text_input_tokens) * row.audio_input_usd_per_mtok / 1_000_000
         + output_tokens * row.output_usd_per_mtok / 1_000_000
     )
     return dict(
@@ -183,12 +162,15 @@ def quote_cost(
         model_id=row.model_id,
         audio_tokens=int(audio_tokens + 0.999),
         output_tokens=output_tokens,
-        worst_case_usd=round(cost, 6),
+        worst_case_usd=math.ceil(cost * 1_000_000) / 1_000_000,
         region=row.region,
         basis=row.basis,
         effective=row.effective,
         expires=row.expires,
-        kind="worst_case_planning_estimate",
+        text_input_tokens=text_input_tokens,
+        input_rate=row.audio_input_usd_per_mtok,
+        output_rate=row.output_usd_per_mtok,
+        kind="conservative_planning_bound",
     )
 
 
@@ -232,26 +214,38 @@ class BudgetLedger:
                 "PRIMARY KEY(provider_id, model_id))"
             )
 
-    def _db(self) -> sqlite3.Connection:
+    @contextmanager
+    def _db(self):
         conn = sqlite3.connect(self.db_path, timeout=10)
-        return conn
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def configure(self, updates: dict[str, Any]) -> BudgetConfig:
         with self.lock:
-            current = self._config.model_dump()
+            current = self._load_config().model_dump()
             current.update(
                 {k: v for k, v in updates.items() if k in BudgetConfig.model_fields}
             )
-            self._config = BudgetConfig.model_validate(current)
-            write_json_atomic(self.config_path, self._config.model_dump(mode="json"))
-            return self._config
+            candidate = BudgetConfig.model_validate(current)
+            if any(not math.isfinite(v) or v < 0 or v > 5 for v in candidate.per_provider_cap_usd.values()):
+                raise ValueError("Provider caps must be finite amounts within the trial ceiling")
+            write_json_atomic(self.config_path, candidate.model_dump(mode="json"))
+            self._config = candidate
+            return self._load_config()
 
     update_config = configure
 
     @property
     def config(self) -> BudgetConfig:
         with self.lock:
-            return self._config
+            return self._load_config()
 
     def quote(
         self,
@@ -260,12 +254,14 @@ class BudgetLedger:
         *,
         audio_seconds: float,
         max_output_tokens: int,
+        text_input_tokens: int = 0,
     ) -> dict[str, Any] | None:
         return quote_cost(
             provider_id,
             model_id,
             audio_seconds=audio_seconds,
             max_output_tokens=max_output_tokens,
+            text_input_tokens=text_input_tokens,
         )
 
     def _spent(self, db) -> tuple[float, dict[str, float], int]:
@@ -293,7 +289,7 @@ class BudgetLedger:
 
     def state(self) -> dict[str, Any]:
         with self.lock:
-            config = self._config
+            config = self._load_config()
             with self._db() as db:
                 total, per_provider, calls = self._spent(db)
                 reservations = [
@@ -338,10 +334,11 @@ class BudgetLedger:
         audio_seconds: float,
         max_output_tokens: int | None = None,
         reference: str | None = None,
+        text_input_tokens: int = 0,
     ) -> dict[str, Any]:
         """Admit one external call or refuse before anything is sent."""
         with self.lock:
-            config = self._config
+            config = self._load_config()
             if not config.enabled:
                 raise BudgetDenied(
                     "Cloud trial budget is not enabled; external audio dispatch stays closed"
@@ -355,6 +352,7 @@ class BudgetLedger:
                 model_id,
                 audio_seconds=audio_seconds,
                 max_output_tokens=capped_output,
+                text_input_tokens=text_input_tokens,
             )
             if estimate is None:
                 raise BudgetDenied(
@@ -386,6 +384,7 @@ class BudgetLedger:
                     reserved_usd=estimate["worst_case_usd"],
                     estimate=estimate,
                     max_output_tokens=capped_output,
+                text_input_tokens=text_input_tokens,
                     reference=reference,
                     counts_as_call=True,
                 )
@@ -408,10 +407,12 @@ class BudgetLedger:
         with self.lock:
             with self._db() as db:
                 row = db.execute(
-                    "SELECT payload FROM reservations WHERE id=?", (reservation_id,)
+                    "SELECT payload,status FROM reservations WHERE id=?", (reservation_id,)
                 ).fetchone()
                 if row is None:
                     raise ValueError("Unknown reservation")
+                if row[1] != "reserved":
+                    raise ValueError("Reservation already finalized; explicit reconciliation required")
                 payload = dict(json.loads(row[0]))
                 payload.update(extra)
                 db.execute(
@@ -451,7 +452,7 @@ class BudgetLedger:
                 reserved = row[1]
             input_tokens = usage.get("input_tokens") if isinstance(usage, dict) else None
             output_tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
-            known = type(input_tokens) is int and type(output_tokens) is int
+            known = type(input_tokens) is int and input_tokens >= 0 and type(output_tokens) is int and output_tokens >= 0
             if outcome == "unknown_remote_outcome" or not known:
                 extra = dict(
                     usage=usage if isinstance(usage, dict) else None,
@@ -461,25 +462,17 @@ class BudgetLedger:
                 )
                 self._update(reservation_id, "unresolved", None, extra)
                 return dict(payload, status="unresolved", **extra)
-            pricing_row = next(
-                (
-                    item
-                    for item in PRICING
-                    if item.provider_id == payload["provider_id"]
-                    and (
-                        item.model_id.lower() in {str(payload["model_id"]).lower(), str(payload["model_id"]).lower().rsplit("/", 1)[-1]}
-                        or str(payload["model_id"]).lower() in {item.model_id.lower(), item.model_id.lower().rsplit("/", 1)[-1]}
-                    )
-                ),
-                None,
-            )
-            if pricing_row is None:
-                settled = reserved
-            else:
-                settled = (
-                    input_tokens * pricing_row.audio_input_usd_per_mtok / 1_000_000
-                    + output_tokens * pricing_row.output_usd_per_mtok / 1_000_000
-                )
+            # Use the reservation's pinned rates, never a later pricing table.
+            rates = payload.get("estimate", {})
+            reasoning_tokens = (usage or {}).get("reasoning_tokens")
+            if payload["provider_id"] == "google":
+                if type(reasoning_tokens) is not int or reasoning_tokens < 0:
+                    self._update(reservation_id, "unresolved", None, dict(usage=usage, outcome=outcome, usage_status="partial"))
+                    return dict(payload, status="unresolved")
+                output_tokens += reasoning_tokens
+            calculated = (input_tokens * rates.get("input_rate", 0) + output_tokens * rates.get("output_rate", 0)) / 1_000_000
+            # Keep the bound held during the trial; estimated token costs are not invoices.
+            settled = max(reserved, calculated, reported_cost_usd if isinstance(reported_cost_usd, (int, float)) and math.isfinite(reported_cost_usd) and reported_cost_usd >= 0 else 0)
             extra = dict(
                 usage=usage if isinstance(usage, dict) else None,
                 reported_cost_usd=reported_cost_usd,

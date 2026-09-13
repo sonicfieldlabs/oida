@@ -174,7 +174,7 @@ wheels = [
 [[package]]
 name = "akouo-contract"
 version = "0.10.0"
-source = { editable = "../akouo" }
+source = { directory = "../akouo" }
 dependencies = [
     { name = "jsonschema" },
     { name = "referencing" },
@@ -2341,7 +2341,7 @@ songid = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'moss'" },
-    { name = "akouo-contract", editable = "../akouo" },
+    { name = "akouo-contract", directory = "../akouo" },
     { name = "akousma", editable = "../earworm/packages/py-akousma" },
     { name = "akousmata", editable = "../akousmata" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'songid'", specifier = ">=0.2.2" },

@@ -94,7 +94,7 @@ def _prompt_with_listening_identity(prompt: str, identity: str) -> str:
 
 def _sanitize_audio_error(message: object) -> str:
     text = sanitize_error(message)
-    return re.sub(r"data:audio/[^;]+;base64,[A-Za-z0-9+/=]+", "[audio_data_redacted]", text)
+    return re.sub(r"[A-Za-z0-9+/=]{120,}", "[audio_data_redacted]", re.sub(r"data:audio/[^;]+;base64,[A-Za-z0-9+/=]+", "[audio_data_redacted]", text))
 
 
 def _audio_duration_seconds(path: Path) -> float:
@@ -114,10 +114,7 @@ def _audio_duration_seconds(path: Path) -> float:
             return float(info.duration)
     except Exception:
         pass
-    try:
-        return min(60.0, max(1.0, path.stat().st_size / 32000.0))
-    except Exception:
-        return 10.0
+    raise EngineUnavailable("Cannot verify audio duration before external dispatch")
 
 
 @dataclass(frozen=True)
@@ -130,6 +127,7 @@ class AudioRequestPolicy:
     allow_external_source: bool = True
     stop_check: Callable[[], bool] | None = None
     deadline: float | None = None
+    focus: str = ""
 
     def listening_identity_block(self, passes: list[str] | tuple[str, ...]) -> dict[str, Any]:
         applied = [name for name in passes if name != "transcribe"]
@@ -198,6 +196,7 @@ class RoutedAudioEngine(MossEngine):
         allow_external_source: bool = True,
         stop_check: Callable[[], bool] | None = None,
         deadline: float | None = None,
+        focus: str = "",
     ) -> Iterator[AudioRequestPolicy]:
         policy = AudioRequestPolicy(
             privacy_mode=str(privacy_mode or "ephemeral"),
@@ -212,6 +211,7 @@ class RoutedAudioEngine(MossEngine):
             allow_external_source=bool(allow_external_source),
             stop_check=stop_check,
             deadline=deadline,
+            focus=focus,
         )
         token = self._policy.set(policy)
         try:
@@ -277,6 +277,10 @@ class RoutedAudioEngine(MossEngine):
                 thinking_budget,
                 f"reasoning settings unavailable: {exc}",
             )
+        policy = self._policy.get()
+        if policy and policy.focus:
+            prompt += "\n\nOPERATOR FOCUS AND RETAINED ACCOUNTS (context, not fresh audio evidence):\n" + policy.focus
+        self._check_dispatch()
         assignment = self._assignment(configured, role)
         provider = configured.providers.get(assignment.provider_id)
         model_id = assignment.model_id or (provider.default_model if provider else None)
@@ -285,6 +289,9 @@ class RoutedAudioEngine(MossEngine):
             from oida.input_binding import reject_unobservable_binding
             reject_unobservable_binding()
         if assignment.provider_id == "oida_moss":
+            spec = find_model_spec("oida_moss", model_id)
+            if spec and not spec.selectable:
+                raise EngineUnavailable("Local model runtime qualification pending")
             self._record_route(role, assignment.provider_id, model_id, "embedded")
             result = self.local_engine.generate(audio_path, prompt, settings, thinking_budget)
             selection = selected_audio_model()
@@ -314,6 +321,9 @@ class RoutedAudioEngine(MossEngine):
                 f"{assignment.provider_id} has no model selected for {role.value}",
             )
 
+        spec = find_model_spec(assignment.provider_id, model_id)
+        if spec and not spec.selectable:
+            raise EngineUnavailable("Selected model runtime is not qualified for dispatch")
         locality = self._provider_locality(provider)
         if assignment.provider_id == "local_audio" and locality != ProviderLocality.LOCAL:
             return self._fallback(
@@ -339,6 +349,8 @@ class RoutedAudioEngine(MossEngine):
                 thinking_budget,
                 "Groq Whisper is dedicated to transcription only; general listening is not supported",
             )
+        if locality != ProviderLocality.LOCAL and isinstance(self._transport, UrllibJsonTransport) and self.budget_ledger is None:
+            raise EngineUnavailable("External listening requires a durable trial ledger")
         if locality == ProviderLocality.EXTERNAL:
             blocked = self._external_audio_block(configured)
             if blocked:
@@ -365,6 +377,7 @@ class RoutedAudioEngine(MossEngine):
                     audio_seconds=audio_sec,
                     max_output_tokens=settings.max_new_tokens,
                     reference=ref,
+                    text_input_tokens=len((prompt + AUDIO_PERCEPTION_SYSTEM_PROMPT).encode("utf-8")) + 1024,
                 )
             except BudgetDenied as exc:
                 return self._fallback(
@@ -375,6 +388,8 @@ class RoutedAudioEngine(MossEngine):
                     f"trial budget denied: {exc.reason}",
                 )
 
+        if reservation:
+            settings = replace(settings, max_new_tokens=reservation["max_output_tokens"])
         reservation_id = reservation["id"] if reservation else None
         settled = False
         try:
@@ -396,6 +411,9 @@ class RoutedAudioEngine(MossEngine):
             last_exc = None
             while attempts < max_attempts:
                 attempts += 1
+                self._check_dispatch()
+                if locality == ProviderLocality.EXTERNAL and self._external_audio_block(self.settings_store.load()):
+                    raise EngineUnavailable("External audio permission revoked")
                 try:
                     submitted_hash = hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() if selected_audio_model() else None
                     result = self._generate_provider_audio(
@@ -411,7 +429,7 @@ class RoutedAudioEngine(MossEngine):
                     break
                 except ProviderTransportError as exc:
                     last_exc = exc
-                    if exc.submitted:
+                    if exc.submitted is not False:
                         break
                     is_conn_error = isinstance(getattr(exc, "__cause__", None), (urllib.error.URLError, ConnectionError, TimeoutError))
                     if attempts < max_attempts and is_conn_error:
@@ -419,7 +437,7 @@ class RoutedAudioEngine(MossEngine):
                     break
 
             if result is None:
-                if last_exc and getattr(last_exc, "submitted", True):
+                if last_exc is None or getattr(last_exc, "submitted", True) is not False:
                     if reservation_id:
                         self.budget_ledger.settle(
                             reservation_id,
@@ -431,7 +449,7 @@ class RoutedAudioEngine(MossEngine):
                     if reservation_id:
                         self.budget_ledger.release(
                             reservation_id,
-                            reason=str(last_exc),
+                            reason=_sanitize_audio_error(last_exc),
                         )
                         settled = True
                 return self._fallback(
@@ -466,8 +484,9 @@ class RoutedAudioEngine(MossEngine):
                     outcome="complete",
                 )
                 settled = True
-                cost_usd = settled_info.get("settled_usd", reservation.get("reserved_usd"))
+                cost_usd = settled_info.get("settled_usd")
 
+            self._check_dispatch()
             selection = selected_audio_model()
             if selection is not None:
                 if hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() != submitted_hash:
@@ -506,6 +525,18 @@ class RoutedAudioEngine(MossEngine):
                     )
                 except Exception:
                     pass
+
+    def _check_dispatch(self):
+        from oida.operation_control import checkpoint
+        checkpoint()
+        policy = self._policy.get()
+        if policy and ((policy.stop_check and policy.stop_check()) or (policy.deadline is not None and time.monotonic() >= policy.deadline)):
+            raise EngineUnavailable("Listening cancelled or deadline exceeded")
+
+    def _timeout(self):
+        self._check_dispatch()
+        policy = self._policy.get()
+        return max(0.01, min(120.0, policy.deadline - time.monotonic())) if policy and policy.deadline is not None else 120.0
 
     def prewarm(self, model_kind: str = "instruct") -> None:
         try:
@@ -649,151 +680,34 @@ class RoutedAudioEngine(MossEngine):
             return self.budget_ledger.is_probed(provider_id, model_id)
         return False
 
-    def probe_audio(self, provider_id: str, model_id: str | None = None) -> dict[str, Any]:
-        """Authorized tiny Google/Qwen audio probe to establish account readiness."""
-        if provider_id not in {"google", "alibaba", "stepfun", "groq"}:
-            return {
-                "ok": False,
-                "provider_id": provider_id,
-                "model_id": model_id,
-                "error": f"Unsupported audio probe provider: {provider_id}",
-                "status": "unsupported",
-            }
-        try:
-            configured = self.settings_store.load()
-        except ValueError as exc:
-            return {
-                "ok": False,
-                "provider_id": provider_id,
-                "model_id": model_id,
-                "error": f"Reasoning settings unavailable: {exc}",
-                "status": "settings_unavailable",
-            }
-        provider = configured.providers.get(provider_id)
-        if provider is None or not provider.enabled:
-            return {
-                "ok": False,
-                "provider_id": provider_id,
-                "model_id": model_id,
-                "error": f"Provider {provider_id} is not enabled",
-                "status": "disabled",
-            }
-        key = self._credential(provider_id, provider)
-        if not key:
-            return {
-                "ok": False,
-                "provider_id": provider_id,
-                "model_id": model_id,
-                "error": f"{provider_id} API key is not configured",
-                "status": "missing_credentials",
-            }
-        if self.budget_ledger is None or not self.budget_ledger.config.enabled:
-            return {
-                "ok": False,
-                "provider_id": provider_id,
-                "model_id": model_id,
-                "error": "Cloud trial budget is not enabled",
-                "status": "budget_disabled",
-            }
-        target_model = model_id or (
-            "gemini-3.5-flash-lite" if provider_id == "google"
-            else "qwen3.5-omni-flash" if provider_id == "alibaba"
-            else "stepfun-ai/Step-Audio-2-mini" if provider_id == "stepfun"
-            else "whisper-large-v3-turbo"
-        )
+    def probe_audio(self, provider_id, model_id=None):
+        """A probe is a bounded ordinary listening request with the same gates."""
+        from oida.reasoning.audio_selection import selector, use_audio_model
+        from oida.recipes import INSTRUCT_CAPTION
         import tempfile
         import wave
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            temp_path = Path(f.name)
+        target = model_id or {"google": "gemini-3.5-flash-lite", "alibaba": "qwen3.5-omni-flash"}.get(provider_id)
+        spec = find_model_spec(provider_id, target)
+        if spec is None or not spec.selectable or provider_id not in {"google", "alibaba"}:
+            return dict(ok=False, status="unqualified", error="Probe requires a qualified candidate adapter and verified price basis")
+        if self.budget_ledger is None or not self.budget_ledger.config.enabled:
+            return dict(ok=False, status="budget_disabled", error="Cloud trial budget is not enabled")
+        provider = self.settings_store.load().providers.get(provider_id)
         try:
-            with wave.open(str(temp_path), "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(16000)
-                wf.writeframes(bytes(16000))
-
-            from oida.recipes import INSTRUCT_CAPTION
-            from dataclasses import replace
-            settings = INSTRUCT_CAPTION
-            if provider_id == "groq":
-                settings = replace(settings, model_kind="transcription")
-            probe_prompt = "" if provider_id == "groq" else "Describe this sound briefly."
-            reservation = self.budget_ledger.reserve(
-                provider_id=provider_id,
-                model_id=target_model,
-                audio_seconds=0.5,
-                max_output_tokens=16,
-                reference="probe_audio",
-            )
-            start_time = time.monotonic()
-            try:
-                result = self._generate_provider_audio(
-                    provider_id=provider_id,
-                    model_id=target_model,
-                    provider=provider,
-                    locality=self._provider_locality(provider),
-                    audio_path=str(temp_path),
-                    prompt=probe_prompt,
-                    settings=settings,
-                    thinking_budget=None,
-                )
-                duration_ms = int((time.monotonic() - start_time) * 1000)
-                self.budget_ledger.settle(
-                    reservation["id"],
-                    usage=result.usage,
-                    outcome="complete",
-                )
-                with self._status_lock:
-                    self._probed_models.add((provider_id, target_model))
-                if self.budget_ledger is not None:
-                    self.budget_ledger.record_probe(provider_id, target_model, "inference_tested")
-                return {
-                    "ok": True,
-                    "provider_id": provider_id,
-                    "model_id": target_model,
-                    "status": "inference_tested",
-                    "latency_ms": duration_ms,
-                    "usage": result.usage,
-                    "preview": result.text[:100] if result.text else "",
-                }
-            except ProviderTransportError as exc:
-                if exc.submitted:
-                    self.budget_ledger.settle(
-                        reservation["id"],
-                        usage=None,
-                        outcome="unknown_remote_outcome",
-                    )
-                else:
-                    self.budget_ledger.release(
-                        reservation["id"],
-                        reason=str(exc),
-                    )
-                return {
-                    "ok": False,
-                    "provider_id": provider_id,
-                    "model_id": target_model,
-                    "error": _sanitize_audio_error(exc),
-                    "status": "failed",
-                    "submitted": exc.submitted,
-                }
-            except Exception as exc:
-                self.budget_ledger.release(
-                    reservation["id"],
-                    reason=str(exc),
-                )
-                return {
-                    "ok": False,
-                    "provider_id": provider_id,
-                    "model_id": target_model,
-                    "error": _sanitize_audio_error(exc),
-                    "status": "failed",
-                }
-        finally:
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
+            validate_endpoint(provider_id, provider.base_url if provider else None)
+            with tempfile.TemporaryDirectory(prefix="oida-probe-") as directory:
+                path = Path(directory) / "probe.wav"
+                with wave.open(str(path), "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(16000)
+                    wf.writeframes(bytes(16000))
+                with use_audio_model(selector(spec)), self.request_policy(source_type="file", allow_external_source=True, deadline=time.monotonic()+120):
+                    result = self.generate(str(path), "Describe this sound briefly.", replace(INSTRUCT_CAPTION, max_new_tokens=128))
+            self.budget_ledger.record_probe(provider_id, target)
+            return dict(ok=True, provider_id=provider_id, model_id=target, status="inference_tested", usage=result.usage)
+        except Exception as exc:
+            return dict(ok=False, status="failed", error=_sanitize_audio_error(exc))
 
     def _credential(self, provider_id: str, provider: Any) -> str | None:
         name = provider.credential_ref or "api_key"
@@ -987,7 +901,7 @@ class RoutedAudioEngine(MossEngine):
                 join_url(base_url, "/chat/completions"),
                 payload=payload,
                 headers=headers,
-                timeout=600,
+                timeout=self._timeout(),
             )
             if response.status >= 400:
                 raise ProviderTransportError(f"Audio provider HTTP {response.status}")
@@ -1112,7 +1026,7 @@ class RoutedAudioEngine(MossEngine):
             join_url(base_url, f"/models/{model}:generateContent"),
             payload=payload,
             headers={"x-goog-api-key": key},
-            timeout=600,
+            timeout=self._timeout(),
         )
         if response.status >= 400:
             raise ProviderTransportError(f"Gemini audio HTTP {response.status}")
@@ -1159,7 +1073,7 @@ class RoutedAudioEngine(MossEngine):
             fields=fields,
             file_path=path,
             headers=_bearer_headers(key),
-            timeout=900,
+            timeout=self._timeout(),
         )
         text = _transcription_text(data)
         if not text:

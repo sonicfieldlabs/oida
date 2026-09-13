@@ -36,7 +36,7 @@ class Rules(Strict):
     autonomous: bool = False
     loop: bool = False
     relisten: Literal["never", "gaps", "always"] = "gaps"
-    relisten_route: str = Field(default="deep", min_length=1, max_length=80)
+    relisten_route: str = Field(default="deep", min_length=1, max_length=70)
     continuation: Literal["never", "relations", "always"] = "relations"
     branch: bool = False
     generate: bool = False
@@ -85,7 +85,7 @@ class Boundaries(Strict):
 
 class RelisteningStep(Strict):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
-    route_preset: str = Field(default="basic", min_length=1, max_length=80)
+    route_preset: str = Field(default="basic", min_length=1, max_length=70)
     listening_mode: str | None = Field(default=None, max_length=100)
     model_id: str | None = Field(default=None, max_length=256)
     audio_model: AudioModel | None = None
@@ -97,9 +97,9 @@ class RelisteningStep(Strict):
 class Relistening(Strict):
     enabled: bool = False
     modalities: list[str] = Field(
-        default_factory=lambda: ["deep"], max_length=8
+        default_factory=lambda: ["deep"], max_length=7
     )
-    steps: list[RelisteningStep] = Field(default_factory=list, max_length=8)
+    steps: list[RelisteningStep] = Field(default_factory=list, max_length=7)
 
     @model_validator(mode="after")
     def compile_steps(self):
@@ -114,6 +114,16 @@ class Relistening(Strict):
             ]
         elif self.steps and not self.modalities:
             self.modalities = [s.route_preset for s in self.steps]
+        self.modalities = [s.route_preset for s in self.steps]
+        seen = {"initial"}
+        for step in self.steps:
+            if step.model_id is not None and step.audio_model is not None:
+                raise ValueError("Conflicting step model selectors")
+            if step.id in seen or len(set(step.context_steps)) != len(step.context_steps) or not set(step.context_steps) <= seen:
+                raise ValueError("Context must reference distinct earlier steps")
+            if step.context_policy == "independent" and step.context_steps:
+                raise ValueError("Independent passes cannot have prior context")
+            seen.add(step.id)
         step_ids = [s.id for s in self.steps]
         if len(step_ids) != len(set(step_ids)):
             raise ValueError("Relistening step IDs must be unique")
@@ -181,7 +191,7 @@ class Decide(Strict):
     chain_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
     record_id: str = Field(pattern=r"^[A-Za-z0-9_:-]{1,100}$")
     settings: Settings | None = None
-    comparison_ids: list[str] = Field(default_factory=list, max_length=8)
+    comparison_ids: list[str] = Field(default_factory=list, max_length=7)
     choices: list[Choice] = Field(default_factory=list, max_length=20)
     available_analysis: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(default_factory=list, max_length=3)
     retained_seconds: float | None = Field(default=None, gt=0, le=86400)

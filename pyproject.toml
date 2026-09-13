@@ -43,7 +43,8 @@ Issues = "https://github.com/sonicfieldlabs/oida/issues"
 
 [tool.uv.sources]
 akousma = { path = "../earworm/packages/py-akousma", editable = true }
-akouo-contract = { path = "../akouo", editable = true }
+# AKOÚŌ bundles schemas through wheel force-include; editable installs omit them.
+akouo-contract = { path = "../akouo" }
 akousmata = { path = "../akousmata", editable = true }
 
 [project.optional-dependencies]

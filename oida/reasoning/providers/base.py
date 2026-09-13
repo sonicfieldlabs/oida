@@ -96,7 +96,7 @@ class ProviderTransportError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.status = status
-        self.submitted = submitted
+        self.submitted = submitted is not False
 
 
 class UrllibJsonTransport:
@@ -153,7 +153,7 @@ class UrllibJsonTransport:
             ) from exc
         except urllib.error.URLError as exc:
             raise ProviderTransportError(
-                f"HTTP connection failed: {exc.reason}", submitted=False
+                f"HTTP connection failed: {exc.reason}", submitted=True
             ) from exc
         except (TimeoutError, UnicodeError, json.JSONDecodeError) as exc:
             raise ProviderTransportError(

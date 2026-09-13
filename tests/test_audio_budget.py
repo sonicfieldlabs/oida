@@ -26,9 +26,19 @@ from test_reasoning_audio_router import (
     DictSecrets,
     FakeEngine,
     FakeTransport,
-    _audio,
 )
 from oida.recipes import INSTRUCT_CAPTION
+
+
+def _audio(root):
+    import wave
+    path = root / "fixture.wav"
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16000)
+        wf.writeframes(bytes(32000))
+    return path
 
 
 def _setup_test_router(
@@ -81,14 +91,14 @@ def test_default_budget_config_and_persistence():
         assert state["remaining_usd"] == 5.0
         assert state["committed_usd"] == 0.0
 
-        updated = ledger.update_config({"enabled": True, "total_ceiling_usd": 10.0})
+        updated = ledger.update_config({"enabled": True, "total_ceiling_usd": 4.0})
         assert updated.enabled is True
-        assert updated.total_ceiling_usd == 10.0
+        assert updated.total_ceiling_usd == 4.0
 
         # Reload from disk
         reloaded = BudgetLedger(root / "budget")
         assert reloaded.config.enabled is True
-        assert reloaded.config.total_ceiling_usd == 10.0
+        assert reloaded.config.total_ceiling_usd == 4.0
 
 
 def test_pricing_and_quote_cost():
@@ -139,6 +149,7 @@ def test_reservation_settlement_and_receipt_enrichment():
             "usageMetadata": {
                 "promptTokenCount": 320,
                 "candidatesTokenCount": 45,
+                "thoughtsTokenCount": 0,
                 "totalTokenCount": 365,
             },
         }
