@@ -1,5 +1,13 @@
 # OÍDA architecture
 
+When `LISTENINGSTACK_WORKSPACE_ID` and
+`LISTENINGSTACK_WORKSPACE_GENERATION` are set before process construction, Oída
+exposes side-effect-free `GET /owner/identity` and requires the matching Station
+headers and owner-derived binding token for every mutation. The fingerprint covers
+effective data, audio, shared Akousmata and global trial roots. Direct calls with a
+missing, stale or wrong-storage binding are refused before route work. Without those
+variables Oída reports explicit `legacy` mode.
+
 OÍDA is one local process with several clients, not a collection of competing
 apps. The FastAPI daemon owns listening state and exposes the same contracts to
 the dashboard, native macOS shell, CLI, MCP clients, host integrations, and the

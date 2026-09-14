@@ -102,9 +102,15 @@ class Workspace:
     def validate_selection(self, req):
         if req.provider_id == "local_ecology":
             registry = self.reasoning.registry_factory(self.settings.load())
-            models = registry.list_models(req.provider_id) if registry.get(req.provider_id) is not None else []
+            models = (
+                registry.list_models(req.provider_id)
+                if registry.get(req.provider_id) is not None
+                else []
+            )
             if req.model_id is None:
-                req.model_id = next((m.id for m in models if m.metadata.get("recommended")), None)
+                req.model_id = next(
+                    (m.id for m in models if m.metadata.get("recommended")), None
+                )
             if not any(m.id == req.model_id for m in models):
                 raise HTTPException(409, "Choose an admitted local planning model")
             return
@@ -244,7 +250,9 @@ class Workspace:
                 reference = self.journal.get("record_reference", identifier) or {}
                 # Control owns the reasoning decision for its entire run. Keep
                 # global automatic expansion from overriding Off or duplicating On.
-                managed = str(reference.get("operation_id", "")).startswith(("control-", "situated-", "discovery-"))
+                managed = str(reference.get("operation_id", "")).startswith(
+                    ("control-", "situated-", "discovery-")
+                )
                 if first == sequence and not managed:
                     request_id = (
                         "auto_"
@@ -431,7 +439,9 @@ class Workspace:
         }
 
 
-def workspace_router(workspace, providers, models, require_admin):
+def workspace_router(
+    workspace, providers, models, require_admin, invalidate_probes=None
+):
     router = APIRouter(prefix="/reasoning/workspace")
 
     @router.get("/options")
@@ -465,6 +475,8 @@ def workspace_router(workspace, providers, models, require_admin):
                 }
             )
             workspace.settings.save(updated)
+            if invalidate_probes is not None:
+                invalidate_probes(selection.provider_id)
         return options()
 
     @router.get("/state")
@@ -499,7 +511,9 @@ def workspace_router(workspace, providers, models, require_admin):
         return workspace.configure(req)
 
     from oida.discovery_tools import discovery_tools_router
+
     router.include_router(discovery_tools_router(workspace, require_admin))
     from oida.situated_listener import situated_router
+
     router.include_router(situated_router(workspace, require_admin))
     return router

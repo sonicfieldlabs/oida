@@ -70,6 +70,15 @@ Set `OIDA_CAPTURE_SOURCES` to a local JSON manifest before starting the daemon:
 }
 ```
 
+The v1 contract remains the trusted configured-source format above. For a public
+radio directory, use `oida/capture-sources/v2` and add
+`"network_policy":"public_radio"` plus `"retention":"temp_only"` to each radio.
+Oída then validates and pins every public DNS hop, fetches bounded bytes without a
+proxy, refuses playlists/private destinations, and decodes only the temporary local
+file. For this v2 policy, `sample_rate` and `channels` are admission maxima; the
+capture receipt records the actual native values. A client must confirm the
+`bounded-public-radio-v1` capability before supplying such a manifest.
+
 FFmpeg must be installed with the selected input backend. `avfoundation` uses the
 macOS device's current native format; set it in the operating system first.
 `alsa` passes the configured rate/channels as input negotiation options. `radio`
@@ -78,7 +87,8 @@ never arbitrary input URLs or FFmpeg arguments. Source URLs are not returned by
 the registry or copied into error receipts. An operator-selected stream is a
 trusted network source, not a sandboxed public proxy.
 
-`GET /sources/capture` lists configured sources as `configured_unverified`.
+`GET /sources/capture` returns `oida/capture-sources/v2`, its capabilities, and
+configured sources as `configured_unverified`.
 Configuration does not prove device presence, permission, calibration or bandwidth.
 The capture does not set output resampling options. It rejects the result if its
 actual rate/channels differ from the configured expectation. Windows native

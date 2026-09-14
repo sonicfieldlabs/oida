@@ -50,6 +50,9 @@ owner. Redirects are rechecked; private, local, link-local and Tailnet destinati
 credentials and file URLs are refused. Fetches are time/byte bounded. Only direct
 MP3/AAC/WAV/FLAC/Ogg demuxing is admitted, from a local temporary download with
 network protocols disabled in the decoder. Playlists and HLS remain unavailable.
+Configured `oida/capture-sources/v2` entries can request the same behavior with
+`network_policy: public_radio` and `retention: temp_only`; v1 radio entries retain
+their trusted configured-source compatibility.
 
 ## System output and optional analysis
 

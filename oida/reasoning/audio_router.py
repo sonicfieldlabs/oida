@@ -27,8 +27,17 @@ from oida.listening_identity import (
     ListeningIdentitySnapshot,
     ListeningIdentityStore,
 )
-from oida.reasoning.contracts import ModelRole, ProviderLocality, ReasoningSettings, RoleAssignment
-from oida.reasoning.audio_selection import selected_audio_model, resolve, validate_endpoint
+from oida.reasoning.contracts import (
+    ModelRole,
+    ProviderLocality,
+    ReasoningSettings,
+    RoleAssignment,
+)
+from oida.reasoning.audio_selection import (
+    selected_audio_model,
+    resolve,
+    validate_endpoint,
+)
 from oida.reasoning.budget import BudgetLedger, BudgetDenied, reservation_reference
 from oida.reasoning.model_catalog import find_model_spec
 from oida.reasoning.providers.base import (
@@ -45,13 +54,13 @@ from oida.reasoning.settings import ReasoningSettingsStore
 from oida.recipes import GenerationSettings
 
 
-
 def _sanitize_vocal_specialist_output(text: str) -> str:
     """Ensure vocal descriptions do not guess demographics, age, gender, or identity."""
     pattern = re.compile(
         r"(?i)\b(?:the\s+)?(?:speaker\s+(?:is|appears\s+to\s+be)|sounds\s+like|likely)\s+(?:a\s+)?(?:\d+[\s-]?year[\s-]?old\s+)?(?:male|female|man|woman|boy|girl)\b"
     )
     return pattern.sub("[vocal acoustic observation only]", text)
+
 
 AUDIO_PERCEPTION_SYSTEM_PROMPT = """You are an audio-perception component inside Oída.
 
@@ -94,12 +103,19 @@ def _prompt_with_listening_identity(prompt: str, identity: str) -> str:
 
 def _sanitize_audio_error(message: object) -> str:
     text = sanitize_error(message)
-    return re.sub(r"[A-Za-z0-9+/=]{120,}", "[audio_data_redacted]", re.sub(r"data:audio/[^;]+;base64,[A-Za-z0-9+/=]+", "[audio_data_redacted]", text))
+    return re.sub(
+        r"[A-Za-z0-9+/=]{120,}",
+        "[audio_data_redacted]",
+        re.sub(
+            r"data:audio/[^;]+;base64,[A-Za-z0-9+/=]+", "[audio_data_redacted]", text
+        ),
+    )
 
 
 def _audio_duration_seconds(path: Path) -> float:
     try:
         import wave
+
         with wave.open(str(path), "rb") as wf:
             frames = wf.getnframes()
             rate = wf.getframerate()
@@ -109,6 +125,7 @@ def _audio_duration_seconds(path: Path) -> float:
         pass
     try:
         import soundfile as sf
+
         info = sf.info(str(path))
         if info.duration:
             return float(info.duration)
@@ -129,7 +146,9 @@ class AudioRequestPolicy:
     deadline: float | None = None
     focus: str = ""
 
-    def listening_identity_block(self, passes: list[str] | tuple[str, ...]) -> dict[str, Any]:
+    def listening_identity_block(
+        self, passes: list[str] | tuple[str, ...]
+    ) -> dict[str, Any]:
         applied = [name for name in passes if name != "transcribe"]
         if not self.listening_identity.active:
             application = "inactive"
@@ -173,7 +192,6 @@ class RoutedAudioEngine(MossEngine):
         self.listening_identity_store = listening_identity_store
         self.incognito_getter = incognito_getter or (lambda: False)
         self.budget_ledger = budget_ledger
-        self._probed_models: set[tuple[str, str]] = set()
         self._transport = transport or UrllibJsonTransport()
         self._binary_uploader = binary_uploader or _put_binary
         self._policy: ContextVar[AudioRequestPolicy | None] = ContextVar(
@@ -201,7 +219,9 @@ class RoutedAudioEngine(MossEngine):
         policy = AudioRequestPolicy(
             privacy_mode=str(privacy_mode or "ephemeral"),
             covenant_engine=covenant_engine,
-            covenant_block=dict(covenant_block) if isinstance(covenant_block, dict) else None,
+            covenant_block=dict(covenant_block)
+            if isinstance(covenant_block, dict)
+            else None,
             listening_identity=(
                 listening_identity_snapshot
                 if listening_identity_snapshot is not None
@@ -225,7 +245,9 @@ class RoutedAudioEngine(MossEngine):
             return configured.roles[role]
         spec = resolve(selection)
         if role.value not in spec.roles:
-            raise EngineUnavailable("Selected audio model does not support this listening role")
+            raise EngineUnavailable(
+                "Selected audio model does not support this listening role"
+            )
         if spec.provider_id != "oida_moss":
             provider = configured.providers.get(spec.provider_id)
             if provider is None:
@@ -233,13 +255,22 @@ class RoutedAudioEngine(MossEngine):
             validate_endpoint(spec.provider_id, provider.base_url)
             # M2 supplies durable budget admission. Production transports stay closed
             # for explicit external selections until that boundary exists and budget is enabled.
-            if self._provider_locality(provider) == ProviderLocality.EXTERNAL and isinstance(self._transport, UrllibJsonTransport):
+            if self._provider_locality(
+                provider
+            ) == ProviderLocality.EXTERNAL and isinstance(
+                self._transport, UrllibJsonTransport
+            ):
                 if self.budget_ledger is None or not self.budget_ledger.config.enabled:
-                    raise EngineUnavailable("Cloud trial admission pending M2; paid calls disabled")
+                    raise EngineUnavailable(
+                        "Cloud trial admission pending M2; paid calls disabled"
+                    )
         return RoleAssignment(provider_id=spec.provider_id, model_id=spec.id)
 
-    def prepare_input_binding(self, audio_path: str, model_kind: str = "instruct") -> dict:
+    def prepare_input_binding(
+        self, audio_path: str, model_kind: str = "instruct"
+    ) -> dict:
         from oida.input_binding import unknown_binding
+
         role = _ROLE_FOR_MODEL_KIND.get(model_kind)
         if role is not None:
             try:
@@ -247,7 +278,9 @@ class RoutedAudioEngine(MossEngine):
             except ValueError:
                 return unknown_binding("Audio routing settings are unavailable")
             if assignment.provider_id != "oida_moss":
-                return unknown_binding("Selected provider preprocessing is not observable")
+                return unknown_binding(
+                    "Selected provider preprocessing is not observable"
+                )
         return self.local_engine.prepare_input_binding(audio_path, model_kind)
 
     def generate(
@@ -261,7 +294,9 @@ class RoutedAudioEngine(MossEngine):
         if role is None and selected_audio_model() is not None:
             raise EngineUnavailable("Unknown role for explicit audio model")
         if role is None:
-            return self.local_engine.generate(audio_path, prompt, settings, thinking_budget)
+            return self.local_engine.generate(
+                audio_path, prompt, settings, thinking_budget
+            )
         if role != ModelRole.TRANSCRIPTION:
             prompt = _prompt_with_listening_identity(
                 prompt,
@@ -279,7 +314,10 @@ class RoutedAudioEngine(MossEngine):
             )
         policy = self._policy.get()
         if policy and policy.focus:
-            prompt += "\n\nOPERATOR FOCUS AND RETAINED ACCOUNTS (context, not fresh audio evidence):\n" + policy.focus
+            prompt += (
+                "\n\nOPERATOR FOCUS AND RETAINED ACCOUNTS (context, not fresh audio evidence):\n"
+                + policy.focus
+            )
         self._check_dispatch()
         assignment = self._assignment(configured, role)
         provider = configured.providers.get(assignment.provider_id)
@@ -287,22 +325,34 @@ class RoutedAudioEngine(MossEngine):
 
         if assignment.provider_id != "oida_moss":
             from oida.input_binding import reject_unobservable_binding
+
             reject_unobservable_binding()
         if assignment.provider_id == "oida_moss":
             spec = find_model_spec("oida_moss", model_id)
             if spec and not spec.selectable:
                 raise EngineUnavailable("Local model runtime qualification pending")
             self._record_route(role, assignment.provider_id, model_id, "embedded")
-            result = self.local_engine.generate(audio_path, prompt, settings, thinking_budget)
+            result = self.local_engine.generate(
+                audio_path, prompt, settings, thinking_budget
+            )
             selection = selected_audio_model()
             if selection is not None:
                 actual = find_model_spec("oida_moss", result.model)
-                if result.unavailable_reason or actual is None or actual.id != selection.model_id:
-                    raise EngineUnavailable("Local engine did not return the selected audio model")
+                if (
+                    result.unavailable_reason
+                    or actual is None
+                    or actual.id != selection.model_id
+                ):
+                    raise EngineUnavailable(
+                        "Local engine did not return the selected audio model"
+                    )
                 result = replace(result, reasoning_trace=None)
                 for receipt in result.pass_provenance:
-                    receipt.update(requested_audio_model=selection.model_dump(),
-                        actual_audio_model=selection.model_dump(), usage=result.usage)
+                    receipt.update(
+                        requested_audio_model=selection.model_dump(),
+                        actual_audio_model=selection.model_dump(),
+                        usage=result.usage,
+                    )
             return result
         if provider is None or not provider.enabled:
             return self._fallback(
@@ -323,9 +373,14 @@ class RoutedAudioEngine(MossEngine):
 
         spec = find_model_spec(assignment.provider_id, model_id)
         if spec and not spec.selectable:
-            raise EngineUnavailable("Selected model runtime is not qualified for dispatch")
+            raise EngineUnavailable(
+                "Selected model runtime is not qualified for dispatch"
+            )
         locality = self._provider_locality(provider)
-        if assignment.provider_id == "local_audio" and locality != ProviderLocality.LOCAL:
+        if (
+            assignment.provider_id == "local_audio"
+            and locality != ProviderLocality.LOCAL
+        ):
             return self._fallback(
                 audio_path,
                 prompt,
@@ -349,12 +404,28 @@ class RoutedAudioEngine(MossEngine):
                 thinking_budget,
                 "Groq Whisper is dedicated to transcription only; general listening is not supported",
             )
-        if locality != ProviderLocality.LOCAL and isinstance(self._transport, UrllibJsonTransport) and self.budget_ledger is None:
-            raise EngineUnavailable("External listening requires a durable trial ledger")
+        if (
+            locality != ProviderLocality.LOCAL
+            and isinstance(self._transport, UrllibJsonTransport)
+            and self.budget_ledger is None
+        ):
+            raise EngineUnavailable(
+                "External listening requires a durable trial ledger"
+            )
         if locality == ProviderLocality.EXTERNAL:
             blocked = self._external_audio_block(configured)
             if blocked:
-                return self._fallback(audio_path, prompt, settings, thinking_budget, blocked)
+                return self._fallback(
+                    audio_path, prompt, settings, thinking_budget, blocked
+                )
+            if not self._credential(assignment.provider_id, provider):
+                return self._fallback(
+                    audio_path,
+                    prompt,
+                    settings,
+                    thinking_budget,
+                    f"{assignment.provider_id} credential is unavailable",
+                )
 
         policy = self._policy.get()
         if policy and policy.stop_check and policy.stop_check():
@@ -369,7 +440,9 @@ class RoutedAudioEngine(MossEngine):
         reservation: dict[str, Any] | None = None
         if locality == ProviderLocality.EXTERNAL and self.budget_ledger is not None:
             audio_sec = _audio_duration_seconds(Path(audio_path))
-            ref = reservation_reference(getattr(settings, "request_id", None) or Path(audio_path).stem)
+            ref = reservation_reference(
+                getattr(settings, "request_id", None) or Path(audio_path).stem
+            )
             try:
                 reservation = self.budget_ledger.reserve(
                     provider_id=assignment.provider_id,
@@ -377,7 +450,10 @@ class RoutedAudioEngine(MossEngine):
                     audio_seconds=audio_sec,
                     max_output_tokens=settings.max_new_tokens,
                     reference=ref,
-                    text_input_tokens=len((prompt + AUDIO_PERCEPTION_SYSTEM_PROMPT).encode("utf-8")) + 1024,
+                    text_input_tokens=len(
+                        (prompt + AUDIO_PERCEPTION_SYSTEM_PROMPT).encode("utf-8")
+                    )
+                    + 1024,
                 )
             except BudgetDenied as exc:
                 return self._fallback(
@@ -389,13 +465,18 @@ class RoutedAudioEngine(MossEngine):
                 )
 
         if reservation:
-            settings = replace(settings, max_new_tokens=reservation["max_output_tokens"])
+            settings = replace(
+                settings, max_new_tokens=reservation["max_output_tokens"]
+            )
         reservation_id = reservation["id"] if reservation else None
         settled = False
+        possibly_submitted = False
         try:
             if policy and policy.stop_check and policy.stop_check():
                 if reservation_id:
-                    self.budget_ledger.release(reservation_id, reason="Cancelled before dispatch")
+                    self.budget_ledger.release(
+                        reservation_id, reason="Cancelled before dispatch"
+                    )
                     settled = True
                 return self._fallback(
                     audio_path,
@@ -412,10 +493,32 @@ class RoutedAudioEngine(MossEngine):
             while attempts < max_attempts:
                 attempts += 1
                 self._check_dispatch()
-                if locality == ProviderLocality.EXTERNAL and self._external_audio_block(self.settings_store.load()):
-                    raise EngineUnavailable("External audio permission revoked")
+                current_settings = self.settings_store.load()
+                current_provider = current_settings.providers.get(
+                    assignment.provider_id
+                )
+                if locality == ProviderLocality.EXTERNAL:
+                    if self._external_audio_block(current_settings):
+                        raise EngineUnavailable("External audio permission revoked")
+                    if current_provider is None or self._probe_fingerprint(
+                        assignment.provider_id, model_id, current_provider
+                    ) != self._probe_fingerprint(
+                        assignment.provider_id, model_id, provider
+                    ):
+                        raise EngineUnavailable(
+                            "Provider configuration changed before dispatch"
+                        )
+                    if reservation_id:
+                        try:
+                            self.budget_ledger.assert_dispatch(reservation_id)
+                        except BudgetDenied as exc:
+                            raise EngineUnavailable(exc.reason) from exc
                 try:
-                    submitted_hash = hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() if selected_audio_model() else None
+                    submitted_hash = (
+                        hashlib.sha256(Path(audio_path).read_bytes()).hexdigest()
+                        if selected_audio_model()
+                        else None
+                    )
                     result = self._generate_provider_audio(
                         provider_id=assignment.provider_id,
                         model_id=model_id,
@@ -426,18 +529,31 @@ class RoutedAudioEngine(MossEngine):
                         settings=settings,
                         thinking_budget=thinking_budget,
                     )
+                    possibly_submitted = True
                     break
                 except ProviderTransportError as exc:
                     last_exc = exc
                     if exc.submitted is not False:
+                        possibly_submitted = True
                         break
-                    is_conn_error = isinstance(getattr(exc, "__cause__", None), (urllib.error.URLError, ConnectionError, TimeoutError))
+                    is_conn_error = isinstance(
+                        getattr(exc, "__cause__", None),
+                        (urllib.error.URLError, ConnectionError, TimeoutError),
+                    )
                     if attempts < max_attempts and is_conn_error:
                         continue
                     break
+                except Exception:
+                    # Only the transport's explicit submitted=False contract
+                    # proves that an attempted provider call has no liability.
+                    possibly_submitted = True
+                    raise
 
             if result is None:
-                if last_exc is None or getattr(last_exc, "submitted", True) is not False:
+                if (
+                    last_exc is None
+                    or getattr(last_exc, "submitted", True) is not False
+                ):
                     if reservation_id:
                         self.budget_ledger.settle(
                             reservation_id,
@@ -489,10 +605,17 @@ class RoutedAudioEngine(MossEngine):
             self._check_dispatch()
             selection = selected_audio_model()
             if selection is not None:
-                if hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() != submitted_hash:
-                    raise EngineUnavailable("Audio changed during selected model inference")
+                if (
+                    hashlib.sha256(Path(audio_path).read_bytes()).hexdigest()
+                    != submitted_hash
+                ):
+                    raise EngineUnavailable(
+                        "Audio changed during selected model inference"
+                    )
                 if result.model != model_id:
-                    raise EngineUnavailable("Provider returned a different model than the selected deployment")
+                    raise EngineUnavailable(
+                        "Provider returned a different model than the selected deployment"
+                    )
                 result = replace(result, reasoning_trace=None)
                 for receipt in result.pass_provenance:
                     receipt.update(
@@ -508,6 +631,11 @@ class RoutedAudioEngine(MossEngine):
             self._record_route(role, assignment.provider_id, model_id, "completed")
             return result
         except (EngineUnavailable, ProviderTransportError, OSError, ValueError) as exc:
+            if reservation_id and not settled and not possibly_submitted:
+                self.budget_ledger.release(
+                    reservation_id, reason=_sanitize_audio_error(exc)
+                )
+                settled = True
             return self._fallback(
                 audio_path,
                 prompt,
@@ -528,15 +656,23 @@ class RoutedAudioEngine(MossEngine):
 
     def _check_dispatch(self):
         from oida.operation_control import checkpoint
+
         checkpoint()
         policy = self._policy.get()
-        if policy and ((policy.stop_check and policy.stop_check()) or (policy.deadline is not None and time.monotonic() >= policy.deadline)):
+        if policy and (
+            (policy.stop_check and policy.stop_check())
+            or (policy.deadline is not None and time.monotonic() >= policy.deadline)
+        ):
             raise EngineUnavailable("Listening cancelled or deadline exceeded")
 
     def _timeout(self):
         self._check_dispatch()
         policy = self._policy.get()
-        return max(0.01, min(120.0, policy.deadline - time.monotonic())) if policy and policy.deadline is not None else 120.0
+        return (
+            max(0.01, min(120.0, policy.deadline - time.monotonic()))
+            if policy and policy.deadline is not None
+            else 120.0
+        )
 
     def prewarm(self, model_kind: str = "instruct") -> None:
         try:
@@ -581,7 +717,9 @@ class RoutedAudioEngine(MossEngine):
                 {
                     "audio_routing": routing,
                     "external_audio_enabled": external_audio,
-                    "last_audio_route": dict(self._last_route) if self._last_route else None,
+                    "last_audio_route": dict(self._last_route)
+                    if self._last_route
+                    else None,
                     "last_audio_routing_warning": self._last_warning,
                 }
             )
@@ -605,11 +743,15 @@ class RoutedAudioEngine(MossEngine):
         with self._status_lock:
             self._last_warning = reason
             self._last_route = {
-                "role": _ROLE_FOR_MODEL_KIND.get(settings.model_kind, ModelRole.FAST_PERCEPTION).value,
+                "role": _ROLE_FOR_MODEL_KIND.get(
+                    settings.model_kind, ModelRole.FAST_PERCEPTION
+                ).value,
                 "status": "local_fallback",
                 "reason": reason,
             }
-        return self.local_engine.generate(audio_path, prompt, local_settings, thinking_budget)
+        return self.local_engine.generate(
+            audio_path, prompt, local_settings, thinking_budget
+        )
 
     def _record_route(
         self,
@@ -636,13 +778,37 @@ class RoutedAudioEngine(MossEngine):
                 return ProviderLocality.UNKNOWN
         return provider.locality
 
+    @staticmethod
+    def _probe_fingerprint(provider_id: str, model_id: str, provider: Any) -> str:
+        spec = find_model_spec(provider_id, model_id)
+        payload = {
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "provider": provider.model_dump(mode="json")
+            if provider is not None
+            else None,
+            "adapter": {
+                "runtime": spec.runtime if spec else None,
+                "revision": spec.revision if spec else None,
+                "transport": spec.audio_transport if spec else None,
+                "integration_status": spec.integration_status if spec else None,
+            },
+            "qualification_contract": "oida/audio-probe/v2",
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
     def _external_audio_block(self, settings: ReasoningSettings) -> str | None:
         if not settings.allow_external_audio:
             return "external audio sharing is off; enable it explicitly in Reasoning settings"
         policy = self._policy.get() or AudioRequestPolicy()
         if policy.privacy_mode == "incognito" or bool(self.incognito_getter()):
             return "incognito mode blocks external audio"
-        if policy.source_type in {"live_input", "browser-microphone", "microphone"} and not policy.allow_external_source:
+        if (
+            policy.source_type in {"live_input", "browser-microphone", "microphone"}
+            and not policy.allow_external_source
+        ):
             return "live microphone audio requires explicit external audio permission"
         historical = policy.covenant_block or {}
         applied = {str(value) for value in historical.get("rules_applied") or []}
@@ -651,10 +817,14 @@ class RoutedAudioEngine(MossEngine):
             for item in historical.get("withheld") or []
             if isinstance(item, dict)
         }
-        if "do_not_reveal:raw-audio" in applied or (
-            "do_not_reveal",
-            "raw-audio",
-        ) in withheld:
+        if (
+            "do_not_reveal:raw-audio" in applied
+            or (
+                "do_not_reveal",
+                "raw-audio",
+            )
+            in withheld
+        ):
             return "the listening event's covenant blocks external raw audio"
         covenant_engine = policy.covenant_engine
         if covenant_engine is None and self.covenant_store is not None:
@@ -673,12 +843,19 @@ class RoutedAudioEngine(MossEngine):
         return None
 
     def is_model_probed(self, provider_id: str, model_id: str) -> bool:
-        with self._status_lock:
-            if (provider_id, model_id) in self._probed_models:
-                return True
-        if self.budget_ledger is not None:
-            return self.budget_ledger.is_probed(provider_id, model_id)
-        return False
+        if self.budget_ledger is None:
+            return False
+        try:
+            provider = self.settings_store.load().providers.get(provider_id)
+        except ValueError:
+            return False
+        if provider is None:
+            return False
+        return self.budget_ledger.is_probed(
+            provider_id,
+            model_id,
+            fingerprint=self._probe_fingerprint(provider_id, model_id, provider),
+        )
 
     def probe_audio(self, provider_id, model_id=None):
         """A probe is a bounded ordinary listening request with the same gates."""
@@ -686,14 +863,36 @@ class RoutedAudioEngine(MossEngine):
         from oida.recipes import INSTRUCT_CAPTION
         import tempfile
         import wave
-        target = model_id or {"google": "gemini-3.5-flash-lite", "alibaba": "qwen3.5-omni-flash"}.get(provider_id)
+
+        target = model_id or {
+            "google": "gemini-3.5-flash-lite",
+            "alibaba": "qwen3.5-omni-flash",
+        }.get(provider_id)
         spec = find_model_spec(provider_id, target)
-        if spec is None or not spec.selectable or provider_id not in {"google", "alibaba"}:
-            return dict(ok=False, status="unqualified", error="Probe requires a qualified candidate adapter and verified price basis")
+        if (
+            spec is None
+            or not spec.selectable
+            or provider_id not in {"google", "alibaba"}
+        ):
+            return dict(
+                ok=False,
+                status="unqualified",
+                error="Probe requires a qualified candidate adapter and verified price basis",
+            )
         if self.budget_ledger is None or not self.budget_ledger.config.enabled:
-            return dict(ok=False, status="budget_disabled", error="Cloud trial budget is not enabled")
+            return dict(
+                ok=False,
+                status="budget_disabled",
+                error="Cloud trial budget is not enabled",
+            )
         provider = self.settings_store.load().providers.get(provider_id)
         try:
+            if provider is None or not provider.enabled:
+                raise ValueError(
+                    "Provider must be enabled with a stored credential before probing"
+                )
+            if not self._credential(provider_id, provider):
+                raise ValueError("Provider credential is unavailable")
             validate_endpoint(provider_id, provider.base_url if provider else None)
             with tempfile.TemporaryDirectory(prefix="oida-probe-") as directory:
                 path = Path(directory) / "probe.wav"
@@ -702,10 +901,31 @@ class RoutedAudioEngine(MossEngine):
                     wf.setsampwidth(2)
                     wf.setframerate(16000)
                     wf.writeframes(bytes(16000))
-                with use_audio_model(selector(spec)), self.request_policy(source_type="file", allow_external_source=True, deadline=time.monotonic()+120):
-                    result = self.generate(str(path), "Describe this sound briefly.", replace(INSTRUCT_CAPTION, max_new_tokens=128))
-            self.budget_ledger.record_probe(provider_id, target)
-            return dict(ok=True, provider_id=provider_id, model_id=target, status="inference_tested", usage=result.usage)
+                with (
+                    use_audio_model(selector(spec)),
+                    self.request_policy(
+                        source_type="file",
+                        allow_external_source=True,
+                        deadline=time.monotonic() + 120,
+                    ),
+                ):
+                    result = self.generate(
+                        str(path),
+                        "Describe this sound briefly.",
+                        replace(INSTRUCT_CAPTION, max_new_tokens=128),
+                    )
+            self.budget_ledger.record_probe(
+                provider_id,
+                target,
+                fingerprint=self._probe_fingerprint(provider_id, target, provider),
+            )
+            return dict(
+                ok=True,
+                provider_id=provider_id,
+                model_id=target,
+                status="inference_tested",
+                usage=result.usage,
+            )
         except Exception as exc:
             return dict(ok=False, status="failed", error=_sanitize_audio_error(exc))
 
@@ -755,8 +975,13 @@ class RoutedAudioEngine(MossEngine):
                 f"audio chunk is {path.stat().st_size / 1_048_576:.1f} MiB; the {provider_id} inline-audio limit is {max_bytes / 1_048_576:.0f} MiB"
             )
         if transport == "openai_transcription" or provider_id == "groq":
-            if provider_id == "groq" and settings.model_kind not in {"transcription", "speech"}:
-                raise EngineUnavailable("Groq Whisper is dedicated to transcription only; general listening is not supported")
+            if provider_id == "groq" and settings.model_kind not in {
+                "transcription",
+                "speech",
+            }:
+                raise EngineUnavailable(
+                    "Groq Whisper is dedicated to transcription only; general listening is not supported"
+                )
             return self._openai_transcription(
                 provider_id=provider_id,
                 model_id=model_id,
@@ -786,13 +1011,14 @@ class RoutedAudioEngine(MossEngine):
             thinking_budget=thinking_budget,
             transport=transport,
             force_stream=bool(provider.options.get("stream", False)),
-            sglang_thinking_processor=provider.options.get(
-                "sglang_thinking_processor"
-            ),
+            sglang_thinking_processor=provider.options.get("sglang_thinking_processor"),
         )
         if "moss-music" in model_id.lower():
             for receipt in result.pass_provenance:
-                receipt["input_representation"] = {"sample_rate_hz": 24000, "channels": 2}
+                receipt["input_representation"] = {
+                    "sample_rate_hz": 24000,
+                    "channels": 2,
+                }
         return result
 
     def _openai_audio_chat(
@@ -849,7 +1075,9 @@ class RoutedAudioEngine(MossEngine):
                     }
 
             system_prompt = AUDIO_PERCEPTION_SYSTEM_PROMPT
-            is_vocal_specialist = provider_id == "stepfun" or "step-audio" in model_id.lower()
+            is_vocal_specialist = (
+                provider_id == "stepfun" or "step-audio" in model_id.lower()
+            )
             if is_vocal_specialist:
                 system_prompt = (
                     "You are an acoustic and vocal specialist. "
@@ -906,13 +1134,23 @@ class RoutedAudioEngine(MossEngine):
             if response.status >= 400:
                 raise ProviderTransportError(f"Audio provider HTTP {response.status}")
             data = response.data if isinstance(response.data, dict) else {}
-            choices = data.get("choices") if isinstance(data.get("choices"), list) else []
-            message = choices[0].get("message") if choices and isinstance(choices[0], dict) else {}
+            choices = (
+                data.get("choices") if isinstance(data.get("choices"), list) else []
+            )
+            message = (
+                choices[0].get("message")
+                if choices and isinstance(choices[0], dict)
+                else {}
+            )
             content = message.get("content") if isinstance(message, dict) else None
             text = _content_text(content)
             if not text:
                 raise ProviderTransportError("audio completion did not contain text")
-            clean_text = _sanitize_vocal_specialist_output(text.strip()) if is_vocal_specialist else text.strip()
+            clean_text = (
+                _sanitize_vocal_specialist_output(text.strip())
+                if is_vocal_specialist
+                else text.strip()
+            )
             trace = (
                 _content_text(message.get("reasoning_content")).strip() or None
                 if isinstance(message, dict)
@@ -932,8 +1170,13 @@ class RoutedAudioEngine(MossEngine):
                 usage=_usage(data.get("usage")),
                 reasoning_trace=trace,
                 wall_ms=round((time.monotonic() - started) * 1000),
-                pass_provenance=[pass_receipt(model=str(data.get("model") or model_id),
-                    provider=provider_id, model_kind=settings.model_kind)],
+                pass_provenance=[
+                    pass_receipt(
+                        model=str(data.get("model") or model_id),
+                        provider=provider_id,
+                        model_kind=settings.model_kind,
+                    )
+                ],
             )
         finally:
             if staged_asset_id is not None and key:
@@ -1007,7 +1250,9 @@ class RoutedAudioEngine(MossEngine):
                         {
                             "inlineData": {
                                 "mimeType": _audio_mime(path),
-                                "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+                                "data": base64.b64encode(path.read_bytes()).decode(
+                                    "ascii"
+                                ),
                             }
                         },
                         {"text": prompt},
@@ -1031,11 +1276,23 @@ class RoutedAudioEngine(MossEngine):
         if response.status >= 400:
             raise ProviderTransportError(f"Gemini audio HTTP {response.status}")
         data = response.data if isinstance(response.data, dict) else {}
-        candidates = data.get("candidates") if isinstance(data.get("candidates"), list) else []
-        candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
-        content = candidate.get("content") if isinstance(candidate.get("content"), dict) else {}
+        candidates = (
+            data.get("candidates") if isinstance(data.get("candidates"), list) else []
+        )
+        candidate = (
+            candidates[0] if candidates and isinstance(candidates[0], dict) else {}
+        )
+        content = (
+            candidate.get("content")
+            if isinstance(candidate.get("content"), dict)
+            else {}
+        )
         parts = content.get("parts") if isinstance(content.get("parts"), list) else []
-        text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict) and not part.get("thought", False))
+        text = "".join(
+            str(part.get("text") or "")
+            for part in parts
+            if isinstance(part, dict) and not part.get("thought", False)
+        )
         if not text:
             raise ProviderTransportError("Gemini audio response did not contain text")
         return EngineResult(
@@ -1044,10 +1301,19 @@ class RoutedAudioEngine(MossEngine):
             profile="google-api",
             settings=settings,
             usage=_usage(data.get("usageMetadata"), gemini=True),
-            pass_provenance=[pass_receipt(model=model_id, provider="google",
-                model_kind=settings.model_kind,
-                revision=data.get("modelVersion") if isinstance(data.get("modelVersion"), str) else None,
-                revision_basis="provider_reported" if isinstance(data.get("modelVersion"), str) else "unknown")],
+            pass_provenance=[
+                pass_receipt(
+                    model=model_id,
+                    provider="google",
+                    model_kind=settings.model_kind,
+                    revision=data.get("modelVersion")
+                    if isinstance(data.get("modelVersion"), str)
+                    else None,
+                    revision_basis="provider_reported"
+                    if isinstance(data.get("modelVersion"), str)
+                    else "unknown",
+                )
+            ],
             wall_ms=round((time.monotonic() - started) * 1000),
         )
 
@@ -1077,13 +1343,23 @@ class RoutedAudioEngine(MossEngine):
         )
         text = _transcription_text(data)
         if not text:
-            raise ProviderTransportError("transcription endpoint did not return text or segments")
+            raise ProviderTransportError(
+                "transcription endpoint did not return text or segments"
+            )
         return EngineResult(
             text=text,
             model=str(data.get("model") or model_id),
-            profile="local-audio-host" if provider_id == "local_audio" else f"{provider_id}-api",
+            profile="local-audio-host"
+            if provider_id == "local_audio"
+            else f"{provider_id}-api",
             settings=settings,
-            pass_provenance=[pass_receipt(model=str(data.get("model") or model_id), provider=provider_id, model_kind=settings.model_kind)],
+            pass_provenance=[
+                pass_receipt(
+                    model=str(data.get("model") or model_id),
+                    provider=provider_id,
+                    model_kind=settings.model_kind,
+                )
+            ],
             wall_ms=round((time.monotonic() - started) * 1000),
         )
 
@@ -1132,7 +1408,9 @@ def _nvidia_asset_id(value: Any) -> str:
     try:
         parsed = uuid.UUID(normalized)
     except (ValueError, AttributeError) as exc:
-        raise ProviderTransportError("NVIDIA asset response did not contain a valid assetId") from exc
+        raise ProviderTransportError(
+            "NVIDIA asset response did not contain a valid assetId"
+        ) from exc
     return str(parsed)
 
 
@@ -1149,7 +1427,9 @@ def _nvidia_upload_url(value: Any) -> str:
         or parsed.fragment
         or not allowed_s3
     ):
-        raise ProviderTransportError("NVIDIA asset response contained an invalid upload URL")
+        raise ProviderTransportError(
+            "NVIDIA asset response contained an invalid upload URL"
+        )
     return normalized
 
 
@@ -1178,7 +1458,9 @@ def _put_binary(
             f"NVIDIA asset upload returned HTTP {exc.code}: {sanitize_error(raw)}"
         ) from exc
     except urllib.error.URLError as exc:
-        raise ProviderTransportError(f"NVIDIA asset upload failed: {exc.reason}") from exc
+        raise ProviderTransportError(
+            f"NVIDIA asset upload failed: {exc.reason}"
+        ) from exc
     except TimeoutError as exc:
         raise ProviderTransportError("NVIDIA asset upload timed out") from exc
 
@@ -1190,7 +1472,8 @@ def _content_text(value: Any) -> str:
         return "".join(
             str(item.get("text") or "")
             for item in value
-            if isinstance(item, dict) and item.get("type") in {None, "text", "output_text"}
+            if isinstance(item, dict)
+            and item.get("type") in {None, "text", "output_text"}
         )
     return ""
 
@@ -1220,7 +1503,9 @@ def _transcription_text(data: Mapping[str, Any]) -> str:
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+    def redirect_request(
+        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> None:
         del req, fp, code, msg, headers, newurl
         return None
 
@@ -1254,7 +1539,9 @@ def _multipart_request(
         "Content-Type": f"multipart/form-data; boundary={boundary}",
         **dict(headers or {}),
     }
-    request = urllib.request.Request(url, data=bytes(body), headers=request_headers, method="POST")
+    request = urllib.request.Request(
+        url, data=bytes(body), headers=request_headers, method="POST"
+    )
     handlers: list[Any] = [_NoRedirect()]
     if endpoint_locality(url) == "local":
         handlers.insert(0, urllib.request.ProxyHandler({}))
@@ -1263,10 +1550,14 @@ def _multipart_request(
         with opener.open(request, timeout=timeout) as response:
             raw = response.read(MAX_CAPTURE_CHARS + 1)
             if len(raw) > MAX_CAPTURE_CHARS:
-                raise ProviderTransportError("transcription response exceeded the capture limit")
+                raise ProviderTransportError(
+                    "transcription response exceeded the capture limit"
+                )
             data = json.loads(raw.decode("utf-8")) if raw else {}
             if not isinstance(data, dict):
-                raise ProviderTransportError("transcription response must be a JSON object")
+                raise ProviderTransportError(
+                    "transcription response must be a JSON object"
+                )
             return data
     except urllib.error.HTTPError as exc:
         raw = exc.read(MAX_ERROR_CHARS).decode("utf-8", errors="replace")
@@ -1274,15 +1565,28 @@ def _multipart_request(
     except urllib.error.URLError as exc:
         raise ProviderTransportError(f"HTTP connection failed: {exc.reason}") from exc
     except (TimeoutError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ProviderTransportError(f"invalid or timed-out transcription response: {exc}") from exc
+        raise ProviderTransportError(
+            f"invalid or timed-out transcription response: {exc}"
+        ) from exc
 
 
 def _usage(value, *, gemini=False):
     """Retain unknown counts as null; never coerce missing usage to zero."""
     value = value if isinstance(value, dict) else {}
-    keys = ("promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount", "totalTokenCount") if gemini else ("prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens")
+    keys = (
+        (
+            "promptTokenCount",
+            "candidatesTokenCount",
+            "thoughtsTokenCount",
+            "totalTokenCount",
+        )
+        if gemini
+        else ("prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens")
+    )
     result = {}
-    for name, key in zip(("input_tokens", "output_tokens", "reasoning_tokens", "total_tokens"), keys):
+    for name, key in zip(
+        ("input_tokens", "output_tokens", "reasoning_tokens", "total_tokens"), keys
+    ):
         number = value.get(key)
         result[name] = number if type(number) is int and number >= 0 else None
     return result

@@ -29,21 +29,21 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: sonicfieldlabs/akouo
-          ref: v0.9.2
+          ref: 110fe5b848f67840a724f347039b7b071b64e272
           path: akouo
 
       - name: Checkout Earworm
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: sonicfieldlabs/earworm
-          ref: v0.7.0
+          ref: a8b827b98222e8d437a766052c78860b311b3067
           path: earworm
 
       - name: Checkout Akousmata
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: sonicfieldlabs/akousmata
-          ref: v0.7.0
+          ref: 23015d71ba28eb4092163cdfe2a7ccab632949be
           path: akousmata
 
       - name: Install uv

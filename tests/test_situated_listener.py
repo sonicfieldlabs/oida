@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from oida.situated_listener import situated_router, Settings
 from oida.reasoning_workspace import Automatic
 from oida.reasoning.contracts import ProviderResult
-from test_reasoning_workspace import workspace  # noqa: F401
+from test_reasoning_workspace import workspace as workspace
 
 
 @pytest.fixture
@@ -196,41 +196,47 @@ def test_source_scope_and_output_cap_are_enforced(harness):
 
 @pytest.mark.parametrize("change", ["analysis", "segment", "unavailable"])
 def test_adaptive_moves_cannot_override_permissions(harness, change):
-    client, workspace, requests, output=harness
-    body=payload()
+    client, workspace, requests, output = harness
+    body = payload()
     if change == "analysis":
-        output["analysis_tasks"]=["transcribe"]
-        body["available_analysis"]=["transcribe"]
+        output["analysis_tasks"] = ["transcribe"]
+        body["available_analysis"] = ["transcribe"]
     elif change == "unavailable":
-        output["analysis_tasks"]=["transcribe"]
-        body["settings"]["rules"]["adaptive_analysis"]=True
+        output["analysis_tasks"] = ["transcribe"]
+        body["settings"]["rules"]["adaptive_analysis"] = True
     else:
-        output["segment"]={"start_seconds":0,"seconds":10}
-        body["retained_seconds"]=10
-    value=client.post("/situated/decide",json=body).json()
-    assert value["status"] == "complete" and value["action"] == "stop",value
+        output["segment"] = {"start_seconds": 0, "seconds": 10}
+        body["retained_seconds"] = 10
+    value = client.post("/situated/decide", json=body).json()
+    assert value["status"] == "complete" and value["action"] == "stop", value
     assert value["blockers"]
 
 
 def test_adaptive_owner_accepts_only_interval_inside_actual_audio(harness, monkeypatch):
     c, w, calls, out = harness
     old_reader = w.reader
-    monkeypatch.setattr(w, 'reader', lambda id: {**old_reader(id), 'audio': {'duration_seconds': 10}})
-    out.update(analysis_tasks=['transcribe'], segment={'start_seconds': 4, 'seconds': 3})
+    monkeypatch.setattr(
+        w, "reader", lambda id: {**old_reader(id), "audio": {"duration_seconds": 10}}
+    )
+    out.update(
+        analysis_tasks=["transcribe"], segment={"start_seconds": 4, "seconds": 3}
+    )
     p = payload(adaptive_analysis=True, adaptive_windows=True)
-    p.update(available_analysis=['transcribe'], retained_seconds=100)
-    v = c.post('/situated/decide', json=p).json()
-    assert v['status'] == 'complete' and v['action'] == 'relisten', v
-    assert json.loads(calls[0].user_prompt)['retained_seconds'] == 10
-    out['segment'] = {'start_seconds': 9, 'seconds': 3}
-    p['request_id'] = 'beyond-actual-audio'
-    assert c.post('/situated/decide', json=p).json()['action'] == 'stop'
+    p.update(available_analysis=["transcribe"], retained_seconds=100)
+    v = c.post("/situated/decide", json=p).json()
+    assert v["status"] == "complete" and v["action"] == "relisten", v
+    assert json.loads(calls[0].user_prompt)["retained_seconds"] == 10
+    out["segment"] = {"start_seconds": 9, "seconds": 3}
+    p["request_id"] = "beyond-actual-audio"
+    assert c.post("/situated/decide", json=p).json()["action"] == "stop"
 
 
 def test_generated_subject_cannot_claim_convergence(harness):
     client, workspace, calls, output = harness
     output.update(kind="convergence", action="stop")
-    response = client.post("/situated/decide", json={**payload(), "subject_generated": True}).json()
-    assert response['status'] != 'complete'
-    assert 'Generated-subject' in response['error']
-    assert json.loads(calls[0].user_prompt)['subject_generated'] is True
+    response = client.post(
+        "/situated/decide", json={**payload(), "subject_generated": True}
+    ).json()
+    assert response["status"] != "complete"
+    assert "Generated-subject" in response["error"]
+    assert json.loads(calls[0].user_prompt)["subject_generated"] is True

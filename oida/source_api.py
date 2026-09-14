@@ -39,11 +39,15 @@ from oida.reasoning.audio_selection import AudioModel
 class AcquisitionRequest(BaseModel):
     audio_model: AudioModel | None = None
     allow_external_audio: bool = False
-    passes: list[Literal["transcribe", "events", "caption", "speech", "music"]] | None = Field(default=None, max_length=5)
+    passes: (
+        list[Literal["transcribe", "events", "caption", "speech", "music"]] | None
+    ) = Field(default=None, max_length=5)
     context_refs: list[str] | None = Field(default=None, max_length=7)
     focus_question: str | None = Field(default=None, max_length=4096)
     aperture: Aperture | None = None
-    specialist_tasks: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(default_factory=list, max_length=3)
+    specialist_tasks: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(
+        default_factory=list, max_length=3
+    )
     speech_vad: bool = True
     speech_alignment: bool = False
     speech_language: Literal["English", "Spanish", "Portuguese"] | None = None
@@ -74,43 +78,56 @@ def source_router(
 ) -> APIRouter:
     router = APIRouter()
     sources = load_capture_sources(os.environ.get("OIDA_CAPTURE_SOURCES"))
-    registry = CaptureRegistry(data_dir / 'capture-registry', sources)
+    registry = CaptureRegistry(data_dir / "capture-registry", sources)
 
     def resolve_source(identifier):
         return sources.get(identifier) or registry.source(identifier)
 
-    @router.post('/sources/capture/register')
+    @router.post("/sources/capture/register")
     def register_source(body: Registration):
-        preflight('external_stream', body.max_seconds, None, False)
+        preflight("external_stream", body.max_seconds, None, False)
         try:
             return registry.register(body)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @router.get('/sources/capture/registered')
+    @router.get("/sources/capture/registered")
     def registered_sources():
-        return {'sources': registry.entries(), 'hls': 'unavailable', 'retention': 'temp_only'}
+        return {
+            "sources": registry.entries(),
+            "hls": "unavailable",
+            "retention": "temp_only",
+        }
 
-    @router.delete('/sources/capture/registered/{identifier}')
+    @router.delete("/sources/capture/registered/{identifier}")
     def revoke_source(identifier: str):
         try:
             registry.revoke(identifier)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         with scheduler.condition:
-            jobs = [job[1].acquisition_id for job in list(scheduler.pending)
-                    if job[0] == identifier]
+            jobs = [
+                job[1].acquisition_id
+                for job in list(scheduler.pending)
+                if job[0] == identifier
+            ]
             if scheduler.running and scheduler.running[0] == identifier:
                 jobs.append(scheduler.running[1].acquisition_id)
         with receipts.lock:
-            jobs += [key for key in receipts.active if receipts.get(key).get('source_id') == identifier]
+            jobs += [
+                key
+                for key in receipts.active
+                if receipts.get(key).get("source_id") == identifier
+            ]
         for job in set(jobs):
             scheduler.cancel(job)
-        return {'revoked': identifier, 'dependent_jobs_cancelled': len(set(jobs))}
+        return {"revoked": identifier, "dependent_jobs_cancelled": len(set(jobs))}
+
     masa_module = os.environ.get("OIDA_MASA_VALIDATOR_MODULE")
     receipts = AcquisitionReceipts(data_dir / "source-acquisitions", journal=journal)
     if operations is None:
         from oida.operation_control import Operations
+
         operations = Operations(receipts.journal)
     operation_lock = threading.Lock()
     capture_temp = data_dir / "source-capture-temp"
@@ -126,7 +143,8 @@ def source_router(
     @router.get("/sources/capture")
     def capture_sources():
         return dict(
-            contract="oida/capture-sources/v1",
+            contract="oida/capture-sources/v2",
+            capabilities=["bounded-public-radio-v1"],
             sources=[
                 dict(
                     id=s.id,
@@ -138,6 +156,12 @@ def source_router(
                     raw_audio_policy="temp",
                     status="configured_unverified",
                     claim_limit="native sample rate is not capture bandwidth",
+                    network_policy=s.network_policy,
+                    retention=s.retention,
+                    consent_ref=s.consent_ref,
+                    rights_ref=s.rights_ref,
+                    source_ref=s.source_ref,
+                    registration_revision=s.registration_revision,
                 )
                 for s in sources.values()
             ],
@@ -173,15 +197,38 @@ def source_router(
             raise HTTPException(404, "unknown configured source")
         # Gates precede subprocess/device/network acquisition, not just inference.
         try:
-            if req.aperture and (req.seconds > 60 or source.channels > 2 or source.sample_rate > 192000):
-                raise ValueError("Requested capture exceeds native aperture duration/channel/rate budget")
-            admit_aperture(req.aperture, remember=req.remember, retain_audio=req.retain_library_audio, source_type=source.source_type)
-            if source.runtime_registered and req.retain_library_audio:
-                raise ValueError('Registered radio consent permits temporary capture only')
+            if req.aperture and (
+                req.seconds > 60 or source.channels > 2 or source.sample_rate > 192000
+            ):
+                raise ValueError(
+                    "Requested capture exceeds native aperture duration/channel/rate budget"
+                )
+            admit_aperture(
+                req.aperture,
+                remember=req.remember,
+                retain_audio=req.retain_library_audio,
+                source_type=source.source_type,
+            )
+            if (
+                source.runtime_registered or source.retention == "temp_only"
+            ) and req.retain_library_audio:
+                raise ValueError("Radio consent permits temporary capture only")
             if source.consent != "granted" or req.seconds > source.max_seconds:
                 raise ValueError("source consent or duration refused")
             if validate_listening is not None:
-                validate_listening(req.model_id, req.listening_mode, **({"audio_model": req.audio_model, "route_preset_id": req.route_preset, "explicit_passes": req.passes} if req.audio_model is not None else {}))
+                validate_listening(
+                    req.model_id,
+                    req.listening_mode,
+                    **(
+                        {
+                            "audio_model": req.audio_model,
+                            "route_preset_id": req.route_preset,
+                            "explicit_passes": req.passes,
+                        }
+                        if req.audio_model is not None
+                        else {}
+                    ),
+                )
             preflight(source.source_type, req.seconds, req.route_preset, req.remember)
             if deadline is not None and time.time() >= deadline:
                 scheduler.terminal_queued(
@@ -219,16 +266,21 @@ def source_router(
                     sample_rate=source.sample_rate, channels=source.channels
                 ),
             )
-            if source.runtime_registered:
-                item['source_descriptor']['format_limits'] = item['source_descriptor'].pop('expected_format')
+            if source.runtime_registered or source.network_policy == "public_radio":
+                item["source_descriptor"]["format_limits"] = item[
+                    "source_descriptor"
+                ].pop("expected_format")
             receipts.save(item)
             with TemporaryDirectory(prefix="oida-source-", dir=capture_temp) as temp:
                 path = Path(temp) / "capture.wav"
                 capture_started = time.perf_counter()
                 capture_audio(source, req.seconds, path, cancel)
                 import soundfile as sf
+
                 actual = sf.info(path)
-                item['source_descriptor']['actual_format'] = dict(sample_rate=actual.samplerate, channels=actual.channels)
+                item["source_descriptor"]["actual_format"] = dict(
+                    sample_rate=actual.samplerate, channels=actual.channels
+                )
                 timing["capture_seconds"] = time.perf_counter() - capture_started
                 with receipts.lock:
                     if deadline is not None and time.time() >= deadline:
@@ -237,21 +289,37 @@ def source_router(
                         raise CaptureInterrupted("capture cancelled")
                     item.update(status="listening")
                     receipts.save(item)
+
                 def seal():
                     item.update(status="committing")
                     receipts.save(item)
+
                 def recheck():
-                    if source.runtime_registered and registry.source(source_id) != source:
-                        raise CaptureInterrupted('Capture registration revoked')
-                    preflight(source.source_type, req.seconds, req.route_preset, req.remember)
-                control = Control(event=cancel, lock=receipts.lock,
+                    if (
+                        source.runtime_registered
+                        and registry.source(source_id) != source
+                    ):
+                        raise CaptureInterrupted("Capture registration revoked")
+                    preflight(
+                        source.source_type, req.seconds, req.route_preset, req.remember
+                    )
+
+                control = Control(
+                    event=cancel,
+                    lock=receipts.lock,
                     recheck=recheck,
-                    on_seal=seal, identifier=req.acquisition_id)
+                    on_seal=seal,
+                    identifier=req.acquisition_id,
+                )
                 listening_started = time.perf_counter()
                 with controlled(control):
                     result = listen(
                         dict(
-                            **({"aperture": req.aperture.model_dump(exclude_none=True)} if req.aperture else {}),
+                            **(
+                                {"aperture": req.aperture.model_dump(exclude_none=True)}
+                                if req.aperture
+                                else {}
+                            ),
                             path=str(path),
                             source_type=source.source_type,
                             source_label=source.id,
@@ -262,12 +330,19 @@ def source_router(
                             response_mode=req.response_mode,
                             model_id=req.model_id,
                             allow_external_audio=req.allow_external_audio,
-                            passes=req.passes, context_refs=req.context_refs, focus_question=req.focus_question,
-                            **({"audio_model": req.audio_model.model_dump()} if req.audio_model is not None else {}),
+                            passes=req.passes,
+                            context_refs=req.context_refs,
+                            focus_question=req.focus_question,
+                            **(
+                                {"audio_model": req.audio_model.model_dump()}
+                                if req.audio_model is not None
+                                else {}
+                            ),
                             listening_mode=req.listening_mode,
                             specialist_tasks=req.specialist_tasks,
                             speech_vad=req.speech_vad,
-                            speech_alignment=req.speech_alignment, speech_language=req.speech_language,
+                            speech_alignment=req.speech_alignment,
+                            speech_language=req.speech_language,
                             source_admission=dict(
                                 adapter="radio-window"
                                 if source.adapter == "radio"
@@ -371,7 +446,19 @@ def source_router(
             if source.consent != "granted" or req.seconds > source.max_seconds:
                 raise ValueError("source consent or duration refused")
             if validate_listening is not None:
-                validate_listening(req.model_id, req.listening_mode, **({"audio_model": req.audio_model, "route_preset_id": req.route_preset, "explicit_passes": req.passes} if req.audio_model is not None else {}))
+                validate_listening(
+                    req.model_id,
+                    req.listening_mode,
+                    **(
+                        {
+                            "audio_model": req.audio_model,
+                            "route_preset_id": req.route_preset,
+                            "explicit_passes": req.passes,
+                        }
+                        if req.audio_model is not None
+                        else {}
+                    ),
+                )
             preflight(source.source_type, req.seconds, req.route_preset, req.remember)
             return scheduler.submit(source_id, req)
         except QueueFull as exc:
@@ -383,8 +470,11 @@ def source_router(
         try:
             preflight("external_stream", None, None, req.remember)
             result = receive_observation(
-                req, masa_module,
-                before_commit=lambda: preflight("external_stream", None, None, req.remember),
+                req,
+                masa_module,
+                before_commit=lambda: preflight(
+                    "external_stream", None, None, req.remember
+                ),
             )
             if result.get("akousma_id"):
                 receipts.journal.record_reference(
@@ -408,9 +498,13 @@ def source_router(
     def cosmoaudition_poll(body: dict):
         from oida.cosmo_subscription import request_from_feed
         import httpx
+
         try:
             preflight("external_stream", None, None, body.get("remember", False))
-            return operations.run(body.get("operation_id"), lambda: execute_observation(request_from_feed(body)))
+            return operations.run(
+                body.get("operation_id"),
+                lambda: execute_observation(request_from_feed(body)),
+            )
         except (ValueError, KeyError, TypeError) as exc:
             raise HTTPException(400, str(exc)) from exc
         except httpx.HTTPError as exc:

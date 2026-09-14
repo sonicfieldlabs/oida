@@ -113,6 +113,21 @@ OpenRouter remains model-id configurable, so a future listed Qwen Omni audio
 route can be selected without new adapter code. Oída does not currently invent
 or pin an OpenRouter Qwen3-Omni id that the provider has not published.
 
+### Trial authority and audio qualification
+
+Hosted audio remains closed by default. A stored credential, an enabled provider,
+external-audio permission, a successful audio probe and an enabled trial budget are
+separate gates. Probe receipts are durable and qualified against the provider endpoint,
+region/settings, credential changes, adapter contract and model revision; changing any
+of those invalidates the earlier proof.
+
+Set every Oída workspace/process to one absolute `OIDA_TRIAL_DIR`. Its SQLite ledger is
+the canonical global authority for the operator's trial, while `budget.json` is only a
+human-readable mirror. Admission and configuration share an immediate transaction, and
+dispatch rechecks both the enabled switch and exact configuration revision. Known
+pre-submission failures release reservations; ambiguous remote outcomes stay held for
+explicit reconciliation. The default ceiling is $5 and the ledger starts disabled.
+
 Thinking-token budgets are backend capabilities, not generic prompt hints. The
 embedded Transformers/MPS runtime does not implement the upstream sampling
 processor and rejects budgeted requests. The `cuda-server` profile supports a

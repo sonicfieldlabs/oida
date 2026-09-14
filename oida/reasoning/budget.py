@@ -13,6 +13,7 @@ numbers. The ledger never claims to predict a provider's final invoice.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from datetime import date
@@ -108,7 +109,6 @@ PRICING: tuple[PricingRow, ...] = (
         basis="Alibaba Model Studio Omni guide (seven audio-input tokens/second) and Model Studio pricing",
         effective="2026-09-12",
     ),
-
 )
 
 
@@ -140,7 +140,8 @@ def quote_cost(
             if item.provider_id == provider_id
             and (
                 item.model_id.lower() in {normalized, normalized.rsplit("/", 1)[-1]}
-                or normalized in {item.model_id.lower(), item.model_id.lower().rsplit("/", 1)[-1]}
+                or normalized
+                in {item.model_id.lower(), item.model_id.lower().rsplit("/", 1)[-1]}
             )
         ),
         None,
@@ -149,7 +150,12 @@ def quote_cost(
         return None
     if not math.isfinite(audio_seconds) or not 0 < audio_seconds <= 60:
         raise BudgetDenied("Audio duration must be verified within 0..60 seconds")
-    if type(max_output_tokens) is not int or max_output_tokens <= 0 or type(text_input_tokens) is not int or text_input_tokens < 0:
+    if (
+        type(max_output_tokens) is not int
+        or max_output_tokens <= 0
+        or type(text_input_tokens) is not int
+        or text_input_tokens < 0
+    ):
         raise BudgetDenied("Invalid token bound")
     audio_tokens = max(0.0, float(audio_seconds)) * row.audio_tokens_per_second
     output_tokens = max(0, int(max_output_tokens))
@@ -175,7 +181,7 @@ def quote_cost(
 
 
 class BudgetLedger:
-    """Shared reservation ledger; one process-wide instance owns external spend."""
+    """SQLite-backed trial authority shared by every process using one directory."""
 
     def __init__(self, directory: Path, *, clock=time.time):
         self.directory = Path(directory)
@@ -184,25 +190,66 @@ class BudgetLedger:
         self.db_path = self.directory / "budget.sqlite3"
         self.clock = clock
         self.lock = threading.RLock()
-        self._config = self._load_config()
         self._db_init()
-
-    def _load_config(self) -> BudgetConfig:
+        self._config = self._load_config()
         if not self.config_path.exists():
-            default_cfg = BudgetConfig()
             try:
-                write_json_atomic(self.config_path, default_cfg.model_dump(mode="json"))
+                write_json_atomic(
+                    self.config_path, self._config.model_dump(mode="json")
+                )
             except OSError:
                 pass
-            return default_cfg
+
+    def _file_config(self) -> BudgetConfig:
+        if not self.config_path.exists():
+            return BudgetConfig()
         try:
-            return BudgetConfig.model_validate(json.loads(self.config_path.read_text(encoding="utf-8")))
+            return BudgetConfig.model_validate(
+                json.loads(self.config_path.read_text(encoding="utf-8"))
+            )
         except (OSError, json.JSONDecodeError, ValidationError):
             # A corrupt configuration keeps the trial closed; it never opens spend.
             return BudgetConfig()
 
+    def _load_config(self, db=None) -> BudgetConfig:
+        if db is None:
+            with self._db() as connection:
+                return self._load_config(connection)
+        row = db.execute("SELECT payload FROM configuration WHERE id=1").fetchone()
+        if row is None:
+            return BudgetConfig()
+        try:
+            return BudgetConfig.model_validate(json.loads(row[0]))
+        except (json.JSONDecodeError, ValidationError, TypeError):
+            return BudgetConfig()
+
+    @staticmethod
+    def _revision(config: BudgetConfig) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                config.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+
     def _db_init(self) -> None:
         with self._db() as db:
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS configuration ("
+                "id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)"
+            )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO metadata VALUES ('trial_id', ?)",
+                ("trial_" + uuid4().hex,),
+            )
+            if db.execute("SELECT 1 FROM configuration WHERE id=1").fetchone() is None:
+                initial = self._file_config()
+                db.execute(
+                    "INSERT INTO configuration VALUES (1, ?)",
+                    (json.dumps(initial.model_dump(mode="json")),),
+                )
             db.execute(
                 "CREATE TABLE IF NOT EXISTS reservations ("
                 "id TEXT PRIMARY KEY, created REAL, provider_id TEXT, model_id TEXT,"
@@ -211,8 +258,20 @@ class BudgetLedger:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS probes ("
                 "provider_id TEXT, model_id TEXT, tested_at REAL, status TEXT,"
+                "fingerprint TEXT,"
                 "PRIMARY KEY(provider_id, model_id))"
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(probes)")}
+            if "fingerprint" not in columns:
+                db.execute("ALTER TABLE probes ADD COLUMN fingerprint TEXT")
+
+    @property
+    def trial_id(self) -> str:
+        with self._db() as db:
+            row = db.execute(
+                "SELECT value FROM metadata WHERE key='trial_id'"
+            ).fetchone()
+            return str(row[0])
 
     @contextmanager
     def _db(self):
@@ -229,16 +288,31 @@ class BudgetLedger:
 
     def configure(self, updates: dict[str, Any]) -> BudgetConfig:
         with self.lock:
-            current = self._load_config().model_dump()
-            current.update(
-                {k: v for k, v in updates.items() if k in BudgetConfig.model_fields}
-            )
-            candidate = BudgetConfig.model_validate(current)
-            if any(not math.isfinite(v) or v < 0 or v > 5 for v in candidate.per_provider_cap_usd.values()):
-                raise ValueError("Provider caps must be finite amounts within the trial ceiling")
-            write_json_atomic(self.config_path, candidate.model_dump(mode="json"))
+            with self._db() as db:
+                current = self._load_config(db).model_dump()
+                current.update(
+                    {k: v for k, v in updates.items() if k in BudgetConfig.model_fields}
+                )
+                candidate = BudgetConfig.model_validate(current)
+                if any(
+                    not math.isfinite(v) or v < 0 or v > 5
+                    for v in candidate.per_provider_cap_usd.values()
+                ):
+                    raise ValueError(
+                        "Provider caps must be finite amounts within the trial ceiling"
+                    )
+                db.execute(
+                    "UPDATE configuration SET payload=? WHERE id=1",
+                    (json.dumps(candidate.model_dump(mode="json")),),
+                )
+            try:
+                write_json_atomic(self.config_path, candidate.model_dump(mode="json"))
+            except OSError:
+                # SQLite is canonical. A failed human-readable mirror must not
+                # make the committed configuration appear to have been refused.
+                pass
             self._config = candidate
-            return self._load_config()
+            return candidate
 
     update_config = configure
 
@@ -283,26 +357,36 @@ class BudgetLedger:
             )
             total += amount
             per_provider[provider] = per_provider.get(provider, 0.0) + amount
-            if status in {"reserved", "unresolved", "settled"} and value.get("counts_as_call", True):
+            if status in {"reserved", "unresolved", "settled"} and value.get(
+                "counts_as_call", True
+            ):
                 calls += 1
         return total, per_provider, calls
 
     def state(self) -> dict[str, Any]:
         with self.lock:
-            config = self._load_config()
             with self._db() as db:
+                config = self._load_config(db)
                 total, per_provider, calls = self._spent(db)
                 reservations = [
-                    dict(json.loads(payload), status=status, reserved_usd=reserved, settled_usd=settled)
+                    dict(
+                        json.loads(payload),
+                        status=status,
+                        reserved_usd=reserved,
+                        settled_usd=settled,
+                    )
                     for status, reserved, settled, payload in db.execute(
                         "SELECT status,reserved_usd,settled_usd,payload FROM reservations "
                         "ORDER BY created DESC LIMIT 200"
                     )
                 ]
                 probes = [
-                    dict(provider_id=p, model_id=m, tested_at=t, status=s)
-                    for p, m, t, s in db.execute(
-                        "SELECT provider_id,model_id,tested_at,status FROM probes ORDER BY tested_at DESC"
+                    dict(
+                        provider_id=p, model_id=m, tested_at=t, status=s, fingerprint=f
+                    )
+                    for p, m, t, s, f in db.execute(
+                        "SELECT provider_id,model_id,tested_at,status,fingerprint "
+                        "FROM probes ORDER BY tested_at DESC"
                     )
                 ]
             remaining = max(0.0, config.total_ceiling_usd - total)
@@ -338,28 +422,28 @@ class BudgetLedger:
     ) -> dict[str, Any]:
         """Admit one external call or refuse before anything is sent."""
         with self.lock:
-            config = self._load_config()
-            if not config.enabled:
-                raise BudgetDenied(
-                    "Cloud trial budget is not enabled; external audio dispatch stays closed"
-                )
-            capped_output = min(
-                int(max_output_tokens or config.max_output_tokens_per_call),
-                config.max_output_tokens_per_call,
-            )
-            estimate = self.quote(
-                provider_id,
-                model_id,
-                audio_seconds=audio_seconds,
-                max_output_tokens=capped_output,
-                text_input_tokens=text_input_tokens,
-            )
-            if estimate is None:
-                raise BudgetDenied(
-                    f"No recorded price basis for {provider_id}/{model_id}; "
-                    "configure pricing before dispatch"
-                )
             with self._db() as db:
+                config = self._load_config(db)
+                if not config.enabled:
+                    raise BudgetDenied(
+                        "Cloud trial budget is not enabled; external audio dispatch stays closed"
+                    )
+                capped_output = min(
+                    int(max_output_tokens or config.max_output_tokens_per_call),
+                    config.max_output_tokens_per_call,
+                )
+                estimate = self.quote(
+                    provider_id,
+                    model_id,
+                    audio_seconds=audio_seconds,
+                    max_output_tokens=capped_output,
+                    text_input_tokens=text_input_tokens,
+                )
+                if estimate is None:
+                    raise BudgetDenied(
+                        f"No recorded price basis for {provider_id}/{model_id}; "
+                        "configure pricing before dispatch"
+                    )
                 total, per_provider, calls = self._spent(db)
                 if calls + 1 > config.max_calls:
                     raise BudgetDenied("Trial call budget is exhausted")
@@ -384,9 +468,10 @@ class BudgetLedger:
                     reserved_usd=estimate["worst_case_usd"],
                     estimate=estimate,
                     max_output_tokens=capped_output,
-                text_input_tokens=text_input_tokens,
+                    text_input_tokens=text_input_tokens,
                     reference=reference,
                     counts_as_call=True,
+                    configuration_revision=self._revision(config),
                 )
                 db.execute(
                     "INSERT INTO reservations VALUES (?,?,?,?,?,?,?,?)",
@@ -403,16 +488,25 @@ class BudgetLedger:
                 )
             return dict(payload, status="reserved")
 
-    def _update(self, reservation_id: str, status: str, settled: float | None, extra: dict[str, Any]) -> None:
+    def _update(
+        self,
+        reservation_id: str,
+        status: str,
+        settled: float | None,
+        extra: dict[str, Any],
+    ) -> None:
         with self.lock:
             with self._db() as db:
                 row = db.execute(
-                    "SELECT payload,status FROM reservations WHERE id=?", (reservation_id,)
+                    "SELECT payload,status FROM reservations WHERE id=?",
+                    (reservation_id,),
                 ).fetchone()
                 if row is None:
                     raise ValueError("Unknown reservation")
                 if row[1] != "reserved":
-                    raise ValueError("Reservation already finalized; explicit reconciliation required")
+                    raise ValueError(
+                        "Reservation already finalized; explicit reconciliation required"
+                    )
                 payload = dict(json.loads(row[0]))
                 payload.update(extra)
                 db.execute(
@@ -423,6 +517,27 @@ class BudgetLedger:
     def release(self, reservation_id: str, *, reason: str) -> None:
         """Pre-submission failure: nothing was sent, so nothing is retained."""
         self._update(reservation_id, "released", None, dict(released_reason=reason))
+
+    def assert_dispatch(self, reservation_id: str) -> None:
+        """Recheck the global switch and configuration revision immediately before send."""
+        with self.lock:
+            with self._db() as db:
+                row = db.execute(
+                    "SELECT status,payload FROM reservations WHERE id=?",
+                    (reservation_id,),
+                ).fetchone()
+                if row is None or row[0] != "reserved":
+                    raise BudgetDenied("Trial reservation is no longer dispatchable")
+                payload = json.loads(row[1])
+                config = self._load_config(db)
+                if not config.enabled:
+                    raise BudgetDenied(
+                        "Cloud trial budget was disabled before dispatch"
+                    )
+                if payload.get("configuration_revision") != self._revision(config):
+                    raise BudgetDenied(
+                        "Cloud trial configuration changed before dispatch"
+                    )
 
     def settle(
         self,
@@ -450,9 +565,18 @@ class BudgetLedger:
                     raise ValueError("Unknown reservation")
                 payload = json.loads(row[0])
                 reserved = row[1]
-            input_tokens = usage.get("input_tokens") if isinstance(usage, dict) else None
-            output_tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
-            known = type(input_tokens) is int and input_tokens >= 0 and type(output_tokens) is int and output_tokens >= 0
+            input_tokens = (
+                usage.get("input_tokens") if isinstance(usage, dict) else None
+            )
+            output_tokens = (
+                usage.get("output_tokens") if isinstance(usage, dict) else None
+            )
+            known = (
+                type(input_tokens) is int
+                and input_tokens >= 0
+                and type(output_tokens) is int
+                and output_tokens >= 0
+            )
             if outcome == "unknown_remote_outcome" or not known:
                 extra = dict(
                     usage=usage if isinstance(usage, dict) else None,
@@ -467,12 +591,28 @@ class BudgetLedger:
             reasoning_tokens = (usage or {}).get("reasoning_tokens")
             if payload["provider_id"] == "google":
                 if type(reasoning_tokens) is not int or reasoning_tokens < 0:
-                    self._update(reservation_id, "unresolved", None, dict(usage=usage, outcome=outcome, usage_status="partial"))
+                    self._update(
+                        reservation_id,
+                        "unresolved",
+                        None,
+                        dict(usage=usage, outcome=outcome, usage_status="partial"),
+                    )
                     return dict(payload, status="unresolved")
                 output_tokens += reasoning_tokens
-            calculated = (input_tokens * rates.get("input_rate", 0) + output_tokens * rates.get("output_rate", 0)) / 1_000_000
+            calculated = (
+                input_tokens * rates.get("input_rate", 0)
+                + output_tokens * rates.get("output_rate", 0)
+            ) / 1_000_000
             # Keep the bound held during the trial; estimated token costs are not invoices.
-            settled = max(reserved, calculated, reported_cost_usd if isinstance(reported_cost_usd, (int, float)) and math.isfinite(reported_cost_usd) and reported_cost_usd >= 0 else 0)
+            settled = max(
+                reserved,
+                calculated,
+                reported_cost_usd
+                if isinstance(reported_cost_usd, (int, float))
+                and math.isfinite(reported_cost_usd)
+                and reported_cost_usd >= 0
+                else 0,
+            )
             extra = dict(
                 usage=usage if isinstance(usage, dict) else None,
                 reported_cost_usd=reported_cost_usd,
@@ -480,27 +620,51 @@ class BudgetLedger:
                 usage_status="reported",
             )
             self._update(reservation_id, "settled", round(settled, 6), extra)
-            return dict(payload, status="settled", settled_usd=round(settled, 6), **extra)
+            return dict(
+                payload, status="settled", settled_usd=round(settled, 6), **extra
+            )
 
-    def record_probe(self, provider_id: str, model_id: str, status: str = "inference_tested") -> None:
+    def record_probe(
+        self,
+        provider_id: str,
+        model_id: str,
+        *,
+        fingerprint: str = "legacy_unqualified",
+        status: str = "inference_tested",
+    ) -> None:
         """Durable record of an authorized audio probe establishing account readiness."""
         with self.lock:
             with self._db() as db:
                 db.execute(
-                    "INSERT OR REPLACE INTO probes (provider_id, model_id, tested_at, status) "
-                    "VALUES (?, ?, ?, ?)",
-                    (provider_id, model_id, self.clock(), status),
+                    "INSERT OR REPLACE INTO probes "
+                    "(provider_id,model_id,tested_at,status,fingerprint) VALUES (?,?,?,?,?)",
+                    (provider_id, model_id, self.clock(), status, fingerprint),
                 )
 
-    def is_probed(self, provider_id: str, model_id: str) -> bool:
+    def is_probed(
+        self,
+        provider_id: str,
+        model_id: str,
+        *,
+        fingerprint: str | None = None,
+    ) -> bool:
         """Check whether provider and model have established account readiness via probe."""
         with self.lock:
             with self._db() as db:
                 row = db.execute(
-                    "SELECT status FROM probes WHERE provider_id=? AND model_id=?",
+                    "SELECT status,fingerprint FROM probes WHERE provider_id=? AND model_id=?",
                     (provider_id, model_id),
                 ).fetchone()
-                return bool(row and row[0] == "inference_tested")
+                return bool(
+                    row
+                    and row[0] == "inference_tested"
+                    and (fingerprint is None or row[1] == fingerprint)
+                )
+
+    def invalidate_probes(self, provider_id: str) -> None:
+        with self.lock:
+            with self._db() as db:
+                db.execute("DELETE FROM probes WHERE provider_id=?", (provider_id,))
 
 
 def reservation_reference(value: str | None) -> str | None:

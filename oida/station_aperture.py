@@ -298,7 +298,10 @@ def persist(record, result):
         memory="record_audio" if policy and result["requested"]["views"] else "record",
         covenant=record.get("auditum", {}).get("covenant"),
     )
-    resolve = lambda ref: bundle if ref == bundle["sampled_representation"] else None
+
+    def resolve(ref):
+        return bundle if ref == bundle["sampled_representation"] else None
+
     with AkousmataStore() as store:
         if policy and result["requested"]["views"]:
             published = publish_bundle(

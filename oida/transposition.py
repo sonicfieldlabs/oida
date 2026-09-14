@@ -144,9 +144,15 @@ def process(samples, rate, req):
 
 
 def matter_receipt(req, recipe, parameters, source_info, output_info, started_at=None):
-    new = lambda: "urn:uuid:" + str(uuid4())
-    known = lambda value: dict(state="known", value=value)
-    unknown = lambda reason: dict(state="unknown", reason=reason)
+    def new():
+        return "urn:uuid:" + str(uuid4())
+
+    def known(value):
+        return dict(state="known", value=value)
+
+    def unknown(reason):
+        return dict(state="unknown", reason=reason)
+
     record_id, actor, policy, rule, operation, input_id, output_id = [
         new() for _ in range(7)
     ]
@@ -326,7 +332,8 @@ def matter_receipt(req, recipe, parameters, source_info, output_info, started_at
 
 
 def graph_account(record, req, final, out_rate, frames, channels, digest, validate):
-    import subprocess, json
+    import subprocess
+    import json
     from akousma import new_akousma
     from akousma.transformation_graph import create_transformation_graph
     from akousma.graph_records import create_graph_record

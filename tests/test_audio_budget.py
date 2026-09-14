@@ -12,6 +12,7 @@ from oida.reasoning.settings import (
 )
 from oida.reasoning.budget import (
     BudgetLedger,
+    BudgetDenied,
     quote_cost,
 )
 from oida.reasoning.audio_router import (
@@ -32,6 +33,7 @@ from oida.recipes import INSTRUCT_CAPTION
 
 def _audio(root):
     import wave
+
     path = root / "fixture.wav"
     with wave.open(str(path), "wb") as wf:
         wf.setnchannels(1)
@@ -64,17 +66,22 @@ def _setup_test_router(
     local = FakeEngine()
     budget = BudgetLedger(root / "budget")
     if budget_enabled:
-        budget.update_config({
-            "enabled": True,
-            "total_ceiling_usd": total_ceiling,
-        })
+        budget.update_config(
+            {
+                "enabled": True,
+                "total_ceiling_usd": total_ceiling,
+            }
+        )
     router = RoutedAudioEngine(
         local,
         settings_store=settings_store,
-        secret_store=secrets or DictSecrets({
-            ("google", "api_key"): "google-secret",
-            ("alibaba", "api_key"): "alibaba-secret",
-        }),
+        secret_store=secrets
+        or DictSecrets(
+            {
+                ("google", "api_key"): "google-secret",
+                ("alibaba", "api_key"): "alibaba-secret",
+            }
+        ),
         budget_ledger=budget,
         transport=transport,
     )
@@ -101,6 +108,52 @@ def test_default_budget_config_and_persistence():
         assert reloaded.config.total_ceiling_usd == 4.0
 
 
+def test_two_instances_share_one_atomic_trial_configuration_and_reservations():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp) / "shared-trial"
+        first = BudgetLedger(root)
+        second = BudgetLedger(root)
+        estimate = quote_cost(
+            "google",
+            "gemini-3.5-flash-lite",
+            audio_seconds=0.5,
+            max_output_tokens=128,
+        )
+        assert estimate is not None
+        first.update_config(
+            {
+                "enabled": True,
+                "total_ceiling_usd": estimate["worst_case_usd"] * 1.5,
+                "max_output_tokens_per_call": 128,
+            }
+        )
+        first.reserve(
+            "google",
+            "gemini-3.5-flash-lite",
+            audio_seconds=0.5,
+            max_output_tokens=128,
+        )
+        with pytest.raises(BudgetDenied):
+            second.reserve(
+                "google",
+                "gemini-3.5-flash-lite",
+                audio_seconds=0.5,
+                max_output_tokens=128,
+            )
+        assert first.trial_id == second.trial_id
+        assert second.state()["calls_used"] == 1
+
+
+def test_probe_fingerprint_and_invalidation_are_durable():
+    with TemporaryDirectory() as tmp:
+        ledger = BudgetLedger(Path(tmp) / "trial")
+        ledger.record_probe("google", "model", fingerprint="settings-a")
+        assert ledger.is_probed("google", "model", fingerprint="settings-a")
+        assert not ledger.is_probed("google", "model", fingerprint="settings-b")
+        ledger.invalidate_probes("google")
+        assert not ledger.is_probed("google", "model", fingerprint="settings-a")
+
+
 def test_pricing_and_quote_cost():
     for prov_id, model_id in [
         ("google", "gemini-3.5-flash-lite"),
@@ -113,15 +166,21 @@ def test_pricing_and_quote_cost():
         assert quote is not None
         assert quote["worst_case_usd"] > 0.0
 
-    missing = quote_cost("unknown", "unknown-model", audio_seconds=10.0, max_output_tokens=100)
+    missing = quote_cost(
+        "unknown", "unknown-model", audio_seconds=10.0, max_output_tokens=100
+    )
     assert missing is None
 
 
 def test_zero_outbound_requests_when_budget_denied():
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
-        transport = FakeTransport({"candidates": [{"content": {"parts": [{"text": "hello"}]}}]})
-        router, local, budget = _setup_test_router(root, transport=transport, budget_enabled=False)
+        transport = FakeTransport(
+            {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}
+        )
+        router, local, budget = _setup_test_router(
+            root, transport=transport, budget_enabled=False
+        )
         audio = _audio(root)
 
         # 1. Budget disabled -> fallback, 0 transport calls
@@ -154,7 +213,9 @@ def test_reservation_settlement_and_receipt_enrichment():
             },
         }
         transport = FakeTransport(google_resp)
-        router, local, budget = _setup_test_router(root, transport=transport, budget_enabled=True)
+        router, local, budget = _setup_test_router(
+            root, transport=transport, budget_enabled=True
+        )
         audio = _audio(root)
 
         sel = selector(find_model_spec("google", "gemini-3.5-flash-lite"))
@@ -185,6 +246,7 @@ def test_reservation_settlement_and_receipt_enrichment():
 def test_unknown_remote_outcome_retains_full_reservation():
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
+
         # Sequence transport that raises ProviderTransportError with submitted=True
         # simulating a 500 error or timeout during read
         class FailingTransport:
@@ -200,7 +262,9 @@ def test_unknown_remote_outcome_retains_full_reservation():
                 )
 
         transport = FailingTransport()
-        router, local, budget = _setup_test_router(root, transport=transport, budget_enabled=True)
+        router, local, budget = _setup_test_router(
+            root, transport=transport, budget_enabled=True
+        )
         audio = _audio(root)
 
         sel = selector(find_model_spec("google", "gemini-3.5-flash-lite"))
@@ -227,6 +291,7 @@ def test_unknown_remote_outcome_retains_full_reservation():
 def test_presubmission_failure_and_bounded_retry():
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
+
         # Simulating socket connect error (submitted=False)
         class ConnFailTransport:
             def __init__(self):
@@ -235,10 +300,14 @@ def test_presubmission_failure_and_bounded_retry():
             def request(self, method: str, url: str, **kwargs: Any) -> JsonResponse:
                 self.calls.append({"method": method, "url": url, **kwargs})
                 err = urllib.error.URLError("Connection refused")
-                raise ProviderTransportError("Connection failed", submitted=False) from err
+                raise ProviderTransportError(
+                    "Connection failed", submitted=False
+                ) from err
 
         transport = ConnFailTransport()
-        router, local, budget = _setup_test_router(root, transport=transport, budget_enabled=True)
+        router, local, budget = _setup_test_router(
+            root, transport=transport, budget_enabled=True
+        )
         audio = _audio(root)
 
         sel = selector(find_model_spec("google", "gemini-3.5-flash-lite"))
@@ -259,15 +328,53 @@ def test_presubmission_failure_and_bounded_retry():
         assert state["reservations"][0]["status"] == "released"
 
 
+def test_disable_between_unsubmitted_attempts_prevents_retry_and_releases():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+
+        class DisableAfterConnectFailure:
+            def __init__(self):
+                self.calls = []
+                self.budget = None
+
+            def request(self, method: str, url: str, **kwargs: Any) -> JsonResponse:
+                self.calls.append({"method": method, "url": url, **kwargs})
+                assert self.budget is not None
+                self.budget.update_config({"enabled": False})
+                error = urllib.error.URLError("Connection refused")
+                raise ProviderTransportError(
+                    "Connection failed", submitted=False
+                ) from error
+
+        transport = DisableAfterConnectFailure()
+        router, _local, budget = _setup_test_router(
+            root, transport=transport, budget_enabled=True
+        )
+        transport.budget = budget
+        audio = _audio(root)
+        selected = selector(find_model_spec("google", "gemini-3.5-flash-lite"))
+        with use_audio_model(selected):
+            with pytest.raises(EngineUnavailable):
+                router.generate(str(audio), "Describe", settings=INSTRUCT_CAPTION)
+        assert len(transport.calls) == 1
+        state = budget.state()
+        assert state["committed_usd"] == 0.0
+        assert state["reservations"][0]["status"] == "released"
+
+
 def test_cancellation_stops_before_and_after_dispatch():
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
         google_resp = {
-            "candidates": [{"content": {"parts": [{"text": "Late sound observation"}]}}],
+            "candidates": [
+                {"content": {"parts": [{"text": "Late sound observation"}]}}
+            ],
             "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 20},
         }
         transport = FakeTransport(google_resp)
-        router, local, budget = _setup_test_router(root, transport=transport, budget_enabled=True)
+        router, local, budget = _setup_test_router(
+            root, transport=transport, budget_enabled=True
+        )
         audio = _audio(root)
 
         # 1. Stop check before dispatch: releases reservation, 0 transport calls
@@ -302,21 +409,32 @@ def test_error_sanitization_no_raw_bytes():
 def test_source_specific_external_admission():
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
-        transport = FakeTransport({"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
-        router, local, budget = _setup_test_router(root, transport=transport, budget_enabled=True)
+        transport = FakeTransport(
+            {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+        )
+        router, local, budget = _setup_test_router(
+            root, transport=transport, budget_enabled=True
+        )
         audio = _audio(root)
 
         sel = selector(find_model_spec("google", "gemini-3.5-flash-lite"))
         with use_audio_model(sel):
             # 1. Microphone without allow_external_source -> blocked
-            with router.request_policy(source_type="microphone", allow_external_source=False):
+            with router.request_policy(
+                source_type="microphone", allow_external_source=False
+            ):
                 with pytest.raises(EngineUnavailable) as exc:
                     router.generate(str(audio), "Describe", settings=INSTRUCT_CAPTION)
-                assert "live microphone audio requires explicit external audio permission" in str(exc.value)
+                assert (
+                    "live microphone audio requires explicit external audio permission"
+                    in str(exc.value)
+                )
             assert len(transport.calls) == 0
 
             # 2. Microphone with allow_external_source -> admitted
-            with router.request_policy(source_type="microphone", allow_external_source=True):
+            with router.request_policy(
+                source_type="microphone", allow_external_source=True
+            ):
                 res = router.generate(str(audio), "Describe", settings=INSTRUCT_CAPTION)
             assert res.text == "ok"
             assert len(transport.calls) == 1
@@ -332,11 +450,15 @@ def test_authorized_audio_probe():
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
         google_resp = {
-            "candidates": [{"content": {"parts": [{"text": "Probe detected silence"}]}}],
+            "candidates": [
+                {"content": {"parts": [{"text": "Probe detected silence"}]}}
+            ],
             "usageMetadata": {"promptTokenCount": 16, "candidatesTokenCount": 5},
         }
         transport = FakeTransport(google_resp)
-        router, local, budget = _setup_test_router(root, transport=transport, budget_enabled=True)
+        router, local, budget = _setup_test_router(
+            root, transport=transport, budget_enabled=True
+        )
 
         assert router.is_model_probed("google", "gemini-3.5-flash-lite") is False
 

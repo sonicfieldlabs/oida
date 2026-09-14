@@ -2,7 +2,7 @@ import hashlib
 import numpy as np
 import soundfile as sf
 import pytest
-from test_observation_source import setup, validator_module  # noqa: F401
+from test_observation_source import setup as setup, validator_module as validator_module
 
 
 def request(tmp_path, frequency=1000.0, duration=1.0):

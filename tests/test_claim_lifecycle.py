@@ -1,8 +1,10 @@
 import copy
 from unittest.mock import patch
-import pytest
-from test_observation_source import setup, payload, validator_module  # noqa: F401
-from oida.claim_lifecycle import evaluate
+from test_observation_source import (
+    setup as setup,
+    payload as payload,
+    validator_module as validator_module,
+)
 from akousma import AkousmataStore
 
 

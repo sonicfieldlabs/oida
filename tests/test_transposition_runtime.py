@@ -1,15 +1,20 @@
 import hashlib
 import os
-
-VALIDATOR_MODULE = os.environ.get("OIDA_TEST_MASA_VALIDATOR_MODULE")
 from concurrent.futures import ThreadPoolExecutor
 import threading
 from unittest.mock import patch
 
 import numpy as np
-import soundfile as sf
 import pytest
-from test_runtime_attribution import client  # noqa: F401
+import soundfile as sf
+from test_runtime_attribution import client as client
+
+VALIDATOR_MODULE = os.environ.get("OIDA_TEST_MASA_VALIDATOR_MODULE")
+
+requires_masa_validator = pytest.mark.skipif(
+    not VALIDATOR_MODULE,
+    reason="set OIDA_TEST_MASA_VALIDATOR_MODULE for real MASA validation",
+)
 
 
 def request(tmp_path, kind, **params):
@@ -47,6 +52,7 @@ def request(tmp_path, kind, **params):
         ("pitch_shift", {"cents": 1200.0}, 48000, 4000, 0.5),
     ],
 )
+@requires_masa_validator
 def test_real_dsp_recipe_canonical_links_and_retry(
     client,
     tmp_path,
@@ -77,6 +83,7 @@ def test_real_dsp_recipe_canonical_links_and_retry(
     assert client.post("/sources/transpositions", json=req).status_code == 409
 
 
+@requires_masa_validator
 def test_refusal_hash_mismatch_and_cancellation_leave_no_output(
     client, tmp_path, monkeypatch
 ):

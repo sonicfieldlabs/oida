@@ -44,16 +44,58 @@ def _write_tone(path: Path) -> Path:
 
 
 class ServerSecurityTests(unittest.TestCase):
+    def test_audio_probe_operation_id_is_durable_and_not_dispatched_twice(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                    "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                    "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                    "AKOUSMATA_WATCHER": "0",
+                },
+                clear=False,
+            ),
+            patch(
+                "oida.reasoning.audio_router.RoutedAudioEngine.probe_audio",
+                return_value={
+                    "ok": True,
+                    "status": "inference_tested",
+                    "provider_id": "google",
+                    "model_id": "gemini-3.5-flash-lite",
+                },
+            ) as probe,
+        ):
+            client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+            payload = {
+                "model_id": "gemini-3.5-flash-lite",
+                "operation_id": "probe-fixture",
+            }
+            first = client.post("/reasoning/providers/google/probe-audio", json=payload)
+            duplicate = client.post(
+                "/reasoning/providers/google/probe-audio", json=payload
+            )
+            receipt = client.get("/operations/probe-fixture")
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(duplicate.status_code, 409, duplicate.text)
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(receipt.json()["status"], "complete")
+
     def test_service_discovery_and_shared_favicon_follow_mounted_routes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {
-                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
-                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
-                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
-                "AKOUSMATA_WATCHER": "0",
-            },
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                    "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                    "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                    "AKOUSMATA_WATCHER": "0",
+                },
+                clear=False,
+            ),
         ):
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
             discovery = client.get("/api")
@@ -66,12 +108,18 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertTrue({"/covenant", "/remote", "/sessions"}.issubset(endpoints))
         self.assertEqual(favicon.status_code, 200)
         self.assertEqual(favicon.headers["content-type"], "image/svg+xml")
-        self.assertIn("text/html", schema["paths"]["/"]["get"]["responses"]["200"]["content"])
+        self.assertIn(
+            "text/html", schema["paths"]["/"]["get"]["responses"]["200"]["content"]
+        )
         self.assertIn(
             "text/event-stream",
-            schema["paths"]["/conversation/ask/stream"]["post"]["responses"]["200"]["content"],
+            schema["paths"]["/conversation/ask/stream"]["post"]["responses"]["200"][
+                "content"
+            ],
         )
-        error_responses = schema["paths"]["/sessions/{session_id}"]["delete"]["responses"]
+        error_responses = schema["paths"]["/sessions/{session_id}"]["delete"][
+            "responses"
+        ]
         self.assertTrue({"400", "404", "422", "503"}.issubset(error_responses))
 
     def test_json_boolean_fields_reject_integer_coercion(self) -> None:
@@ -82,15 +130,18 @@ class ServerSecurityTests(unittest.TestCase):
             ("/native/system-audio/cleanup", {"dry_run": 0}),
             ("/raw-audio/wipe", {"include_legacy": 0}),
         ]
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {
-                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
-                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
-                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
-                "AKOUSMATA_WATCHER": "0",
-            },
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                    "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                    "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                    "AKOUSMATA_WATCHER": "0",
+                },
+                clear=False,
+            ),
         ):
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
             for endpoint, payload in cases:
@@ -99,15 +150,18 @@ class ServerSecurityTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 422, response.text)
 
     def test_germ_handoff_rejects_malformed_payload_before_processing_it(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {
-                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
-                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
-                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
-                "AKOUSMATA_WATCHER": "0",
-            },
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                    "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                    "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                    "AKOUSMATA_WATCHER": "0",
+                },
+                clear=False,
+            ),
         ):
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
             response = client.post(
@@ -117,23 +171,33 @@ class ServerSecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422, response.text)
 
-    def test_embedded_memory_can_be_renamed_and_forgotten_without_deleting_audio(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {
-                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
-                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
-                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
-                "AKOUSMATA_WATCHER": "0",
-            },
-            clear=False,
+    def test_embedded_memory_can_be_renamed_and_forgotten_without_deleting_audio(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                    "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                    "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                    "AKOUSMATA_WATCHER": "0",
+                },
+                clear=False,
+            ),
         ):
             import akousma
             from oida.akousma_bridge import build_akousma_from_listen
 
             record = build_akousma_from_listen(
                 audio={"asset_id": "asset_memory_menu", "type": "capture"},
-                listening={"oida.listen": {"event_id": "evt_memory_menu", "summary": "Original"}},
+                listening={
+                    "oida.listen": {
+                        "event_id": "evt_memory_menu",
+                        "summary": "Original",
+                    }
+                },
                 session_id="session_memory_menu",
                 summary="Original memory name",
             )
@@ -145,11 +209,15 @@ class ServerSecurityTests(unittest.TestCase):
 
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
             listed = client.get("/akousmata/records")
-            renamed = client.patch(f"/akousmata/records/{memory_id}", json={"summary": "Renamed memory"})
+            renamed = client.patch(
+                f"/akousmata/records/{memory_id}", json={"summary": "Renamed memory"}
+            )
             forgotten = client.delete(f"/akousmata/records/{memory_id}")
             missing = client.get(f"/akousmata/records/{memory_id}")
 
-        card = next(item for item in listed.json()["records"] if item["akousma_id"] == memory_id)
+        card = next(
+            item for item in listed.json()["records"] if item["akousma_id"] == memory_id
+        )
         self.assertEqual(card["session_id"], "session_memory_menu")
         self.assertEqual(card["event_id"], "evt_memory_menu")
         self.assertEqual(renamed.json()["record"]["summary"], "Renamed memory")
@@ -198,30 +266,49 @@ class ServerSecurityTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
 
     def test_wildcard_bind_requires_bearer_token(self) -> None:
-        with patch.dict("os.environ", {"HMM_AUTH_TOKEN": "", "AEAR_AUTH_TOKEN": ""}, clear=False):
+        with patch.dict(
+            "os.environ", {"HMM_AUTH_TOKEN": "", "AEAR_AUTH_TOKEN": ""}, clear=False
+        ):
             with self.assertRaises(RuntimeError):
                 create_app(profile="stub", host="0.0.0.0")
 
         with patch.dict("os.environ", {"HMM_AUTH_TOKEN": "secret"}, clear=False):
-            client = TestClient(create_app(profile="stub", host="0.0.0.0"), base_url="http://127.0.0.1")
+            client = TestClient(
+                create_app(profile="stub", host="0.0.0.0"), base_url="http://127.0.0.1"
+            )
             self.assertEqual(client.get("/health").status_code, 401)
-            self.assertEqual(client.get("/health", headers={"authorization": "Bearer secret"}).status_code, 200)
+            self.assertEqual(
+                client.get(
+                    "/health", headers={"authorization": "Bearer secret"}
+                ).status_code,
+                200,
+            )
 
     def test_sample_tone_uses_configured_data_dir(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"HMM_DATA_DIR": tmp}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"HMM_DATA_DIR": tmp}, clear=False),
+        ):
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
             response = client.get("/sample-tone")
             body = response.json()
             exists = Path(body["path"]).exists()
-            in_data_dir = Path(body["path"]).resolve().is_relative_to(Path(tmp).resolve())
+            in_data_dir = (
+                Path(body["path"]).resolve().is_relative_to(Path(tmp).resolve())
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(exists)
         self.assertTrue(in_data_dir)
 
     def test_raw_audio_wipe_deletes_uploads(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ", {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "uploads")}, clear=False
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "uploads")},
+                clear=False,
+            ),
         ):
             upload = Path(tmp) / "uploads" / "old.wav"
             upload.parent.mkdir(parents=True)
@@ -240,7 +327,9 @@ class ServerSecurityTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmp,
             tempfile.TemporaryDirectory() as legacy_tmp,
             patch.dict(
-                "os.environ", {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "uploads")}, clear=False
+                "os.environ",
+                {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "uploads")},
+                clear=False,
             ),
         ):
             upload = Path(tmp) / "uploads" / "new.wav"
@@ -251,9 +340,13 @@ class ServerSecurityTests(unittest.TestCase):
             legacy_file = legacy_dir / "june-recording.wav"
             legacy_file.write_bytes(b"raw")
             with patch("oida.raw_audio.legacy_uploads_dir", return_value=legacy_dir):
-                client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
+                client = TestClient(
+                    create_app(profile="stub"), base_url="http://127.0.0.1"
+                )
                 status = client.get("/raw-audio/status").json()
-                default_wipe = client.post("/raw-audio/wipe", json={"delete_all": True}).json()
+                default_wipe = client.post(
+                    "/raw-audio/wipe", json={"delete_all": True}
+                ).json()
                 legacy_survives_default = legacy_file.exists()
                 legacy_wipe = client.post(
                     "/raw-audio/wipe", json={"delete_all": True, "include_legacy": True}
@@ -275,10 +368,13 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertEqual(response.json()["version"], "0.1")
 
     def test_listen_event_preserves_microphone_source_metadata(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+                clear=False,
+            ),
         ):
             path = _write_tone(Path(tmp) / "mic.wav")
             response = TestClient(
@@ -310,11 +406,15 @@ class ServerSecurityTests(unittest.TestCase):
             "artist": "Test Artist",
             "checked_at": "2026-07-13T00:00:00Z",
         }
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
-            clear=False,
-        ), patch("oida.server.identify_song", return_value=match) as identify:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+                clear=False,
+            ),
+            patch("oida.server.identify_song", return_value=match) as identify,
+        ):
             path = _write_tone(Path(tmp) / "music.wav")
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
             music = client.post(
@@ -327,16 +427,21 @@ class ServerSecurityTests(unittest.TestCase):
             )
 
         self.assertEqual(music.status_code, 200)
-        self.assertEqual(music.json()["listening_event"]["music_id"]["title"], "Test Track")
+        self.assertEqual(
+            music.json()["listening_event"]["music_id"]["title"], "Test Track"
+        )
         self.assertIn("music-id", music.json()["listening_event"]["tags"])
         self.assertNotIn("music_id", general.json()["listening_event"])
         identify.assert_called_once_with(path.resolve(), enabled=True)
 
     def test_listen_event_carries_capture_and_location(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+                clear=False,
+            ),
         ):
             path = _write_tone(Path(tmp) / "walk.wav")
             response = TestClient(
@@ -349,7 +454,12 @@ class ServerSecurityTests(unittest.TestCase):
                     "capture_direction": "past",
                     "capture_seconds": 30,
                     "capture_trigger": "floating-listener",
-                    "location": {"lat": 6.2442, "lon": -75.5812, "accuracy_m": 12, "source": "gps"},
+                    "location": {
+                        "lat": 6.2442,
+                        "lon": -75.5812,
+                        "accuracy_m": 12,
+                        "source": "gps",
+                    },
                 },
             )
 
@@ -363,11 +473,16 @@ class ServerSecurityTests(unittest.TestCase):
         self.assertEqual(event["segment"]["metadata"]["capture"]["direction"], "past")
         self.assertEqual(event["segment"]["metadata"]["location"]["lon"], -75.5812)
 
-    def test_session_and_capture_contracts_drive_the_shared_listener_state(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
-            clear=False,
+    def test_session_and_capture_contracts_drive_the_shared_listener_state(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+                clear=False,
+            ),
         ):
             path = _write_tone(Path(tmp) / "session.wav")
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
@@ -387,8 +502,12 @@ class ServerSecurityTests(unittest.TestCase):
                 json={"title": "Edited street listen"},
             )
             sessions = client.get("/sessions")
-            archived = client.post(f"/sessions/{created.json()['session']['id']}/archive")
-            restored = client.post(f"/sessions/{created.json()['session']['id']}/restore")
+            archived = client.post(
+                f"/sessions/{created.json()['session']['id']}/archive"
+            )
+            restored = client.post(
+                f"/sessions/{created.json()['session']['id']}/restore"
+            )
             deleted_event = client.delete(
                 f"/sessions/{created.json()['session']['id']}/events/{listened.json()['listening_event']['id']}"
             )
@@ -411,21 +530,35 @@ class ServerSecurityTests(unittest.TestCase):
         session_id = created.json()["session"]["id"]
         self.assertEqual(listened.status_code, 200)
         self.assertEqual(renamed.status_code, 200)
-        self.assertEqual(renamed.json()["listening_event"]["aggregate"]["title"], "Edited street listen")
-        self.assertEqual(listened.json()["listening_event"]["session"]["id"], session_id)
+        self.assertEqual(
+            renamed.json()["listening_event"]["aggregate"]["title"],
+            "Edited street listen",
+        )
+        self.assertEqual(
+            listened.json()["listening_event"]["session"]["id"], session_id
+        )
         self.assertEqual(sessions.json()["sessions"][0]["event_count"], 1)
-        self.assertEqual(sessions.json()["sessions"][0]["events"][0]["aggregate"]["title"], "Edited street listen")
+        self.assertEqual(
+            sessions.json()["sessions"][0]["events"][0]["aggregate"]["title"],
+            "Edited street listen",
+        )
         self.assertEqual(archived.status_code, 200)
         self.assertEqual(archived.json()["archived_sessions"][0]["event_count"], 1)
         self.assertEqual(restored.status_code, 200)
         self.assertTrue(deleted_event.json()["deleted"])
         self.assertTrue(deleted_session.json()["deleted"])
-        self.assertNotIn(disposable_session_id, {session["id"] for session in deleted_session.json()["sessions"]})
+        self.assertNotIn(
+            disposable_session_id,
+            {session["id"] for session in deleted_session.json()["sessions"]},
+        )
         self.assertEqual(restored.status_code, 200)
         self.assertEqual(restored.json()["archived_sessions"], [])
         self.assertEqual(capture.json()["capture_request"]["direction"], "future")
         self.assertEqual(capture.json()["capture_request"]["source"], "mic")
-        self.assertEqual(capture.json()["capture_request"]["enabled_skill_ids"], ["musicological-listener"])
+        self.assertEqual(
+            capture.json()["capture_request"]["enabled_skill_ids"],
+            ["musicological-listener"],
+        )
         self.assertTrue(capture.json()["capture_request"]["song_id"])
 
     def test_listen_event_rejects_bad_capture_and_location(self) -> None:
@@ -433,10 +566,12 @@ class ServerSecurityTests(unittest.TestCase):
             path = _write_tone(Path(tmp) / "tone.wav")
             client = _client()
             sideways = client.post(
-                "/listen-event", json={"path": str(path), "capture_direction": "sideways"}
+                "/listen-event",
+                json={"path": str(path), "capture_direction": "sideways"},
             )
             off_planet = client.post(
-                "/listen-event", json={"path": str(path), "location": {"lat": 123, "lon": 0}}
+                "/listen-event",
+                json={"path": str(path), "location": {"lat": 123, "lon": 0}},
             )
         self.assertEqual(sideways.status_code, 400)
         self.assertIn("capture_direction", sideways.json()["detail"])
@@ -447,15 +582,18 @@ class ServerSecurityTests(unittest.TestCase):
         import io
         import wave as wave_module
 
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {
-                "HMM_DATA_DIR": str(Path(tmp) / "oida"),
-                "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
-                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
-                "AKOUSMATA_WATCHER": "0",
-            },
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "HMM_DATA_DIR": str(Path(tmp) / "oida"),
+                    "HMM_AUDIO_DIR": str(Path(tmp) / "audio"),
+                    "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                    "AKOUSMATA_WATCHER": "0",
+                },
+                clear=False,
+            ),
         ):
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
             page = client.get("/remote")
@@ -488,7 +626,9 @@ class ServerSecurityTests(unittest.TestCase):
             self.assertNotIn("akousma_error", remote)
             self.assertIn("akousma_id", remote)
             self.assertTrue(str(remote["audio_uri"]).startswith("akousmata://objects/"))
-            self.assertEqual(body["listening_event"]["location"]["label"], "río Medellín")
+            self.assertEqual(
+                body["listening_event"]["location"]["label"], "río Medellín"
+            )
 
             import akousma
 
@@ -507,23 +647,31 @@ class ServerSecurityTests(unittest.TestCase):
                 store.close()
 
     def test_generation_relisten_honors_signal_preset_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            "os.environ",
-            {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"HMM_DATA_DIR": tmp, "HMM_AUDIO_DIR": str(Path(tmp) / "audio")},
+                clear=False,
+            ),
         ):
             client = TestClient(create_app(profile="stub"), base_url="http://127.0.0.1")
             source_event = {
                 "id": "evt_source",
                 "source": {"type": "file", "label": "source.wav"},
-                "segment": {"duration_ms": 1000, "data_ref": {"kind": "path", "uri": "source.wav"}},
+                "segment": {
+                    "duration_ms": 1000,
+                    "data_ref": {"kind": "path", "uri": "source.wav"},
+                },
                 "aggregate": {"title": "Source", "short_summary": "A source sound."},
                 "routes": [],
                 "features": {},
                 "privacy_mode": "session",
                 "raw_audio_policy": "external_ref",
             }
-            generation = client.post("/generation/prompt", json={"event": source_event}).json()
+            generation = client.post(
+                "/generation/prompt", json={"event": source_event}
+            ).json()
             output = _write_tone(Path(tmp) / "generated.wav")
             response = client.post(
                 "/generation/relisten",
@@ -540,7 +688,10 @@ class ServerSecurityTests(unittest.TestCase):
     def test_qa_forbidden_topic_short_circuits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = _write_tone(Path(tmp) / "tone.wav")
-            response = _client().post("/qa", json={"path": str(path), "question": "what is happening above 8 kHz?"})
+            response = _client().post(
+                "/qa",
+                json={"path": str(path), "question": "what is happening above 8 kHz?"},
+            )
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertTrue(body["forbidden_topics_triggered"])

@@ -97,8 +97,12 @@ def measure(req):
 
 
 def material(req, measured):
-    new = lambda: "urn:uuid:" + str(uuid4())
-    known = lambda v: dict(state="known", value=v)
+    def new():
+        return "urn:uuid:" + str(uuid4())
+
+    def known(v):
+        return dict(state="known", value=v)
+
     now = utc_now()
     mid, actor, representation, measurement = new(), new(), new(), new()
     m = dict(

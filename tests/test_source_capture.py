@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import shutil
 import threading
@@ -8,6 +9,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -49,19 +51,21 @@ def setup(tmp_path, monkeypatch):
 
 
 def source(**kwargs):
-    return dict(
-        id="fixture",
-        adapter="radio",
-        input="http://127.0.0.1:1/source.wav",
-        sample_rate=96000,
-        channels=1,
-        max_seconds=1.0,
-        producer_id="fixture",
-        consent="granted",
-        consent_ref="fixture-permission",
-        apparatus={"status": "unknown"},
+    return {
+        **dict(
+            id="fixture",
+            adapter="radio",
+            input="http://127.0.0.1:1/source.wav",
+            sample_rate=96000,
+            channels=1,
+            max_seconds=1.0,
+            producer_id="fixture",
+            consent="granted",
+            consent_ref="fixture-permission",
+            apparatus={"status": "unknown"},
+        ),
         **kwargs,
-    )
+    }
 
 
 @pytest.fixture
@@ -99,7 +103,9 @@ def test_real_ffmpeg_radio_owner_listen_and_durable_receipt(setup, radio, tmp_pa
         receipt["source_admission"]["sampled_representation"]["sample_rate_hz"] == 96000
     )
     assert receipt["source_admission"]["source_time_basis"] == "local-acquisition-start"
-    assert receipt["source_descriptor"]["source_time_basis"] == "local-acquisition-start"
+    assert (
+        receipt["source_descriptor"]["source_time_basis"] == "local-acquisition-start"
+    )
     assert receipt["raw_audio_deleted"]
     assert not Path(
         body["result"]["listening_event"]["segment"]["data_ref"]["uri"]
@@ -167,9 +173,7 @@ def test_cancel_before_listening_and_cleanup(setup):
         t.join(timeout=5)
         assert not t.is_alive()
     assert outputs[0].json()["receipt"]["status"] == "cancelled"
-    assert client.post("/sources/acquisitions/cancel/cancel").json()[
-        "cancel_requested"
-    ]
+    assert client.post("/sources/acquisitions/cancel/cancel").json()["cancel_requested"]
 
 
 def test_restart_marks_nonterminal_without_replay(tmp_path):
@@ -245,6 +249,50 @@ def test_device_command_never_resamples_and_pre_cancel_does_not_spawn(tmp_path):
     ):
         with pytest.raises(CaptureInterrupted):
             capture_audio(config, 0.25, tmp_path / "capture.wav", cancel)
+
+
+@pytest.mark.parametrize("sample_rate,channels", [(44100, 1), (48000, 2)])
+def test_public_radio_guard_preserves_native_format(tmp_path, sample_rate, channels):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("FFmpeg unavailable")
+    payload = io.BytesIO()
+    sf.write(
+        payload,
+        np.zeros((sample_rate // 4, channels), dtype=np.float32),
+        sample_rate,
+        format="WAV",
+    )
+    configured = CaptureSource.model_validate(
+        source(
+            input="https://radio.example/audio",
+            sample_rate=192000,
+            channels=2,
+            network_policy="public_radio",
+            retention="temp_only",
+        )
+    )
+    output = tmp_path / "capture.wav"
+    fetched = SimpleNamespace(content_type="audio/wav", data=payload.getvalue())
+    with patch("oida.public_fetch.PublicFetcher.get", return_value=fetched) as get:
+        capture_audio(configured, 0.1, output, threading.Event())
+    info = sf.info(output)
+    assert (info.samplerate, info.channels) == (sample_rate, channels)
+    assert get.call_args.kwargs["limit"] == 32 * 1024**2
+    assert get.call_args.kwargs["stream_seconds"] == 2.1
+
+
+def test_public_radio_rejects_playlist_before_decoder(tmp_path):
+    configured = CaptureSource.model_validate(
+        source(
+            input="https://radio.example/playlist",
+            network_policy="public_radio",
+            retention="temp_only",
+        )
+    )
+    fetched = SimpleNamespace(content_type="audio/mpeg", data=b"#EXTM3U\n")
+    with patch("oida.public_fetch.PublicFetcher.get", return_value=fetched):
+        with pytest.raises(ValueError, match="playlists"):
+            capture_audio(configured, 0.1, tmp_path / "capture.wav", threading.Event())
 
 
 def test_capture_worker_stops_child_when_owner_pipe_closes(tmp_path):

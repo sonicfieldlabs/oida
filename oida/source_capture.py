@@ -40,7 +40,9 @@ class CaptureSource(BaseModel):
     registration_revision: str | None = None
     rights_ref: str | None = None
     source_ref: str | None = None
-    guarded_format: Literal['mp3', 'aac', 'wav', 'flac', 'ogg'] | None = None
+    guarded_format: Literal["mp3", "aac", "wav", "flac", "ogg"] | None = None
+    network_policy: Literal["public_radio"] | None = None
+    retention: Literal["temp_only"] | None = None
 
     @model_validator(mode="after")
     def bounded(self):
@@ -61,6 +63,15 @@ class CaptureSource(BaseModel):
                 raise ValueError(
                     "radio requires an owner-selected HTTP(S) URL without credentials"
                 )
+            if self.network_policy == "public_radio":
+                if self.retention != "temp_only" or self.guarded_format is not None:
+                    raise ValueError(
+                        "public radio requires temp_only retention and owner-derived format"
+                    )
+            elif self.retention is not None:
+                raise ValueError("retention is valid only for guarded public radio")
+        elif self.network_policy is not None or self.retention is not None:
+            raise ValueError("network policy is valid only for radio")
         if len(json.dumps(self.apparatus, allow_nan=False).encode()) > 16384:
             raise ValueError("apparatus exceeds 16 KiB")
         return self
@@ -78,10 +89,10 @@ def load_capture_sources(path: str | None) -> dict[str, CaptureSource]:
     if len(raw) > 128 * 1024:
         raise ValueError("source manifest exceeds 128 KiB")
     value = json.loads(raw)
-    if (
-        set(value) != {"contract", "sources"}
-        or value["contract"] != "oida/capture-sources/v1"
-    ):
+    if set(value) != {"contract", "sources"} or value["contract"] not in {
+        "oida/capture-sources/v1",
+        "oida/capture-sources/v2",
+    }:
         raise ValueError("invalid capture source manifest")
     if not isinstance(value["sources"], list) or len(value["sources"]) > 64:
         raise ValueError("at most 64 configured sources are supported")
@@ -101,7 +112,7 @@ def capture_input_command(source: CaptureSource) -> list[str]:
         raise RuntimeError("FFmpeg is unavailable")
     command = [executable, "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
     if source.guarded_format:
-        command += ['-protocol_whitelist', 'file,pipe', '-f', source.guarded_format]
+        command += ["-protocol_whitelist", "file,pipe", "-f", source.guarded_format]
     elif source.adapter == "radio":
         command += [
             "-protocol_whitelist",
@@ -146,25 +157,55 @@ class CaptureInterrupted(RuntimeError):
 def capture_audio(
     source: CaptureSource, seconds: float, path: Path, cancelled: threading.Event
 ) -> None:
-    if source.consent != 'granted' or not 0 < seconds <= source.max_seconds:
-        raise ValueError('Capture consent or duration refused')
+    if source.consent != "granted" or not 0 < seconds <= source.max_seconds:
+        raise ValueError("Capture consent or duration refused")
     if cancelled.is_set():
-        raise CaptureInterrupted('Capture cancelled')
-    if source.runtime_registered:
+        raise CaptureInterrupted("Capture cancelled")
+    if source.runtime_registered or source.network_policy == "public_radio":
         from tempfile import TemporaryDirectory
         from oida.public_fetch import PublicFetcher
-        result = PublicFetcher().get(source.input, limit=32*1024**2, cancel=cancelled, stream_seconds=min(seconds+2, 40))
+
+        result = PublicFetcher().get(
+            source.input,
+            limit=32 * 1024**2,
+            cancel=cancelled,
+            stream_seconds=min(seconds + 2, 40),
+        )
         data = result.data
-        formats = {'audio/mpeg':'mp3', 'audio/aac':'aac', 'audio/aacp':'aac', 'audio/wav':'wav',
-                   'audio/x-wav':'wav', 'audio/flac':'flac', 'audio/ogg':'ogg', 'application/ogg':'ogg'}
+        formats = {
+            "audio/mpeg": "mp3",
+            "audio/aac": "aac",
+            "audio/aacp": "aac",
+            "audio/wav": "wav",
+            "audio/x-wav": "wav",
+            "audio/flac": "flac",
+            "audio/ogg": "ogg",
+            "application/ogg": "ogg",
+        }
         format_name = formats.get(result.content_type.lower())
-        if not format_name or data.lstrip().startswith((b'#EXTM3U', b'[playlist]', b'<')):
-            raise ValueError('Only guarded direct audio streams are available; playlists/HLS refused')
-        with TemporaryDirectory(prefix='oida-radio-', dir=path.parent) as temp:
-            local = Path(temp)/'input.audio'
+        if not format_name or data.lstrip().startswith(
+            (b"#EXTM3U", b"[playlist]", b"<")
+        ):
+            raise ValueError(
+                "Only guarded direct audio streams are available; playlists/HLS refused"
+            )
+        with TemporaryDirectory(prefix="oida-radio-", dir=path.parent) as temp:
+            local = Path(temp) / "input.audio"
             local.write_bytes(data)
-            return capture_audio(source.model_copy(update={'input':str(local), 'runtime_registered':False,
-                                                          'guarded_format':format_name}), seconds, path, cancelled)
+            return capture_audio(
+                source.model_copy(
+                    update={
+                        "input": str(local),
+                        "runtime_registered": False,
+                        "network_policy": None,
+                        "retention": None,
+                        "guarded_format": format_name,
+                    }
+                ),
+                seconds,
+                path,
+                cancelled,
+            )
     if source.consent != "granted" or not 0 < seconds <= source.max_seconds:
         raise ValueError("capture consent or duration refused")
     if cancelled.is_set():
@@ -197,8 +238,11 @@ def capture_audio(
             )
         info = sf.info(path)
         if source.guarded_format:
-            if not 8000 <= info.samplerate <= source.sample_rate or not 1 <= info.channels <= source.channels:
-                raise ValueError('Direct stream exceeds admitted native format limits')
+            if (
+                not 8000 <= info.samplerate <= source.sample_rate
+                or not 1 <= info.channels <= source.channels
+            ):
+                raise ValueError("Direct stream exceeds admitted native format limits")
         elif info.samplerate != source.sample_rate or info.channels != source.channels:
             raise ValueError(
                 "native input rate/channels differ from configured expectation; no resampling applied"
@@ -326,7 +370,10 @@ class AcquisitionReceipts:
             event = self.active.get(item["id"])
             if event is not None and event.is_set():
                 if item.get("status") != "expired":
-                    item.update(status="cancelled", reason="owner cancellation accepted; late output discarded")
+                    item.update(
+                        status="cancelled",
+                        reason="owner cancellation accepted; late output discarded",
+                    )
                 for key in ("event_id", "akousma_id", "source_admission"):
                     item.pop(key, None)
             self.save(item)
@@ -341,6 +388,10 @@ class AcquisitionReceipts:
             if item["status"] not in {"acquiring", "listening", "cancelled"}:
                 return False
             event.set()
-            item.update(status="cancelled", reason="owner cancellation accepted; late output will be discarded", finished_at=now_iso())
+            item.update(
+                status="cancelled",
+                reason="owner cancellation accepted; late output will be discarded",
+                finished_at=now_iso(),
+            )
             self.save(item)
             return True
