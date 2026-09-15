@@ -406,6 +406,10 @@ def harness_host_perception(
         privacy_mode=privacy_mode,
         raw_audio_policy=raw_audio_policy,
         listening_identity=identity_block,
+        # Compared against event labels so the orientation cannot become the
+        # account's title. It is not stored: the event carries identity_block,
+        # which is a digest and an application state, never the document.
+        identity_text=identity_snapshot.text,
     )
     if identity_block.get("application") == "revision_mismatch":
         event.setdefault("aggregate", {}).setdefault("warnings", []).append(

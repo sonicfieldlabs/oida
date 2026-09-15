@@ -45,6 +45,9 @@ def listening_event_from_report(
     privacy_mode: PrivacyMode = "session",
     raw_audio_policy: RawAudioPolicy = "external_ref",
     listening_identity: dict[str, Any] | None = None,
+    # Compared against event labels and never stored: records carry the digest
+    # from ``listening_identity``, never the document.
+    identity_text: str = "",
 ) -> ListeningEvent:
     preset = route_preset(route_preset_id)
     selected_skill_ids = resolve_route_skill_ids(
@@ -77,7 +80,7 @@ def listening_event_from_report(
             )
         ]
 
-    aggregate = _aggregate(report, command_output or {}, preset.id)
+    aggregate = _aggregate(report, command_output or {}, preset.id, identity_text or "")
     features = _features(report)
     tags = _tags(report, aggregate.primary_tags)
     apparatus = build_apparatus(report)
@@ -243,14 +246,37 @@ def _signal_health_summary(features: dict[str, Any]) -> str:
     return "Signal health route found no obvious clipping or silence failure from DSP features."
 
 
-def _aggregate(report: dict[str, Any], command_output: dict[str, Any], route_preset_id: str) -> ListeningAggregate:
+def _identity_echoes(report: dict[str, Any], identity_text: str) -> list[str]:
+    """Event labels that quote the orientation document, in the order returned."""
+    events = report.get("events") if isinstance(report.get("events"), list) else []
+    return [
+        str(event["label"])
+        for event in events
+        if isinstance(event, dict)
+        and event.get("label")
+        and _echoes_identity(str(event["label"]), identity_text)
+    ]
+
+
+def _aggregate(
+    report: dict[str, Any],
+    command_output: dict[str, Any],
+    route_preset_id: str,
+    identity_text: str = "",
+) -> ListeningAggregate:
     claim_summary = command_output.get("claim_summary") if isinstance(command_output.get("claim_summary"), dict) else {}
     inferred = _claim_hypotheses(claim_summary, "inferred") + _claim_hypotheses(claim_summary, "interpreted")
     signal_facts = _claim_statements(claim_summary, "measured")[:8] or _signal_facts_from_features(_features(report))
     warnings = _uncertainty(report) + _claim_statements(claim_summary, "undetermined")[:6]
+    for echoed in _identity_echoes(report, identity_text)[:3]:
+        warnings.append(
+            "An event label repeated the listening orientation and was not used as the "
+            f"title: {echoed!r}. The label is kept in the record; it describes what the "
+            "model returned, not a sound that was heard."
+        )
     short_summary = _short_summary(report, command_output)
     return ListeningAggregate(
-        title=_event_title(report, short_summary),
+        title=_event_title(report, short_summary, identity_text),
         short_summary=short_summary,
         detailed_summary=str(command_output.get("synthesis") or _summary_from_report(report)),
         primary_tags=_primary_tags(report),
@@ -311,11 +337,52 @@ def _signal_interpretation(report: dict[str, Any]) -> dict[str, Any]:
     return signal if isinstance(signal, dict) else {}
 
 
-def _event_title(report: dict[str, Any], fallback: str) -> str:
+def _normalised(value: str) -> str:
+    """Lower case, punctuation dropped, whitespace collapsed, for comparison only."""
+    return " ".join("".join(c if c.isalnum() or c.isspace() else " " for c in value).lower().split())
+
+
+# An event label naming a sound is short: "bird", "speech", "glass, shatter".
+# One long enough to be a phrase, whose words are all drawn from the orientation
+# document, is quoting that document rather than naming a sound. Substring
+# matching is too strict, because a model paraphrases as it echoes; these bounds
+# are deliberately tight, so a real label has to be both long and made almost
+# entirely of the document's own words before it is refused the title.
+_ECHO_MIN_CHARS = 18
+_ECHO_MIN_WORDS = 4
+_ECHO_CONTAINMENT = 0.9
+
+
+def _echoes_identity(label: str, identity_text: str) -> bool:
+    if not identity_text.strip():
+        return False
+    candidate = _normalised(label)
+    if len(candidate) < _ECHO_MIN_CHARS:
+        return False
+    words = set(candidate.split())
+    if len(words) < _ECHO_MIN_WORDS:
+        return False
+    identity_words = set(_normalised(identity_text).split())
+    shared = len(words & identity_words)
+    return shared / len(words) >= _ECHO_CONTAINMENT
+
+
+def _event_title(report: dict[str, Any], fallback: str, identity_text: str = "") -> str:
+    """The title names the sound, never the orientation the listener was given.
+
+    A model handed LISTENING.md as orientation can echo it back as an event
+    label, and the first label used to become the account title. The label is
+    left in the record, because it is a true fact about what the model returned;
+    it is only refused the title, and ``_identity_echoes`` reports the refusal so
+    the account can say what happened.
+    """
     events = report.get("events") if isinstance(report.get("events"), list) else []
     for event in events:
         if isinstance(event, dict) and event.get("label"):
-            return _title(str(event["label"]))[:90]
+            label = str(event["label"])
+            if _echoes_identity(label, identity_text):
+                continue
+            return _title(label)[:90]
     caption = report.get("caption") if isinstance(report.get("caption"), dict) else {}
     text = caption.get("brief") or caption.get("dense")
     if not text:

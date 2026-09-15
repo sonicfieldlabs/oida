@@ -610,3 +610,40 @@ def test_local_structured_provider_is_offline_and_validator_clean() -> None:
     assert "2.50 seconds" in response.answer
     assert "private phrase" not in json.dumps(result.parsed)
     assert provider.probe().locality.value == "local"
+
+
+def test_an_event_label_quoting_the_orientation_is_refused_the_title() -> None:
+    """F8: a model handed LISTENING.md can echo it back as an event label, and
+    the first label used to become the account title. The label stays in the
+    record; it is only refused the title, and the account says so."""
+    from oida.listening import _aggregate, _echoes_identity, _event_title
+
+    identity = (
+        "# Listening\n\nThis is the Centaur Listening Central's own listening "
+        "identity. It orients attention and voice inside a workspace."
+    )
+    report = {
+        "events": [
+            {"label": "Centaur Listening Central's Listening Identity"},
+            {"label": "Bird"},
+        ],
+        "caption": {"brief": "Insects and two bird calls in still air."},
+    }
+
+    assert _echoes_identity("Centaur Listening Central's Listening Identity", identity)
+    assert not _echoes_identity("Bird", identity)
+    # Real labels are not refused, however long.
+    assert not _echoes_identity("Distant surf and gulls over dry grass", identity)
+
+    # The next real label takes the title.
+    assert _event_title(report, "fallback", identity) == "Bird"
+    # With no identity in force nothing is refused, so behaviour is unchanged.
+    assert _event_title(report, "fallback", "").startswith("Centaur")
+
+    claims = {k: [] for k in ("measured", "inferred", "interpreted", "undetermined")}
+    aggregate = _aggregate(report, {"claim_summary": claims}, "basic", identity)
+    assert aggregate.title == "Bird"
+    assert any("repeated the listening orientation" in w for w in aggregate.warnings), (
+        "the account must say that a label was refused the title"
+    )
+    assert any("kept in the record" in w for w in aggregate.warnings)

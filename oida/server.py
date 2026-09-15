@@ -1398,6 +1398,9 @@ def create_app(
             privacy_mode=_privacy_mode(privacy_mode),
             raw_audio_policy="temp",
             listening_identity=audio_policy.listening_identity_block(passes),
+            # Compared against event labels so an orientation cannot become
+            # the account's title. Never stored: the block above is a digest.
+            identity_text=audio_policy.listening_identity.text,
         )
         song_identity_withheld = None
         if (
@@ -3286,6 +3289,9 @@ def create_app(
                 privacy_mode=privacy_mode,
                 raw_audio_policy=raw_audio_policy,
                 listening_identity=audio_policy.listening_identity_block(passes),
+                # Compared against event labels so an orientation cannot become
+                # the account's title. Never stored: the block above is a digest.
+                identity_text=audio_policy.listening_identity.text,
             )
             if specialist_evidence:
                 event["specialist_evidence"] = specialist_evidence
@@ -4099,6 +4105,9 @@ def create_app(
                 privacy_mode=privacy_mode,
                 raw_audio_policy=raw_audio_policy,
                 listening_identity=audio_policy.listening_identity_block(passes),
+                # Compared against event labels so an orientation cannot become
+                # the account's title. Never stored: the block above is a digest.
+                identity_text=audio_policy.listening_identity.text,
             )
             if covenant_engine is not None:
                 event["covenant"] = covenant_engine.event_block(
@@ -4253,6 +4262,9 @@ def create_app(
                 privacy_mode=_privacy_mode(req.privacy_mode),
                 raw_audio_policy="temp",
                 listening_identity=audio_policy.listening_identity_block(passes),
+                # Compared against event labels so an orientation cannot become
+                # the account's title. Never stored: the block above is a digest.
+                identity_text=audio_policy.listening_identity.text,
             )
             song_identity_withheld = None
             if (
@@ -5066,6 +5078,9 @@ def create_app(
                 privacy_mode=privacy_mode,
                 raw_audio_policy="external_ref",
                 listening_identity=audio_policy.listening_identity_block(passes),
+                # Compared against event labels so an orientation cannot become
+                # the account's title. Never stored: the block above is a digest.
+                identity_text=audio_policy.listening_identity.text,
             )
             if covenant_engine is not None:
                 event["covenant"] = covenant_engine.event_block(
