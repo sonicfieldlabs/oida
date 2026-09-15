@@ -630,10 +630,17 @@ def test_an_event_label_quoting_the_orientation_is_refused_the_title() -> None:
         "caption": {"brief": "Insects and two bird calls in still air."},
     }
 
+    # Both echoes seen in the wild. The first is a paraphrase no substring test
+    # catches; the second is a verbatim phrase of three words that slipped under
+    # a length bar set for the first, which is why both rules are needed.
     assert _echoes_identity("Centaur Listening Central's Listening Identity", identity)
+    assert _echoes_identity("It orients attention and voice", identity)
+    # Real labels are not refused, however long, and two words is never enough.
     assert not _echoes_identity("Bird", identity)
-    # Real labels are not refused, however long.
+    assert not _echoes_identity("Glass, shatter", identity)
     assert not _echoes_identity("Distant surf and gulls over dry grass", identity)
+    assert not _echoes_identity("Two distinct bird calls", identity)
+    assert not _echoes_identity("Low frequency rumble", identity)
 
     # The next real label takes the title.
     assert _event_title(report, "fallback", identity) == "Bird"

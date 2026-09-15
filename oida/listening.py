@@ -343,13 +343,18 @@ def _normalised(value: str) -> str:
 
 
 # An event label naming a sound is short: "bird", "speech", "glass, shatter".
-# One long enough to be a phrase, whose words are all drawn from the orientation
-# document, is quoting that document rather than naming a sound. Substring
-# matching is too strict, because a model paraphrases as it echoes; these bounds
-# are deliberately tight, so a real label has to be both long and made almost
-# entirely of the document's own words before it is refused the title.
-_ECHO_MIN_CHARS = 18
-_ECHO_MIN_WORDS = 4
+# A label that quotes the orientation is doing something else. Two ways to
+# quote, and both are needed: the first echo seen in the wild was a paraphrase,
+# "Centaur Listening Central's Listening Identity", which no substring test
+# catches; the second was the verbatim phrase "name the aperture", three words
+# and seventeen characters, which slipped under a length bar set for the first.
+#
+# So: a phrase of three or more words repeated verbatim is quoting, whatever its
+# length, and a longer phrase built almost entirely from the document's own
+# words is quoting even when reworded. Both bars sit above real labels, which
+# are short and are not made of the document's vocabulary.
+_ECHO_VERBATIM_MIN_WORDS = 3
+_ECHO_PARAPHRASE_MIN_WORDS = 4
 _ECHO_CONTAINMENT = 0.9
 
 
@@ -357,14 +362,17 @@ def _echoes_identity(label: str, identity_text: str) -> bool:
     if not identity_text.strip():
         return False
     candidate = _normalised(label)
-    if len(candidate) < _ECHO_MIN_CHARS:
+    words = candidate.split()
+    if len(words) < _ECHO_VERBATIM_MIN_WORDS:
         return False
-    words = set(candidate.split())
-    if len(words) < _ECHO_MIN_WORDS:
+    identity = _normalised(identity_text)
+    if candidate in identity:
+        return True
+    distinct = set(words)
+    if len(distinct) < _ECHO_PARAPHRASE_MIN_WORDS:
         return False
-    identity_words = set(_normalised(identity_text).split())
-    shared = len(words & identity_words)
-    return shared / len(words) >= _ECHO_CONTAINMENT
+    shared = len(distinct & set(identity.split()))
+    return shared / len(distinct) >= _ECHO_CONTAINMENT
 
 
 def _event_title(report: dict[str, Any], fallback: str, identity_text: str = "") -> str:
