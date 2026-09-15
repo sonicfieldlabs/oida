@@ -376,6 +376,12 @@ class GatewayListenRequest(ListenEventRequest):
     library_parent_sound_id: str | None = Field(
         default=None, min_length=1, max_length=256
     )
+    # Finding P1-02. Kinship oída cannot observe: that this listening reviews a
+    # sound generated from an earlier account. Only the caller knows it, and
+    # without this the join lives in the caller's run receipt where no exporter
+    # can reach it. Validated and recorded by apply_declared_lineage, which
+    # refuses an unrecognised relation type rather than coercing it.
+    declared_lineage: dict[str, Any] | None = None
     response_mode: Literal["full", "summary"] = "full"
     ephemeral_delivery: bool = False
     operation_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$")
@@ -1450,6 +1456,7 @@ def create_app(
         user_notes: str | None = None,
         human_listener_id: str | None = None,
         human_display_name: str | None = None,
+        declared_lineage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Write one result through Oida's compatibility trace and the shared
         Akousmata store. The UI calls both simply "Memory"; callers still get
@@ -1587,6 +1594,7 @@ def create_app(
                 audio=audio,
                 listening=listening,
                 origin=origin,
+                lineage=declared_lineage,
                 device=str(source.get("label") or "") or None,
                 session_id=str(session.get("id") or "") or None,
                 tags=[
@@ -3635,6 +3643,7 @@ def create_app(
                 human_listener_id=req.human_listener_id,
                 human_display_name=req.human_display_name,
                 tags=req.tags,
+                declared_lineage=req.declared_lineage,
             )
             trace = remembered["trace"]
         if native_analysis is not None and req.aperture.views:
