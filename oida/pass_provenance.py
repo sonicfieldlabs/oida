@@ -48,6 +48,11 @@ def pass_receipt(
     model: str,
     provider: str,
     model_kind: str,
+    #: How the kind was established. "loaded_model" means it was read from the
+    #: model actually loaded; anything else says what it was read from instead.
+    #: Added after a Thinking run recorded the right weights with the wrong kind,
+    #: because the request had selected by id and the kind kept its default.
+    model_kind_basis: str = "requested",
     revision: str | None = None,
     revision_basis: str = "unknown",
     weights: dict | None = None,
@@ -58,6 +63,7 @@ def pass_receipt(
         "model": model,
         "provider": provider,
         "model_kind": model_kind,
+        "model_kind_basis": model_kind_basis,
         "revision": {"value": revision, "basis": revision_basis},
         "weights": weights
         or {"status": "unknown", "reason": "Adapter cannot inspect provider weights"},

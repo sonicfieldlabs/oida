@@ -169,8 +169,38 @@ class MpsMossEngine(MossEngine):
         )
         return source, revision.lower()
 
+    def _kind_of_loaded(self, model_id: str, requested_kind: str) -> tuple[str, str]:
+        """The kind of the model actually loaded, and how that was established.
+
+        Found by qualifying MOSS-Audio-4B-Thinking for the first time (G7). A
+        request that selects the model by id rather than by kind leaves
+        ``settings.model_kind`` at its default of "instruct", and the receipt then
+        recorded the right weights beside the wrong kind — a record asserting that
+        a listening used the instruct model when it used the thinking one.
+
+        The weights are the ground truth here, so the kind is derived from the
+        model actually loaded and the requested kind is kept beside it when the
+        two disagree. Nothing is silently corrected: a disagreement is recorded,
+        because it usually means a caller asked for something it did not get.
+        """
+        thinking = str(getattr(self.config, "thinking_model", "") or "")
+        instruct = str(getattr(self.config, "instruct_model", "") or "")
+        if thinking and str(model_id) == thinking:
+            actual = "thinking"
+        elif instruct and str(model_id) == instruct:
+            actual = "instruct"
+        else:
+            # An override or an unknown path: the request is the only thing that
+            # says what this was meant to be, and it says so as a request.
+            return requested_kind, "requested; the loaded model is not a configured pair member"
+        if actual == requested_kind:
+            return actual, "loaded_model"
+        return actual, f"loaded_model; the request asked for {requested_kind!r}"
+
     def _input_receipt(self, model_id, model_kind, raw_audio, rate):
-        return pass_receipt(model=model_id, provider="local-moss", model_kind=model_kind,
+        kind, kind_basis = self._kind_of_loaded(model_id, model_kind)
+        return pass_receipt(model=model_id, provider="local-moss", model_kind=kind,
+            model_kind_basis=kind_basis,
             revision=self._loaded_revisions.get(model_id),
             revision_basis="loaded_model" if self._loaded_revisions.get(model_id) else "unknown",
             weights=self._weight_provenance.get(model_id),
