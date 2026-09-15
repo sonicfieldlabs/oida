@@ -25,6 +25,9 @@ class OidaConfig:
     moss_audio_repo: Path | None
     instruct_model: str
     thinking_model: str
+    # Optional. When set, an unavailable primary substitutes this model and the
+    # receipt says so; when unset, an unavailable primary refuses.
+    backup_model: str | None
     sglang_base_url: str
     sglang_thinking_processor: str | None
     require_model: bool
@@ -216,6 +219,7 @@ def load_config(
         moss_audio_repo=moss_repo,
         instruct_model=instruct,
         thinking_model=thinking,
+        backup_model=(_env("OIDA_MOSS_BACKUP_MODEL") or None),
         sglang_base_url=_env(
             "OIDA_SGLANG_BASE_URL",
             "HMM_SGLANG_BASE_URL",
