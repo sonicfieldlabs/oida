@@ -62,6 +62,15 @@ class MossEngine:
             "Adapter does not expose verifiable prepared model input"
         )
 
+    def ensure_ready(self) -> None:
+        """Raise EngineUnavailable if a pass could not be served right now.
+
+        The default is that an engine which exists can serve; engines with
+        optional dependencies override this so a caller can distinguish a cold
+        engine from a broken one without loading weights.
+        """
+        return None
+
     def prewarm(self, model_kind: str = "instruct") -> None:
         """Load weights ahead of the first request. Default: nothing to warm."""
         return None

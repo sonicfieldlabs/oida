@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import threading
@@ -34,6 +35,8 @@ from oida.station_aperture import Aperture, admit as admit_aperture
 
 
 from oida.reasoning.audio_selection import AudioModel
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AcquisitionRequest(BaseModel):
@@ -393,10 +396,18 @@ def source_router(
                 reason="listening route refused",
                 http_status=exc.status_code,
             )
-        except (ValueError, RuntimeError, OSError, TimeoutError):
+        except (ValueError, RuntimeError, OSError, TimeoutError) as exc:
+            # The generic sentence sent operators to the source configuration
+            # for failures that had nothing to do with it. Carry the exception
+            # out: the type and message name what actually broke, and a capture
+            # failure here holds no audio and no credential.
+            LOGGER.exception("capture listen failed for %s", item.get("source_id"))
             item.update(
                 status="failed",
-                reason="acquisition or listening failed; source configuration and native format must match",
+                reason=(
+                    "acquisition or listening failed "
+                    f"({type(exc).__name__}: {exc})"
+                ),
             )
         except Exception:
             item.update(

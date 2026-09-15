@@ -52,7 +52,26 @@ class FallbackEngine(MossEngine):
         self.primary.prewarm(model_kind)
 
     def runtime_status(self) -> dict[str, object]:
-        return self.primary.runtime_status()
+        status = dict(self.primary.runtime_status())
+        # A cold engine and an engine that cannot start look identical from
+        # outside unless the reason is carried out. Without this, a fallback to
+        # the stub reads as "not loaded yet" forever, and the only place the
+        # truth appeared was one field of a pass receipt after the fact.
+        reason = self.primary_unavailable_reason()
+        if reason:
+            status["primary_unavailable_reason"] = reason
+            status["falls_back_to_stub"] = True
+        return status
+
+    def primary_unavailable_reason(self) -> str | None:
+        """Why the real engine cannot serve, or None when it can."""
+        try:
+            self.primary.ensure_ready()
+        except EngineUnavailable as exc:
+            return str(exc)
+        except Exception as exc:  # a broken runtime is still unavailable
+            return f"{type(exc).__name__}: {exc}"
+        return None
 
     def set_model(self, model_kind: str, model_id: str) -> None:
         self.primary.set_model(model_kind, model_id)

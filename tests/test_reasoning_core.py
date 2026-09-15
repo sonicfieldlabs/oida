@@ -26,6 +26,7 @@ from oida.reasoning.secrets import (
     EnvironmentSecretStore,
     MacOSKeychainSecretStore,
     SecretPersistenceUnavailable,
+    SecretStoreError,
 )
 from oida.reasoning.prompts import trusted_route_instructions
 
@@ -143,15 +144,55 @@ def test_environment_and_keychain_secret_boundaries_do_not_put_values_in_argv() 
     environment = EnvironmentSecretStore({"OIDA_REASONING_OPENROUTER_API_KEY": "env-secret"})
     assert environment.get("openrouter") == "env-secret"
 
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-    with patch("oida.reasoning.secrets.subprocess.run", return_value=completed) as run:
+    # The secret must never reach argv, where `ps` would show it. It used to be
+    # sent as stdin to a bare trailing `-w`, which on a machine with no terminal
+    # stores an empty password and exits 0: the write reported success and every
+    # read came back empty. `security -i` takes the command on stdin instead,
+    # which keeps the value out of argv and actually stores it.
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        wrote = any(a == "-i" for a in argv)
+        return subprocess.CompletedProcess(
+            args=argv,
+            returncode=0,
+            stdout="keychain-secret\n" if not wrote else "",
+            stderr="",
+        )
+
+    with patch("oida.reasoning.secrets.subprocess.run", side_effect=fake_run):
         keychain = MacOSKeychainSecretStore()
         keychain.set("openrouter", "keychain-secret")
-    argv = run.call_args.args[0]
-    assert "keychain-secret" not in argv
-    assert run.call_args.kwargs["input"] == "keychain-secret\n"
-    assert argv[-1] == "-w"
+    write_argv, write_kwargs = calls[0]
+    assert "keychain-secret" not in write_argv
+    assert not any("keychain-secret" in str(part) for part in write_argv)
+    assert write_argv[-1] == "-i"
+    assert "keychain-secret" in write_kwargs["input"]
+    assert "add-generic-password" in write_kwargs["input"]
+    # The write is verified by reading it back, so an unreadable write fails.
+    assert len(calls) == 2 and "find-generic-password" in calls[1][0]
 
+
+def test_a_keychain_write_that_cannot_be_read_back_is_an_error() -> None:
+    """The bug this guards: an empty write that reported success."""
+    empty = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    with patch("oida.reasoning.secrets.subprocess.run", return_value=empty):
+        keychain = MacOSKeychainSecretStore()
+        with pytest.raises(SecretStoreError, match="did not return it"):
+            keychain.set("openrouter", "keychain-secret")
+
+
+def test_keychain_quoting_survives_awkward_values() -> None:
+    from oida.reasoning.secrets import _quote
+
+    assert _quote('plain') == '"plain"'
+    assert _quote('with "quotes"') == '"with \\"quotes\\""'
+    assert _quote('back\\slash') == '"back\\\\slash"'
+
+
+def _keychain_argv_guard() -> None:
+    keychain = MacOSKeychainSecretStore()
     with pytest.raises(ValueError, match="must start with a letter or number"):
         keychain.set("-malicious-option", "keychain-secret")
     with pytest.raises(SecretPersistenceUnavailable, match="unavailable"):

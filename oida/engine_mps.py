@@ -72,17 +72,33 @@ class MpsMossEngine(MossEngine):
             raise ValueError(f"unknown model kind: {model_kind}")
         self._model_overrides[model_kind] = model_id
 
-    def _load_pair(self, model_id: str) -> tuple[object, object]:
-        if model_id in self._models:
-            return self._models[model_id], self._processors[model_id]
+    def ensure_ready(self) -> None:
+        """Raise EngineUnavailable if this engine could not serve a pass.
+
+        Cheap: it imports the MOSS modules and touches no weights, so a caller
+        can ask "would you work?" without paying for a ten-gigabyte load.
+        """
+        self._moss_modules()
+
+    def _moss_modules(self):
         try:
-            from src.audio_io import load_audio  # noqa: F401
+            from src.audio_io import load_audio
             from src.modeling_moss_audio import MossAudioModel
             from src.processing_moss_audio import MossAudioProcessor
         except Exception as exc:
+            repo = self.config.moss_audio_repo
+            where = f"looked in {repo}" if repo else "no MOSS-Audio repo is configured"
             raise EngineUnavailable(
-                "official MOSS-Audio repo/dependencies are unavailable; set OIDA_MOSS_AUDIO_REPO (legacy HMM_/AEAR_ accepted) and install MOSS extras"
+                "official MOSS-Audio repo/dependencies are unavailable "
+                f"({where}; {type(exc).__name__}: {exc}). Set OIDA_MOSS_AUDIO_REPO "
+                "(legacy HMM_/AEAR_ accepted) and install the moss extras."
             ) from exc
+        return load_audio, MossAudioModel, MossAudioProcessor
+
+    def _load_pair(self, model_id: str) -> tuple[object, object]:
+        if model_id in self._models:
+            return self._models[model_id], self._processors[model_id]
+        load_audio, MossAudioModel, MossAudioProcessor = self._moss_modules()
 
         _adapt_moss_generation(MossAudioModel)
 
