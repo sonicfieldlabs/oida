@@ -4835,7 +4835,14 @@ def create_app(
     ) -> dict[str, Any]:
         require_local_admin(request)
         try:
-            return reasoning_budget.update_config(body)
+            # Found while enabling the Gemini trial for G7. update_config returns
+            # a BudgetConfig model and this route is typed as returning a dict,
+            # so FastAPI rejected the *response* with a 500 after the config had
+            # already been applied - the caller was told the request failed
+            # while the ledger had in fact been changed. Return the ledger's
+            # own state view, which is what GET returns, so the two agree.
+            reasoning_budget.update_config(body)
+            return reasoning_budget.state()
         except (ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
