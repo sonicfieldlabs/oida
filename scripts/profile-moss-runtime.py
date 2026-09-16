@@ -15,6 +15,29 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 
+def routed_generate(router, target, requested_id, audio_path, settings):
+    """Check selection receipts on a real router; do not infer identity from text."""
+    from oida.engine_base import use_listening_model
+    from oida.reasoning.audio_selection import selector, use_audio_model
+    from oida.reasoning.model_catalog import find_model_spec
+
+    requested = selector(find_model_spec("oida_moss", requested_id))
+    expected = selector(find_model_spec("oida_moss", str(target)))
+    with use_listening_model(str(target)), use_audio_model(requested):
+        result = router.generate(
+            str(audio_path), "Describe the sounds briefly.", settings
+        )
+    if not result.pass_provenance:
+        raise RuntimeError("Routed inference did not return pass provenance")
+    for receipt in result.pass_provenance:
+        if (
+            receipt.get("requested_audio_model") != requested.model_dump()
+            or receipt.get("actual_audio_model") != expected.model_dump()
+        ):
+            raise RuntimeError("Routed inference selection receipt mismatch")
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
@@ -30,6 +53,11 @@ def main():
         default=["instruct", "thinking"],
     )
     parser.add_argument("--check-runtime-only", action="store_true")
+    parser.add_argument(
+        "--routed-selections",
+        action="store_true",
+        help="Exercise configured aliases and canonical IDs through the local router",
+    )
     args = parser.parse_args()
     if (
         any(not 0 < value <= 45 for value in args.seconds)
@@ -75,6 +103,9 @@ def main():
         resident_mode="single",
         concurrency=1,
         generated_token_cap=args.tokens,
+        execution_path="local-router-selections"
+        if args.routed_selections
+        else "adapter",
         workload="deterministic synthetic tones/noise; not semantic or physical-capture qualification",
         mps_memory_basis="sampled at 50 ms; transient peaks may be missed; driver and tensor bytes overlap",
         rss_basis="process lifetime high-water RSS; not additive with unified MPS memory",
@@ -147,6 +178,26 @@ def main():
         with TemporaryDirectory(prefix="oida-hardware-input-") as temporary:
             from src.audio_io import load_audio
 
+            router = None
+            if args.routed_selections:
+                from oida.reasoning.audio_router import RoutedAudioEngine
+                from oida.reasoning.settings import ReasoningSettingsStore
+                from oida.reasoning.secrets import EnvironmentSecretStore
+
+                class NoNetwork:
+                    def post_json(self, *args, **kwargs):
+                        raise RuntimeError(
+                            "External transport forbidden in local qualification"
+                        )
+
+                router = RoutedAudioEngine(
+                    engine,
+                    settings_store=ReasoningSettingsStore(
+                        Path(temporary) / "reasoning.json"
+                    ),
+                    secret_store=EnvironmentSecretStore({}),
+                    transport=NoNetwork(),
+                )
             probe = Path(temporary) / "decoder-probe.wav"
             sf.write(probe, np.zeros(1600, dtype=np.float32), 16000)
 
@@ -182,12 +233,31 @@ def main():
                     )
                     path = Path(temporary) / "fixture.wav"
                     sf.write(path, audio, rate, subtype="PCM_16")
-                    measure(
-                        f"{kind}:{seconds:g}s",
-                        lambda: engine.generate(
-                            str(path), "Describe the sounds briefly.", settings
-                        ),
-                    )
+                    if router is not None:
+                        from oida.reasoning.model_catalog import find_model_spec
+
+                        target = (
+                            args.instruct.resolve()
+                            if kind == "instruct"
+                            else args.thinking.resolve()
+                        )
+                        canonical = find_model_spec("oida_moss", str(target))
+                        if canonical is None:
+                            raise RuntimeError("Checkpoint has no catalogue identity")
+                        for requested_id in (kind, canonical.id):
+                            measure(
+                                f"{kind}:{seconds:g}s:{requested_id}",
+                                lambda requested_id=requested_id: routed_generate(
+                                    router, target, requested_id, path, settings
+                                ),
+                            )
+                    else:
+                        measure(
+                            f"{kind}:{seconds:g}s",
+                            lambda: engine.generate(
+                                str(path), "Describe the sounds briefly.", settings
+                            ),
+                        )
             if len(args.kinds) > 1:
                 measure(
                     args.kinds[0] + ":reload", lambda: engine.prewarm(args.kinds[0])

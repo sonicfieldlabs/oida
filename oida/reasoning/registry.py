@@ -276,8 +276,17 @@ def build_provider_registry(
     if local_config:
         try:
             local = json.loads(Path(local_config).read_text())
+            if not isinstance(local, dict):
+                raise ValueError("Local planning configuration must be an object")
+            from oida.reasoning.providers.base import validate_http_url
+            base_url = local.get("base_url", "http://127.0.0.1:5194/v1")
+            if not isinstance(base_url, str):
+                raise ValueError("Local planning endpoint must be a URL")
+            validate_http_url(base_url)
+            if endpoint_locality(base_url) != "local":
+                raise ValueError("Local planning requires a loopback endpoint")
             registry.register(OpenAICompatibleProvider(
-                provider_id="local_ecology", base_url="http://127.0.0.1:5194/v1",
+                provider_id="local_ecology", base_url=base_url,
                 enabled=True, api_key_getter=lambda: Path(local["token_file"]).read_text().strip(),
                 display_name="Local planning · " + local["recommended_model"],
             ), enabled=True)

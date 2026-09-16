@@ -78,7 +78,13 @@ class FallbackEngine(MossEngine):
         self.primary.prewarm(model_kind)
 
     def runtime_status(self) -> dict[str, object]:
+        from oida.reasoning.audio_selection import selected_audio_model
+
         status = dict(self.primary.runtime_status())
+        permitted = selected_audio_model() is None
+        status["configured_backup_model"] = self.backup_model
+        status["configured_fallback_profile"] = self.fallback.profile
+        status["fallback_permitted_for_selection"] = permitted
         # A cold engine and an engine that cannot start look identical from
         # outside unless the reason is carried out. Without this, a fallback to
         # the stub reads as "not loaded yet" forever, and the only place the
@@ -86,7 +92,9 @@ class FallbackEngine(MossEngine):
         reason = self.primary_unavailable_reason()
         if reason:
             status["primary_unavailable_reason"] = reason
-            status["falls_back_to_stub"] = True
+            # Configuration is not a completed substitution or backup-readiness
+            # receipt. Explicit deployment selection refuses fallback entirely.
+            status["falls_back_to_stub"] = permitted and self.fallback.profile == "stub"
         return status
 
     def primary_unavailable_reason(self) -> str | None:

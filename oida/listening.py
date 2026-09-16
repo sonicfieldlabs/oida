@@ -466,11 +466,15 @@ def _signal_facts_from_features(features: dict[str, Any]) -> list[str]:
 
 def _claim_statements(claims: dict[str, Any], category: str) -> list[str]:
     values = claims.get(category) if isinstance(claims, dict) else []
+    if not isinstance(values, list):
+        return []
     return [str(item.get("statement")) for item in values if isinstance(item, dict) and item.get("statement")]
 
 
 def _claim_hypotheses(claims: dict[str, Any], category: str) -> list[ListeningHypothesis]:
     values = claims.get(category) if isinstance(claims, dict) else []
+    if not isinstance(values, list):
+        return []
     return [
         ListeningHypothesis(
             statement=str(item.get("statement")),

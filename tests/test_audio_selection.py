@@ -169,6 +169,99 @@ def test_opaque_deployment_refuses_cross_model_substitution():
         resolve(selection().model_copy(update={"model_id": "gemini-3.8-flash"}))
 
 
+@pytest.mark.parametrize(
+    "alias,recipe,checkpoint",
+    [
+        ("instruct", INSTRUCT_CAPTION, "MOSS-Audio-4B-Instruct"),
+        ("thinking", THINKING_REASONING, "MOSS-Audio-4B-Thinking"),
+    ],
+)
+@pytest.mark.parametrize("use_alias", [True, False])
+def test_local_selection_records_resolved_identity(
+    tmp_path, alias, recipe, checkpoint, use_alias
+):
+    from oida.engine_base import EngineResult, use_listening_model
+
+    actual = find_model_spec("oida_moss", "OpenMOSS-Team/" + checkpoint)
+    requested = selector(find_model_spec("oida_moss", alias) if use_alias else actual)
+    router, local = _router(tmp_path, ReasoningSettings(), transport=FakeTransport({}))
+    local.generate = lambda *args: EngineResult(
+        text="technical fixture",
+        model="/local/" + checkpoint,
+        profile="fake-local",
+        settings=recipe,
+        pass_provenance=[{}],
+    )
+    with use_audio_model(requested), use_listening_model("/local/" + checkpoint):
+        result = router.generate(str(_audio(tmp_path)), "Describe", recipe)
+    assert result.pass_provenance[0]["requested_audio_model"] == requested.model_dump()
+    assert (
+        result.pass_provenance[0]["actual_audio_model"] == selector(actual).model_dump()
+    )
+
+
+@pytest.mark.parametrize("pinned", [None, "instruct", "/local/unknown-model"])
+def test_local_alias_rejects_unresolved_target_before_inference(tmp_path, pinned):
+    from oida.engine_base import use_listening_model
+
+    router, local = _router(tmp_path, ReasoningSettings(), transport=FakeTransport({}))
+    requested = selector(find_model_spec("oida_moss", "instruct"))
+    with (
+        use_audio_model(requested),
+        use_listening_model(pinned),
+        pytest.raises(EngineUnavailable),
+    ):
+        router.generate(str(_audio(tmp_path)), "Describe", INSTRUCT_CAPTION)
+    assert not local.calls
+
+
+@pytest.mark.parametrize(
+    "requested_id", ["instruct", "OpenMOSS-Team/MOSS-Audio-4B-Instruct"]
+)
+@pytest.mark.parametrize(
+    "actual_id", ["/local/MOSS-Audio-4B-Thinking", "unknown-model", "instruct"]
+)
+def test_local_selection_rejects_substitution(tmp_path, requested_id, actual_id):
+    from oida.engine_base import EngineResult, use_listening_model
+
+    router, local = _router(tmp_path, ReasoningSettings(), transport=FakeTransport({}))
+    local.generate = lambda *args: EngineResult(
+        text="technical fixture",
+        model=actual_id,
+        profile="fake-local",
+        settings=INSTRUCT_CAPTION,
+        pass_provenance=[{}],
+    )
+    requested = selector(find_model_spec("oida_moss", requested_id))
+    with (
+        use_audio_model(requested),
+        use_listening_model("/local/MOSS-Audio-4B-Instruct"),
+        pytest.raises(EngineUnavailable),
+    ):
+        router.generate(str(_audio(tmp_path)), "Describe", INSTRUCT_CAPTION)
+
+
+@pytest.mark.parametrize("pinned", [None, "/local/MOSS-Audio-4B-Thinking"])
+def test_local_alias_refuses_missing_or_mismatched_resolution(tmp_path, pinned):
+    from oida.engine_base import EngineResult, use_listening_model
+
+    router, local = _router(tmp_path, ReasoningSettings(), transport=FakeTransport({}))
+    local.generate = lambda *args: EngineResult(
+        text="technical fixture",
+        model="/local/MOSS-Audio-4B-Instruct",
+        profile="fake-local",
+        settings=INSTRUCT_CAPTION,
+        pass_provenance=[{}],
+    )
+    requested = selector(find_model_spec("oida_moss", "instruct"))
+    with (
+        use_audio_model(requested),
+        use_listening_model(pinned),
+        pytest.raises(EngineUnavailable),
+    ):
+        router.generate(str(_audio(tmp_path)), "Describe", INSTRUCT_CAPTION)
+
+
 @pytest.mark.parametrize("actual", ["qwen3.5-omni-flash", "wrong-model"])
 def test_qwen_sse_usage_text_only_and_model_identity(tmp_path, actual):
     import json

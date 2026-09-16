@@ -865,6 +865,7 @@ def _memory_context_item(item: dict[str, Any]) -> dict[str, Any]:
 def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
     if not value:
         return None
+    from oida.reasoning.relisten_projection import provenance_projection
     public = {
         key: value.get(key)
         for key in (
@@ -872,6 +873,8 @@ def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
             "id",
             "base_event_id",
             "segment_ref",
+            "conversation_id",
+            "turn_id",
             "question",
             "parent_question",
             "time_range",
@@ -889,6 +892,8 @@ def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
         ("id", 255),
         ("base_event_id", 255),
         ("segment_ref", 255),
+        ("conversation_id", 255),
+        ("turn_id", 255),
         ("question", 4000),
         ("parent_question", 16_000),
         ("engine", 255),
@@ -919,6 +924,7 @@ def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
                 "role",
             )
         }
+    public["provenance"] = provenance_projection(value)
     if not value.get("observation_shared_to_reasoner"):
         public["observation"] = None
         public["observation_withheld"] = True

@@ -767,6 +767,19 @@ def create_app(
             return config.instruct_model
         if normalized == "thinking":
             return config.thinking_model
+        spec = find_model_spec("oida_moss", normalized)
+        # Installed deployments can keep checkpoints outside REPO_ROOT/weights.
+        # Prefer an explicitly configured local target of this exact catalogue
+        # identity; an unrelated configured model must not satisfy the request.
+        if spec is not None and spec.integration_status != "configured_alias":
+            for configured in (config.instruct_model, config.thinking_model):
+                configured_spec = find_model_spec("oida_moss", configured)
+                if (
+                    configured_spec is not None
+                    and configured_spec.id == spec.id
+                    and (Path(configured) / "config.json").is_file()
+                ):
+                    return configured
         selected = next(
             (
                 item
@@ -778,7 +791,6 @@ def create_app(
         )
         if selected:
             return str(selected["path"])
-        spec = find_model_spec("oida_moss", normalized)
         if spec is not None:
             local = next(
                 (
@@ -2885,10 +2897,25 @@ def create_app(
             has_cred = bool(provider and provider.credential_ref)
             probed = engine.is_model_probed(spec.provider_id, spec.id)
             prov_enabled = bool(provider and provider.enabled)
+            local_target = (
+                resolve_moss_model(spec.id) if spec.provider_id == "oida_moss" else None
+            )
+            local_installed = bool(
+                local_target and (Path(local_target) / "config.json").is_file()
+            )
+            local_loaded = bool(local_target) and any(
+                descriptor.metadata.get("loaded")
+                and Path(str(descriptor.metadata.get("path", ""))).name
+                == Path(local_target).name
+                for descriptor in descriptors
+            )
 
             if not spec.selectable:
                 avail = False
                 unavail_reason = "Adapter or model runtime qualification pending"
+            elif local_installed and config.profile != "stub":
+                avail = True
+                unavail_reason = None
             elif (
                 spec.provider_id in {"local_audio", "oida_moss"}
                 or spec.locality == ProviderLocality.LOCAL
@@ -2925,17 +2952,23 @@ def create_app(
                     audio_model=audio_selector(spec).model_dump(),
                     capabilities=spec.capabilities,
                     description=spec.notes or "Registered audio deployment",
-                    installed=False
+                    installed=local_installed
                     if spec.locality == ProviderLocality.LOCAL
                     else None,
-                    loaded=False,
+                    loaded=local_loaded,
                     available=avail,
                     catalogued=True,
-                    configured=prov_enabled,
+                    configured=(
+                        local_target in {config.instruct_model, config.thinking_model}
+                    )
+                    if spec.provider_id == "oida_moss"
+                    else prov_enabled,
                     reachable=None,  # A past probe is not a current reachability check.
                     inference_tested=probed,
                     unavailable_reason=unavail_reason,
-                    qualification_level=spec.integration_status,
+                    qualification_level="local_runtime_detected"
+                    if local_installed and avail
+                    else spec.integration_status,
                     license=spec.license,
                     revision=spec.revision,
                     sample_rate_hz=spec.sample_rate_hz,

@@ -87,7 +87,34 @@ def test_preparation_and_execution_use_same_input_identity(loaded):
     assert result.pass_provenance[0]["effective_input"] == receipt
 
 
-@pytest.mark.parametrize("change", ["samples", "rate", "revision", "weights"])
+@pytest.mark.parametrize("requested_kind,actual_kind", [
+    ("music", "thinking"), ("targeted_relisten", "thinking"),
+    ("transcription", "instruct"),
+])
+def test_prepared_role_binding_keeps_loaded_family_identity(
+    loaded, monkeypatch, tmp_path, requested_kind, actual_kind
+):
+    from dataclasses import replace
+
+    monkeypatch.setenv("LISTENINGSTACK_RESOURCE_DIR", str(tmp_path / "fixture-leases"))
+    engine, _, state = loaded
+    setattr(engine.config, actual_kind + "_model", "fixture-resident")
+    binding = engine.prepare_input_binding("fixture.wav", requested_kind)
+    assert binding["receipt"]["model_kind"] == actual_kind
+    settings = replace(get_recipe("qa").settings, model_kind=requested_kind)
+    with enforce_input_bindings({requested_kind: binding["binding_id"]}):
+        result = engine.generate("fixture.wav", "fixture", settings)
+    assert state["calls"] == 1
+    assert result.pass_provenance[0]["input_binding_id"] == binding["binding_id"]
+    assert result.pass_provenance[0]["model_kind"] == actual_kind
+    # An identical digest under a different invocation role is not permission.
+    with enforce_input_bindings({actual_kind: binding["binding_id"]}):
+        with pytest.raises(InputBindingChanged):
+            engine.generate("fixture.wav", "fixture", settings)
+    assert state["calls"] == 1
+
+
+@pytest.mark.parametrize("change", ["samples", "rate", "revision", "weights", "family"])
 def test_drift_is_rejected_before_model_generation(loaded, change):
     engine, processor, state = loaded
     binding = engine.prepare_input_binding("fixture.wav")
@@ -97,6 +124,8 @@ def test_drift_is_rejected_before_model_generation(loaded, change):
         processor.config.mel_sr = 16000
     if change == "revision":
         engine._loaded_revisions["fixture-resident"] = "b" * 40
+    if change == "family":
+        engine.config.thinking_model = "fixture-resident"
     if change == "weights":
         engine._weight_provenance["fixture-resident"] = {
             "status": "unknown",

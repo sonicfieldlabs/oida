@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
-from oida.engine_base import EngineResult, EngineUnavailable, MossEngine
+from oida.engine_base import EngineResult, EngineUnavailable, MossEngine, selected_model
 from oida.listening_identity import (
     MAX_LISTENING_IDENTITY_CHARS,
     ListeningIdentitySnapshot,
@@ -34,6 +34,7 @@ from oida.reasoning.contracts import (
     RoleAssignment,
 )
 from oida.reasoning.audio_selection import (
+    selector,
     selected_audio_model,
     resolve,
     validate_endpoint,
@@ -331,17 +332,36 @@ class RoutedAudioEngine(MossEngine):
             spec = find_model_spec("oida_moss", model_id)
             if spec and not spec.selectable:
                 raise EngineUnavailable("Local model runtime qualification pending")
+            selection = selected_audio_model()
+            expected = spec
+            if (
+                selection is not None
+                and spec
+                and spec.integration_status == "configured_alias"
+            ):
+                # Resolve aliases only from the request-scoped target chosen by
+                # the server, never from the result we are about to validate.
+                expected = find_model_spec("oida_moss", selected_model())
+                if (
+                    expected is None
+                    or expected.integration_status == "configured_alias"
+                    or not expected.selectable
+                    or role.value not in expected.roles
+                ):
+                    raise EngineUnavailable(
+                        "Local audio model alias has no qualified resolved target"
+                    )
             self._record_route(role, assignment.provider_id, model_id, "embedded")
             result = self.local_engine.generate(
                 audio_path, prompt, settings, thinking_budget
             )
-            selection = selected_audio_model()
             if selection is not None:
                 actual = find_model_spec("oida_moss", result.model)
                 if (
                     result.unavailable_reason
                     or actual is None
-                    or actual.id != selection.model_id
+                    or expected is None
+                    or actual.id != expected.id
                 ):
                     raise EngineUnavailable(
                         "Local engine did not return the selected audio model"
@@ -350,7 +370,7 @@ class RoutedAudioEngine(MossEngine):
                 for receipt in result.pass_provenance:
                     receipt.update(
                         requested_audio_model=selection.model_dump(),
-                        actual_audio_model=selection.model_dump(),
+                        actual_audio_model=selector(actual).model_dump(),
                         usage=result.usage,
                     )
             return result

@@ -62,6 +62,38 @@ def test_without_a_backup_an_unavailable_primary_refuses(monkeypatch, tmp_path):
             engine.ensure_ready()
 
 
+def test_status_names_real_backup_without_claiming_stub_or_loading_it(monkeypatch, tmp_path):
+    config = _mps(monkeypatch, OIDA_MOSS_AUDIO_REPO=str(tmp_path / "nowhere"),
+                  OIDA_MOSS_BACKUP_MODEL="Backup-Model-1B")
+    engine = build_engine(config)
+    with patch.dict("sys.modules", {"src": None, "src.audio_io": None}), \
+            patch.object(engine.fallback, "ensure_ready") as backup_ready:
+        status = engine.runtime_status()
+    assert status["falls_back_to_stub"] is False
+    assert status["configured_backup_model"] == "Backup-Model-1B"
+    assert status["configured_fallback_profile"] == "mac-mps"
+    assert status["fallback_permitted_for_selection"] is True
+    assert "unavailable" in status["primary_unavailable_reason"]
+    backup_ready.assert_not_called()
+
+
+def test_explicit_selection_status_agrees_with_no_substitution_policy(monkeypatch, tmp_path):
+    from oida.reasoning.audio_selection import selector, use_audio_model
+    from oida.reasoning.model_catalog import MODEL_SPECS
+
+    config = _mps(monkeypatch, OIDA_MOSS_AUDIO_REPO=str(tmp_path / "nowhere"))
+    engine = FallbackEngine(MpsMossEngine(config), StubMossEngine())
+    selected = selector(next(spec for spec in MODEL_SPECS if spec.id == "instruct"))
+    with patch.dict("sys.modules", {"src": None, "src.audio_io": None}):
+        with use_audio_model(selected):
+            status = engine.runtime_status()
+        restored = engine.runtime_status()
+    assert status["fallback_permitted_for_selection"] is False
+    assert status["falls_back_to_stub"] is False
+    assert restored["fallback_permitted_for_selection"] is True
+    assert restored["falls_back_to_stub"] is True
+
+
 def test_with_a_backup_the_substitution_is_recorded(monkeypatch, tmp_path):
     config = _mps(monkeypatch, OIDA_MOSS_BACKUP_MODEL="Backup-Model-1B")
     engine = build_engine(config)

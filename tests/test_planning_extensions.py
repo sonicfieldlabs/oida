@@ -75,3 +75,40 @@ def test_malformed_or_disabled_local_gateway_does_not_replace_builtins(
         and registry.get("ollama") is not None
     )
     assert registry.get("local_ecology") is None
+
+
+@pytest.mark.parametrize("url", [None, "http://127.0.0.1:55194/v1", "http://[::1]:55195/v1"])
+def test_local_gateway_uses_selected_loopback_endpoint(tmp_path, monkeypatch, url):
+    from oida.reasoning.registry import build_provider_registry
+    config = {"token_file": str(tmp_path / "token"), "recommended_model": "fixture"}
+    if url is not None:
+        config["base_url"] = url
+    path = tmp_path / "gateway.json"
+    path.write_text(json.dumps(config))
+    monkeypatch.setenv("OIDA_LOCAL_REASONING_CONFIG", str(path))
+    provider = build_provider_registry().get("local_ecology")
+    assert provider.base_url == (url or "http://127.0.0.1:5194/v1")
+
+
+@pytest.mark.parametrize("url", ["https://external.example/v1", "http://192.168.1.2/v1",
+    "file:///tmp/planner", "http://user:password@127.0.0.1/v1", "http://127.0.0.1/v1?token=x", 42, None])
+def test_invalid_local_endpoint_cannot_admit_or_expose_a_credential(tmp_path, monkeypatch, url):
+    from oida.reasoning.registry import build_provider_registry
+    path = tmp_path / "gateway.json"
+    path.write_text(json.dumps({"base_url": url, "token_file": str(tmp_path / "absent-token"),
+                                "recommended_model": "fixture"}))
+    monkeypatch.setenv("OIDA_LOCAL_REASONING_CONFIG", str(path))
+    registry = build_provider_registry()
+    assert registry.get("local_ecology") is None
+    assert registry.get("local_structured") is not None
+
+
+@pytest.mark.parametrize("value", [[], None, "not an object", 1])
+def test_non_object_local_config_leaves_builtins_available(tmp_path, monkeypatch, value):
+    from oida.reasoning.registry import build_provider_registry
+    path = tmp_path / "gateway.json"
+    path.write_text(json.dumps(value))
+    monkeypatch.setenv("OIDA_LOCAL_REASONING_CONFIG", str(path))
+    registry = build_provider_registry()
+    assert registry.get("local_ecology") is None
+    assert registry.get("local_structured") is not None

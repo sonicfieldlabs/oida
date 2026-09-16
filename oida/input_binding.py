@@ -108,12 +108,18 @@ def reject_unobservable_binding():
         )
 
 
-def verify_input_binding(receipt: dict) -> dict:
+def verify_input_binding(receipt: dict, *, requested_kind: str) -> dict:
+    """Select the prepared invocation, then compare its actual-input identity.
+
+    Recipe roles (music, transcription, targeted_relisten) are not loaded model
+    families (thinking, instruct). The digest must retain the actual family;
+    looking up that digest must use the same invocation key as preparation.
+    """
     binding = binding_for_receipt(receipt)
     expected = _EXPECTED.get()
     if (
         expected is not None
-        and expected.get(receipt["model_kind"]) != binding["binding_id"]
+        and expected.get(requested_kind) != binding["binding_id"]
     ):
         raise InputBindingChanged(
             "Model, adapter or preprocessed input changed after preparation"

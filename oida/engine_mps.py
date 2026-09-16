@@ -300,7 +300,7 @@ class MpsMossEngine(MossEngine):
             raw_audio = load_audio(str(Path(audio_path)), sample_rate=processor.config.mel_sr)
             rate = int(processor.config.mel_sr)
             provenance = self._input_receipt(model_id, settings.model_kind, raw_audio, rate)
-            binding = verify_input_binding(provenance)
+            binding = verify_input_binding(provenance, requested_kind=settings.model_kind)
             provenance["input_binding_id"] = binding["binding_id"]
             inputs = processor(text=prompt, audios=[raw_audio], return_tensors="pt")
             inputs = inputs.to(model.device)
