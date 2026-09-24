@@ -391,6 +391,10 @@ class GatewayListenRequest(ListenEventRequest):
     response_mode: Literal["full", "summary"] = "full"
     ephemeral_delivery: bool = False
     operation_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$")
+    # A caller's hard deadline, in epoch seconds. Absent, admitted work runs to completion,
+    # as before. Present, the operation stops at its next checkpoint or inside a model
+    # generation once it passes, and discards partial output.
+    deadline_at: float | None = Field(default=None, gt=0)
     remember: bool = False
     user_notes: str | None = None
     human_listener_id: str | None = None
@@ -3492,7 +3496,11 @@ def create_app(
             except ValueError as exc:
                 raise HTTPException(400, "Invalid native options") from exc
             return native_listen(native_request)
-        return operations.run(req.operation_id, lambda: gateway_listen_impl(req))
+        return operations.run(
+            req.operation_id,
+            lambda: gateway_listen_impl(req),
+            deadline_at=checked_deadline(req.deadline_at),
+        )
 
     @app.post("/gateway/listen-window")
     def gateway_window_endpoint(req: GatewayWindowRequest) -> dict[str, object]:
@@ -3560,7 +3568,22 @@ def create_app(
             except (ValueError, RuntimeError) as exc:
                 raise HTTPException(400, str(exc)) from exc
 
-        return operations.run(req.operation_id, execute_window)
+        return operations.run(
+            req.operation_id, execute_window, deadline_at=checked_deadline(req.deadline_at)
+        )
+
+    def checked_deadline(value):
+        """A deadline must lie in the future and within four hours; anything else is refused."""
+        if value is None:
+            return None
+        remaining = value - time.time()
+        if remaining <= 0:
+            from oida.operation_control import DeadlineReached
+
+            raise DeadlineReached("operation deadline already passed; nothing was started")
+        if remaining > 4 * 3600:
+            raise HTTPException(400, "deadline_at must be within four hours")
+        return value
 
     def gateway_listen_impl(
         req: GatewayListenRequest, *, file_window=None

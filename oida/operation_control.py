@@ -12,8 +12,16 @@ _current = ContextVar('oida_operation', default=None)
 
 
 class OperationCancelled(HTTPException):
-    def __init__(self):
-        super().__init__(409, 'operation cancelled; late output discarded')
+    def __init__(self, detail='operation cancelled; late output discarded'):
+        super().__init__(409, detail)
+
+
+class DeadlineReached(OperationCancelled):
+    """The caller's deadline passed. Work stops at the next checkpoint, or inside a model
+    generation that honours it, and any partial output is discarded."""
+
+    def __init__(self, detail='operation deadline reached; partial output discarded'):
+        super().__init__(detail)
 
 
 class Control:
@@ -33,7 +41,7 @@ class Control:
             if self.event.is_set():
                 raise OperationCancelled()
             if self.deadline_at is not None and time.time() >= self.deadline_at:
-                raise OperationCancelled()
+                raise DeadlineReached()
             if self.recheck:
                 self.recheck()
             if seal and not self.sealed:
@@ -70,6 +78,12 @@ def current_operation_id():
     return control.identifier if control is not None else None
 
 
+def current_deadline():
+    """The epoch-seconds deadline of the operation this code runs under, or None."""
+    control = _current.get()
+    return control.deadline_at if control is not None else None
+
+
 def remaining_timeout(default):
     control = _current.get()
     if control is None or control.deadline_at is None:
@@ -77,7 +91,7 @@ def remaining_timeout(default):
     control.check()
     remaining = control.deadline_at - time.time()
     if remaining < 1:
-        raise OperationCancelled()
+        raise DeadlineReached()
     return min(default, remaining)
 
 
@@ -124,7 +138,11 @@ class Operations:
 
     def run(self, identifier, callback, *, recheck=None, deadline_at=None):
         if identifier is None:
-            return callback()
+            if deadline_at is None:
+                return callback()
+            # No receipt without an identity, but the deadline still binds the work.
+            with controlled(Control(deadline_at=deadline_at, recheck=recheck)):
+                return callback()
         if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', identifier):
             raise HTTPException(400, 'invalid operation id')
         with self.lock:
@@ -144,6 +162,9 @@ class Operations:
                 links['event_id'] = event['id']
             self.save(identifier, 'refused' if result.get('outcome') in ('refused', 'withheld') else 'complete', **links)
             return result
+        except DeadlineReached:
+            self.save(identifier, 'cancelled', reason='deadline')
+            raise
         except OperationCancelled:
             self.save(identifier, 'cancelled')
             raise

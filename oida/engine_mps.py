@@ -296,12 +296,24 @@ class MpsMossEngine(MossEngine):
         except Exception as exc:
             raise EngineUnavailable("MOSS-Audio runtime dependencies are unavailable") from exc
 
+        from oida.operation_control import DeadlineReached, current_deadline
+
         model_id = self._model_id(settings)
+        deadline = current_deadline()
         # Serialize model load/evict + generate. FastAPI dispatches the sync endpoint
         # handlers across a worker thread pool, so without this lock two concurrent
         # requests could evict a model out from under an in-flight inference (resident
         # mode "single") or run parallel generate() calls on the one MPS device.
-        with self._lock:
+        # Waiting for it is timed and, under a caller's deadline, bounded.
+        waiting = time.perf_counter()
+        if deadline is None:
+            self._lock.acquire()
+        elif deadline - time.time() <= 0 or not self._lock.acquire(timeout=deadline - time.time()):
+            raise DeadlineReached(
+                "operation deadline reached while waiting for the audio model; nothing was generated"
+            )
+        wait_ms = round((time.perf_counter() - waiting) * 1000)
+        try:
             model, processor = self._load_pair(model_id)
             start = time.perf_counter()
             raw_audio = load_audio(str(Path(audio_path)), sample_rate=processor.config.mel_sr)
@@ -332,13 +344,47 @@ class MpsMossEngine(MossEngine):
                         "top_k": settings.top_k,
                     }
                 )
+            if deadline is not None:
+                remaining = deadline - time.time()
+                if remaining < 1:
+                    raise DeadlineReached(
+                        "operation deadline reached before generation; nothing was generated"
+                    )
+                # transformers stops generating once this much wall time has passed.
+                generation_kwargs["max_time"] = remaining
+            generating = time.perf_counter()
             with torch.no_grad():
                 out = model.generate(
                     **inputs,
                     **generation_kwargs,
                 )
-            text = _safe_decode(processor, out[0, inputs["input_ids"].shape[1] :])
+            new_ids = out[0, inputs["input_ids"].shape[1] :]
+            generated = int(new_ids.shape[0])
+            eos = processor.tokenizer.eos_token_id
+            if generated and int(new_ids[-1]) == eos:
+                stop = "eos"
+            elif generated >= settings.max_new_tokens:
+                stop = "max_new_tokens"
+            elif deadline is not None and time.time() >= deadline - 0.25:
+                stop = "deadline"
+            else:
+                stop = "other"
+            provenance["generation"] = {
+                "engine_wait_ms": wait_ms,
+                "generate_ms": round((time.perf_counter() - generating) * 1000),
+                "new_tokens": generated,
+                "max_new_tokens": settings.max_new_tokens,
+                "stop_reason": stop,
+                "deadline_bound": deadline is not None,
+            }
+            if stop == "deadline":
+                raise DeadlineReached(
+                    "operation deadline reached during generation; the partial output was discarded"
+                )
+            text = _safe_decode(processor, new_ids)
             wall_ms = round((time.perf_counter() - start) * 1000)
+        finally:
+            self._lock.release()
         reasoning_trace, answer = split_reasoning(text)
         return EngineResult(
             text=answer,
