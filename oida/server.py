@@ -649,6 +649,23 @@ def scan_moss_models(weights_dir: Path) -> list[dict[str, object]]:
     return models
 
 
+
+def dispatch_deadline(passes, *, now=None, wall=None) -> float:
+    """The monotonic time after which no further pass of a listening is dispatched.
+
+    A caller's deadline, when one was sent, is the bound. Otherwise each requested pass
+    gets 120 s. A single 120 s bound for the whole listening (13 September) refused the
+    second pass of a two-pass route whenever the first ran long on this M1 Max: a Phase 3
+    loop's field listening was refused at 190 s under an 1800 s window (24 September).
+    """
+    from oida.operation_control import current_deadline
+
+    now = time.monotonic() if now is None else now
+    caller = current_deadline()
+    if caller is not None:
+        return now + max(0.0, caller - (time.time() if wall is None else wall))
+    return now + 120 * max(1, len(passes or []))
+
 def create_app(
     profile: str | None = None, host: str | None = None, port: int | None = None
 ) -> Any:
@@ -3271,7 +3288,7 @@ def create_app(
                     allow_external_source=bool(
                         getattr(req, "allow_external_audio", False)
                     ),
-                    deadline=time.monotonic() + 120,
+                    deadline=dispatch_deadline(passes),
                     focus=focus,
                 ) as audio_policy,
             ):

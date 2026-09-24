@@ -232,3 +232,14 @@ def test_preparing_the_input_binding_waits_no_longer_than_the_deadline(loaded): 
     finally:
         engine._lock.release()
     assert engine.prepare_input_binding("fixture.wav", "instruct")["status"] in {"prepared", "unknown"}
+
+
+def test_passes_are_dispatched_until_the_callers_deadline_or_two_minutes_each():
+    from oida.server import dispatch_deadline
+
+    assert dispatch_deadline(["caption"], now=0.0) == 120
+    assert dispatch_deadline(["caption", "events"], now=0.0) == 240
+    assert dispatch_deadline([], now=0.0) == 120
+    wall = time.time()
+    with controlled(Control(deadline_at=wall + 900)):
+        assert dispatch_deadline(["caption", "events"], now=50.0, wall=wall) == 950.0
