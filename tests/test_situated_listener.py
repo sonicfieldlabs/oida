@@ -240,3 +240,23 @@ def test_generated_subject_cannot_claim_convergence(harness):
     assert response["status"] != "complete"
     assert "Generated-subject" in response["error"]
     assert json.loads(calls[0].user_prompt)["subject_generated"] is True
+
+
+def test_a_bounded_local_planner_is_sent_whole_items_within_its_context(harness, monkeypatch):
+    """Phase 3: the local planner refused every decision over its validated 8192 tokens."""
+    import oida.situated_listener as situated
+
+    c, _, calls, _ = harness
+    monkeypatch.setitem(
+        situated.BOUNDED_CONTEXT, "ollama", {"evidence_chars": 1, "max_choices": 1}
+    )
+    p = payload()
+    p["choices"] = [dict(key="a" * 64, title="One"), dict(key="b" * 64, title="Two")]
+    v = c.post("/situated/decide", json=p).json()
+    assert v["status"] == "complete", v
+    sent = json.loads(calls[0].user_prompt)
+    assert [i["kind"] for i in sent["evidence"]] == ["event_anchor"]
+    assert len(sent["choices"]) == 1
+    bound = v["evidence_bound"]
+    assert bound["sent"] == 1 and bound["offered"] > 1 and bound["withheld_refs"]
+    assert [i["ref"] for i in v["evidence"]] == [i["ref"] for i in sent["evidence"]]

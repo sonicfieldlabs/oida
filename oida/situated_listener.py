@@ -18,6 +18,42 @@ from oida.reasoning.evidence import covenant_blocks_untyped_prose, safe_external
 from oida.reasoning_context import retained_event
 
 
+
+# A provider whose validated context is bounded receives at most this much evidence. The
+# admitted local planner (local_ecology, Qwen3.5-4B) was evaluated within an 8192-token
+# prompt and refuses anything longer. On 24 September a five-second listening produced 24
+# evidence items (about 20 KB with its choices), 8647 prompt tokens, and every situated
+# decision it was asked for was refused. The budget below brought that request to 7344.
+BOUNDED_CONTEXT = {"local_ecology": {"evidence_chars": 8000, "max_choices": 20}}
+
+_EVIDENCE_PRIORITY = {"event_anchor": 0, "summary": 1, "reference": 2}
+
+
+def bound_evidence(items, choices, *, evidence_chars, max_choices):
+    """Keep the anchor, then summaries and references, then claims in order, within a budget.
+
+    Nothing is summarised or rewritten: whole items are sent or withheld, and the receipt
+    says how many of each were withheld, so a decision is read against what was offered.
+    """
+    ranked = sorted(enumerate(items), key=lambda pair: (_EVIDENCE_PRIORITY.get(pair[1].get("kind"), 3), pair[0]))
+    kept, used = set(), 0
+    for index, item in ranked:
+        size = len(json.dumps(item, ensure_ascii=False))
+        if item.get("kind") == "event_anchor" or used + size <= evidence_chars:
+            kept.add(index)
+            used += size
+    sent = [item for index, item in enumerate(items) if index in kept]
+    receipt = dict(
+        offered=len(items),
+        sent=len(sent),
+        withheld_refs=[item["ref"] for index, item in enumerate(items) if index not in kept],
+        choices_offered=len(choices),
+        choices_sent=min(len(choices), max_choices),
+        evidence_chars=used,
+        basis="the provider's validated context is bounded; whole items were withheld, none rewritten",
+    )
+    return sent, choices[:max_choices], receipt
+
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
@@ -345,6 +381,10 @@ def situated_router(workspace, require_admin):
                     )
             # Deduplicate event refs while keeping their original attribution.
             items = list({i["ref"]: i for i in items}.values())
+            choices = list(req.choices)
+            bound = BOUNDED_CONTEXT.get(policy.provider_id)
+            if bound:
+                items, choices, value["evidence_bound"] = bound_evidence(items, choices, **bound)
             refs = {i["ref"] for i in items}
             anchor = next(i["ref"] for i in items if i["kind"] == "event_anchor")
             value.update(
@@ -392,7 +432,7 @@ def situated_router(workspace, require_admin):
                                         title=safe_external_text(c.title, limit=250)
                                         or "",
                                     )
-                                    for c in req.choices
+                                    for c in choices
                                 ],
                                 allowed_actions=req.allowed_actions,
                                 available_analysis=req.available_analysis,
