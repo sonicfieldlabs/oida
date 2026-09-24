@@ -10,6 +10,7 @@ import time
 from akousma.resource_admission import admitted
 from oida.operation_control import checkpoint
 
+from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
 
@@ -234,7 +235,7 @@ class MpsMossEngine(MossEngine):
     def prepare_input_binding(self, audio_path: str, model_kind: str = "instruct") -> dict:
         # Preparation never loads weights or changes residency. The same loader
         # and receipt constructor are used by generate under this model lock.
-        with self._lock:
+        with self._locked_until_deadline():
             model_id = self.model_id_for_kind(model_kind)
             if model_id not in self._models or model_id not in self._processors:
                 return unknown_binding("Selected local model is not loaded")
@@ -245,6 +246,28 @@ class MpsMossEngine(MossEngine):
             rate = int(self._processors[model_id].config.mel_sr)
             raw_audio = load_audio(str(Path(audio_path)), sample_rate=rate)
             return binding_for_receipt(self._input_receipt(model_id, model_kind, raw_audio, rate))
+
+    @contextmanager
+    def _locked_until_deadline(self):
+        """Hold the model lock, waiting no longer than the caller's deadline.
+
+        Found at runtime on 24 September: a listening whose deadline was six seconds away
+        waited 31 s here, behind another listening, because preparation took this lock
+        without a bound before generate's own bounded wait was ever reached.
+        """
+        from oida.operation_control import DeadlineReached, current_deadline
+
+        deadline = current_deadline()
+        if deadline is None:
+            self._lock.acquire()
+        elif deadline - time.time() <= 0 or not self._lock.acquire(timeout=deadline - time.time()):
+            raise DeadlineReached(
+                "operation deadline reached while waiting for the audio model; nothing was generated"
+            )
+        try:
+            yield
+        finally:
+            self._lock.release()
 
     @admitted("oida", checkpoint=lambda *a, **k: checkpoint())
     def prewarm(self, model_kind: str = "instruct") -> None:

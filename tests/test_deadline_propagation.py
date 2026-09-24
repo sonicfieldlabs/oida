@@ -216,3 +216,19 @@ def test_host_memory_reads_the_machine_without_content():
 
     value = host_memory()
     assert value is None or {"available_mb", "swap_used_mb"} <= set(value)
+
+
+def test_preparing_the_input_binding_waits_no_longer_than_the_deadline(loaded):  # noqa: F811
+    """Runtime, 24 Sept: preparation took the model lock unbounded and a waiter overran by 25 s."""
+    engine, _, _ = loaded
+    engine.prepare_input_binding = type(engine).prepare_input_binding.__get__(engine)
+    engine._lock.acquire()
+    try:
+        with controlled(Control(deadline_at=time.time() + 1.0)):
+            started = time.time()
+            with pytest.raises(DeadlineReached, match="waiting for the audio model"):
+                engine.prepare_input_binding("fixture.wav", "instruct")
+        assert time.time() - started < 2.5
+    finally:
+        engine._lock.release()
+    assert engine.prepare_input_binding("fixture.wav", "instruct")["status"] in {"prepared", "unknown"}
