@@ -70,6 +70,9 @@ class AcquisitionRequest(BaseModel):
     response_mode: Literal["full", "summary"] = "full"
     model_id: str | None = Field(default=None, min_length=1, max_length=256)
     listening_mode: str | None = Field(default=None, min_length=1, max_length=100)
+    # A caller's deadline (epoch seconds). The capture window and its listening both stop
+    # at it, and a listening stopped there publishes nothing.
+    deadline_at: float | None = None
 
 
 class ScheduledAcquisitionRequest(AcquisitionRequest):
@@ -235,6 +238,19 @@ def source_router(
         source = resolve_source(source_id)
         if source is None:
             raise HTTPException(404, "unknown configured source")
+        scheduled = deadline is not None
+        caller_deadline = req.deadline_at
+        if caller_deadline is not None:
+            remaining = caller_deadline - time.time()
+            if remaining > 4 * 3600:
+                raise HTTPException(400, "deadline_at must be within four hours")
+            if remaining < req.seconds + 1:
+                # The capture window alone would outlast the deadline: nothing is started.
+                raise HTTPException(
+                    409,
+                    "operation deadline leaves no time for the capture window; nothing was started",
+                )
+            deadline = caller_deadline if deadline is None else min(deadline, caller_deadline)
         # Gates precede subprocess/device/network acquisition, not just inference.
         try:
             if req.aperture and (
@@ -279,13 +295,13 @@ def source_router(
                     ),
                 )
             preflight(source.source_type, req.seconds, req.route_preset, req.remember)
-            if deadline is not None and time.time() >= deadline:
+            if scheduled and time.time() >= deadline:
                 scheduler.terminal_queued(
                     req.acquisition_id, "expired", "deadline elapsed before acquisition"
                 )
                 raise ValueError("source job expired")
             item, cancel = receipts.begin(
-                req.acquisition_id, source_id, scheduled=deadline is not None
+                req.acquisition_id, source_id, scheduled=scheduled
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -319,11 +335,25 @@ def source_router(
                 item["source_descriptor"]["format_limits"] = item[
                     "source_descriptor"
                 ].pop("expected_format")
+            if caller_deadline is not None:
+                item["deadline_at"] = caller_deadline
             receipts.save(item)
             with TemporaryDirectory(prefix="oida-source-", dir=capture_temp) as temp:
                 path = Path(temp) / "capture.wav"
                 capture_started = time.perf_counter()
-                capture_audio(source, req.seconds, path, cancel)
+                timer = None
+                if caller_deadline is not None:
+                    # Stops an acquisition still running when the deadline passes.
+                    timer = threading.Timer(
+                        max(0.0, caller_deadline - time.time()), cancel.set
+                    )
+                    timer.daemon = True
+                    timer.start()
+                try:
+                    capture_audio(source, req.seconds, path, cancel)
+                finally:
+                    if timer is not None:
+                        timer.cancel()
                 import soundfile as sf
 
                 actual = sf.info(path)
@@ -359,6 +389,7 @@ def source_router(
                     recheck=recheck,
                     on_seal=seal,
                     identifier=req.acquisition_id,
+                    deadline_at=caller_deadline,
                 )
                 listening_started = time.perf_counter()
                 with controlled(control):
@@ -456,6 +487,11 @@ def source_router(
                 reason="deadline elapsed before publication"
                 if expired
                 else "cancelled before publication; late output discarded",
+                **(
+                    {"reason_code": "deadline"}
+                    if expired and caller_deadline is not None
+                    else {}
+                ),
             )
         except HTTPException as exc:
             result = None
