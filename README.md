@@ -466,6 +466,13 @@ capped at 1 GiB and normalized through ffmpeg. `/raw-audio/status` and
 `/raw-audio/wipe` inspect and delete raw upload/live-buffer audio, including
 pre-data-dir recordings in the checkout's `uploads/` via `include_legacy`.
 
+Public radio audio is temporary: it is deleted after listening. The one exception is
+opt-in and scoped. A station configured with `research_sample` retention and an
+operator attestation may keep the exact input a listening heard, when that listening
+asks for it. The sample stays local in `<data dir>/research-samples/`, outside the
+library, is never exported, and is deleted with a receipt when its retention elapses
+(at most 30 days). See [source admission](docs/source-admission.md#research-samples-public-radio-opt-in).
+
 Memory is explicit: events are saved only through `/memory/remember`, the
 dashboard's Remember or Add my listening actions, or an explicit GERM handoff.
 Incognito events stay out of durable history. A human note is stored as a
@@ -504,6 +511,10 @@ variables as the fallback; they are never written into reasoning settings.
   costs, data handling, and model terms are controlled by their operators.
 - Oída does not publish a remote endpoint or configure TLS. Exposing the
   service beyond loopback is an operator decision and requires authentication.
+- Research samples are unit-tested and were runtime-checked once, on one station in a
+  testing workspace (MOSS-Audio 4B Instruct, 10 s windows). They are not signed.
+  `raw-audio/wipe` does not remove them; `DELETE /sources/research-samples/{id}` deletes
+  one early, with a receipt.
 
 The [roadmap](ROADMAP.md) states the public research priorities without
 promising production stability.

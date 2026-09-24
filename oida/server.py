@@ -5514,6 +5514,14 @@ def create_app(
             journal=owner_journal,
             operations=operations,
             validate_listening=validate_listening_selection,
+            retention_forbidden=lambda: bool(
+                (checker := covenant_store.engine())
+                and (
+                    checker.forbids_retention("raw-audio")
+                    or checker.forbids_retention("memory")
+                )
+            ),
+            scanned_roots=(uploads_dir(),),
         )
     )
 

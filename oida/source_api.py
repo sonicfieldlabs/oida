@@ -31,12 +31,14 @@ from oida.source_capture import (
     load_capture_sources,
 )
 from oida.capture_registry import CaptureRegistry, Registration
+from oida.research_samples import ResearchSampleRefused, ResearchSamples
 from oida.station_aperture import Aperture, admit as admit_aperture
 
 
 from oida.reasoning.audio_selection import AudioModel
 
 LOGGER = logging.getLogger(__name__)
+RESEARCH_SWEEP_SECONDS = 30.0
 
 
 class AcquisitionRequest(BaseModel):
@@ -59,6 +61,8 @@ class AcquisitionRequest(BaseModel):
     seconds: float = Field(gt=0, le=300)
     remember: bool = False
     retain_library_audio: bool = False
+    # Keep the listened input as a local research sample; only for opted-in stations.
+    retain_research_sample: bool = False
     route_preset: str = "basic"
     response_mode: Literal["full", "summary"] = "full"
     model_id: str | None = Field(default=None, min_length=1, max_length=256)
@@ -78,6 +82,8 @@ def source_router(
     journal=None,
     operations=None,
     validate_listening=None,
+    retention_forbidden=None,
+    scanned_roots=(),
 ) -> APIRouter:
     router = APIRouter()
     sources = load_capture_sources(os.environ.get("OIDA_CAPTURE_SOURCES"))
@@ -128,6 +134,29 @@ def source_router(
 
     masa_module = os.environ.get("OIDA_MASA_VALIDATOR_MODULE")
     receipts = AcquisitionReceipts(data_dir / "source-acquisitions", journal=journal)
+    samples = ResearchSamples(
+        data_dir / "research-samples", receipts.journal, scanned_roots=scanned_roots
+    )
+    samples.sweep()
+    # Expiry must not wait for a reader: sweep on a timer while any station can keep
+    # samples or any sample is still on disk.
+    if samples.root.exists() or any(
+        s.retention == "research_sample" for s in sources.values()
+    ):
+        stop_sweeping = threading.Event()
+
+        def sweep_on_schedule():
+            while not stop_sweeping.wait(RESEARCH_SWEEP_SECONDS):
+                try:
+                    samples.sweep()
+                except Exception:
+                    LOGGER.exception("research-sample sweep failed")
+
+        threading.Thread(
+            target=sweep_on_schedule, name="research-sample-sweep", daemon=True
+        ).start()
+        if shutdown_callbacks is not None:
+            shutdown_callbacks.append(stop_sweeping.set)
     if operations is None:
         from oida.operation_control import Operations
 
@@ -156,7 +185,12 @@ def source_router(
                     channels=s.channels,
                     max_seconds=s.max_seconds,
                     consent=s.consent,
-                    raw_audio_policy="temp",
+                    raw_audio_policy="research_sample"
+                    if s.retention == "research_sample"
+                    else "temp",
+                    research=dict(ttl_seconds=s.research.ttl_seconds, audience="local")
+                    if s.research
+                    else None,
                     status="configured_unverified",
                     claim_limit="native sample rate is not capture bandwidth",
                     network_policy=s.network_policy,
@@ -216,6 +250,15 @@ def source_router(
                 source.runtime_registered or source.retention == "temp_only"
             ) and req.retain_library_audio:
                 raise ValueError("Radio consent permits temporary capture only")
+            if req.retain_research_sample:
+                if source.retention != "research_sample" or source.research is None:
+                    raise ValueError(
+                        "This station is not opted in to research samples; its audio is temporary"
+                    )
+                if retention_forbidden is not None and retention_forbidden():
+                    raise ValueError(
+                        "The active covenant forbids retaining raw audio; no research sample"
+                    )
             if source.consent != "granted" or req.seconds > source.max_seconds:
                 raise ValueError("source consent or duration refused")
             if validate_listening is not None:
@@ -372,13 +415,34 @@ def source_router(
                     )
                 else:
                     admission = event["source"]["details"]["source_admission"]
+                    sample = None
+                    if req.retain_research_sample:
+                        segment = event.get("segment") or {}
+                        try:
+                            sample = samples.retain(
+                                path,
+                                expected_sha256=(segment.get("data_ref") or {}).get(
+                                    "sha256"
+                                ),
+                                source=source,
+                                acquisition_id=req.acquisition_id,
+                                event_id=event.get("id"),
+                                record_id=result.get("akousma_id"),
+                                captured_at=item["started_at"],
+                                sample_rate=actual.samplerate,
+                                channels=actual.channels,
+                            )
+                        except (ResearchSampleRefused, OSError) as exc:
+                            sample = dict(status="not_retained", reason=str(exc)[:300])
+                    retained = bool(sample and sample.get("status") == "retained")
                     item.update(
                         status="complete",
                         event_id=event["id"],
                         akousma_id=result.get("akousma_id"),
                         source_admission=admission,
                         raw_audio_policy="temp",
-                        raw_audio_deleted=True,
+                        raw_audio_deleted=not retained,
+                        **({"research_sample": sample} if sample else {}),
                     )
         except (CaptureInterrupted, OperationCancelled):
             result = None
@@ -443,6 +507,44 @@ def source_router(
             return execute(source_id, req)
         finally:
             operation_lock.release()
+
+    @router.get("/sources/research-samples")
+    def research_samples():
+        return dict(
+            contract="oida/research-samples/v1",
+            audience="local",
+            exportable=False,
+            samples=samples.entries(),
+        )
+
+    @router.delete("/sources/research-samples/{identifier}")
+    def delete_research_sample(identifier: str):
+        try:
+            receipt = samples.delete(identifier)
+        except KeyError as exc:
+            raise HTTPException(404, "No such research sample, or it expired") from exc
+        return {k: v for k, v in receipt.items() if k != "file"}
+
+    @router.get("/sources/research-samples/{identifier}/audio")
+    def research_sample_audio(identifier: str):
+        from fastapi.responses import FileResponse
+
+        try:
+            path, value = samples.audio(identifier)
+        except KeyError as exc:
+            raise HTTPException(404, "No such research sample, or it expired") from exc
+        except ResearchSampleRefused as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return FileResponse(
+            path,
+            media_type="audio/wav"
+            if path.suffix == ".wav"
+            else "application/octet-stream",
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Oida-Research-Sample-Sha256": value["sha256"],
+            },
+        )
 
     @router.get("/sources/scheduler")
     def scheduler_status():

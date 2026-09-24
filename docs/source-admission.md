@@ -79,6 +79,46 @@ file. For this v2 policy, `sample_rate` and `channels` are admission maxima; the
 capture receipt records the actual native values. A client must confirm the
 `bounded-public-radio-v1` capability before supplying such a manifest.
 
+### Research samples (public radio, opt-in)
+
+A public radio is temporary by default: its capture is deleted after listening. A
+station may instead carry `"retention":"research_sample"` with a `research` block:
+
+```json
+"retention": "research_sample",
+"research": {"attestation": "<the operator's own words>", "ttl_seconds": 2592000}
+```
+
+Both are required together. `ttl_seconds` is 60 s to 30 days (the default). The
+attestation is stored verbatim with every sample. A listening keeps a sample only when
+its request also asks, with `"retain_research_sample": true` on
+`POST /sources/capture/{id}/listen` or `/jobs`. A station that is not opted in, or an
+active covenant forbidding `raw-audio` or `memory` retention, refuses the request
+before anything is captured. `retain_library_audio` stays refused for radio.
+
+What is kept, and where:
+
+- **Exactly the listened input.** After the commit fence, Oída copies the file it
+  handed to the listening and keeps it only if its SHA-256 equals the listening
+  event's `segment.data_ref.sha256`. Otherwise nothing is kept and the acquisition
+  receipt says why (`research_sample.status: "not_retained"`).
+- **Outside the library.** Samples live in `<data dir>/research-samples/` (files mode
+  0600), never under the audio folder GERM and the library scan. If that folder is
+  configured inside a scanned folder, nothing is kept. No record, listening event or
+  export names a sample; the acquisition receipt names its id, digest, size and expiry,
+  and says `raw_audio_deleted: false`.
+- **Local only.** `GET /sources/research-samples` (`oida/research-samples/v1`) lists
+  unexpired samples as metadata, without paths, with `audience: "local"` and
+  `exportable: false`. `GET /sources/research-samples/{id}/audio` serves the file after
+  checking its bytes against the recorded digest (409 if they changed). Telar reads
+  these for its Listening Station section and never packages them.
+- **Expiring.** A sweep deletes a sample at `expires_at`. It runs every 30 s, and also
+  at startup and before every listing, read and retention. Each deletion is journaled as a
+  `research_sample` receipt with `status: "expired"`, `deleted_at` and
+  `audio_deleted`.
+  `DELETE /sources/research-samples/{id}` deletes one early, journaled with
+  `status: "deleted"` and `reason: "operator request"`.
+
 FFmpeg must be installed with the selected input backend. `avfoundation` uses the
 macOS device's current native format; set it in the operating system first.
 `alsa` passes the configured rate/channels as input negotiation options. `radio`

@@ -22,6 +22,17 @@ from oida.owner_journal import OwnerJournal
 from oida.contracts import now_iso
 
 MAX_AUDIO_BYTES = 128 * 1024 * 1024
+RESEARCH_TTL_DEFAULT = 30 * 24 * 3600
+
+
+class ResearchPolicy(BaseModel):
+    """The operator's opt-in to keep a station's listened input for local research."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    attestation: str = Field(min_length=1, max_length=1024)
+    ttl_seconds: int = Field(
+        default=RESEARCH_TTL_DEFAULT, ge=60, le=RESEARCH_TTL_DEFAULT
+    )
 
 
 class CaptureSource(BaseModel):
@@ -42,7 +53,8 @@ class CaptureSource(BaseModel):
     source_ref: str | None = None
     guarded_format: Literal["mp3", "aac", "wav", "flac", "ogg"] | None = None
     network_policy: Literal["public_radio"] | None = None
-    retention: Literal["temp_only"] | None = None
+    retention: Literal["temp_only", "research_sample"] | None = None
+    research: ResearchPolicy | None = None
 
     @model_validator(mode="after")
     def bounded(self):
@@ -64,14 +76,21 @@ class CaptureSource(BaseModel):
                     "radio requires an owner-selected HTTP(S) URL without credentials"
                 )
             if self.network_policy == "public_radio":
-                if self.retention != "temp_only" or self.guarded_format is not None:
+                if (
+                    self.retention not in {"temp_only", "research_sample"}
+                    or self.guarded_format is not None
+                ):
                     raise ValueError(
-                        "public radio requires temp_only retention and owner-derived format"
+                        "public radio requires temp_only or research_sample retention and owner-derived format"
                     )
             elif self.retention is not None:
                 raise ValueError("retention is valid only for guarded public radio")
         elif self.network_policy is not None or self.retention is not None:
             raise ValueError("network policy is valid only for radio")
+        if (self.retention == "research_sample") != (self.research is not None):
+            raise ValueError(
+                "research_sample retention requires, and only it accepts, a research attestation"
+            )
         if len(json.dumps(self.apparatus, allow_nan=False).encode()) > 16384:
             raise ValueError("apparatus exceeds 16 KiB")
         return self
@@ -199,6 +218,7 @@ def capture_audio(
                         "runtime_registered": False,
                         "network_policy": None,
                         "retention": None,
+                        "research": None,
                         "guarded_format": format_name,
                     }
                 ),
