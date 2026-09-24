@@ -40,8 +40,12 @@ class ResearchSampleRefused(ValueError):
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
+    size = 0
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
+            size += len(block)
+            if size > MAX_BYTES:
+                raise ResearchSampleRefused("Research sample exceeds its byte limit")
             digest.update(block)
     return digest.hexdigest()
 
@@ -246,7 +250,7 @@ class ResearchSamples:
         if value is None:
             raise KeyError(identifier)
         path = self.root / str(value["file"])
-        if not path.is_file() or path.parent != self.root:
+        if not path.is_file() or path.is_symlink() or path.parent != self.root or not _within(path, self.root):
             raise KeyError(identifier)
         if _sha256(path) != value["sha256"]:
             raise ResearchSampleRefused(

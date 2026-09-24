@@ -146,5 +146,7 @@ def test_malformed_optional_speech_configuration_does_not_disable_owner(
     path.write_text(json.dumps(dict(deployments=deployments)))
     monkeypatch.setenv("OIDA_SPEECH_CONFIG", str(path))
     runtime = Specialists("missing")
-    assert len(runtime.options()) == 3
+    # T5 adds the speech_quality lane; a malformed config must leave every
+    # lane reported with its own unavailable reason.
+    assert len(runtime.options()) == 4
     assert all(not option["available"] for option in runtime.options())

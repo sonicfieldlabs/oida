@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 import threading
 import re
+import time
 
 from fastapi import HTTPException
 from oida.contracts import now_iso
@@ -16,19 +17,22 @@ class OperationCancelled(HTTPException):
 
 
 class Control:
-    def __init__(self, *, event=None, lock=None, recheck=None, on_seal=None, identifier=None):
+    def __init__(self, *, event=None, lock=None, recheck=None, on_seal=None, identifier=None, deadline_at=None):
         self.identifier = identifier
         self.event = event if event is not None else threading.Event()
         self.lock = lock if lock is not None else threading.RLock()
         self.recheck = recheck
         self.on_seal = on_seal
         self.sealed = False
+        self.deadline_at = deadline_at
 
     def check(self, *, seal=False):
         with self.lock:
             if self.sealed:
                 return
             if self.event.is_set():
+                raise OperationCancelled()
+            if self.deadline_at is not None and time.time() >= self.deadline_at:
                 raise OperationCancelled()
             if self.recheck:
                 self.recheck()
@@ -64,6 +68,17 @@ def checkpoint(*, seal=False):
 def current_operation_id():
     control = _current.get()
     return control.identifier if control is not None else None
+
+
+def remaining_timeout(default):
+    control = _current.get()
+    if control is None or control.deadline_at is None:
+        return default
+    control.check()
+    remaining = control.deadline_at - time.time()
+    if remaining < 1:
+        raise OperationCancelled()
+    return min(default, remaining)
 
 
 class Operations:
@@ -107,7 +122,7 @@ class Operations:
             for identifier in list(self.active):
                 self.cancel(identifier)
 
-    def run(self, identifier, callback):
+    def run(self, identifier, callback, *, recheck=None, deadline_at=None):
         if identifier is None:
             return callback()
         if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', identifier):
@@ -116,7 +131,7 @@ class Operations:
             existing = self.journal.get('operation', identifier)
             if existing is not None:
                 raise HTTPException(409, {'detail': 'operation already exists; inspect receipt', 'receipt': existing})
-            control = Control(lock=self.lock, on_seal=lambda: self.save(identifier, 'committing'), identifier=identifier)
+            control = Control(lock=self.lock, on_seal=lambda: self.save(identifier, 'committing'), identifier=identifier, recheck=recheck, deadline_at=deadline_at)
             self.active[identifier] = control
             self.save(identifier, 'running')
         try:

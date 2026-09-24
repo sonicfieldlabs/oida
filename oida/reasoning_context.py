@@ -30,10 +30,8 @@ def retained_event(record):
     """No audio paths or fresh measurement claims; canonical record is never written."""
     routes = []
     specialist_observations = []
-    covenant = deepcopy(record.get("covenant") or {})
-    native_policy = (record.get('extensions') or {}).get('oida.native-policy', {})
-    if native_policy.get('covenant'):
-        covenant = deepcopy(native_policy['covenant'])
+    from akousma.retained_policy import retained_covenant
+    covenant = retained_covenant(record)
     for entry in record.get("listening", {}).values():
         payload = entry.get("payload") or {}
         if not isinstance(payload, dict):
@@ -49,9 +47,6 @@ def retained_event(record):
                 routes.append({'structured': {'claim_summary': {'undetermined': inherited}}})
         from oida.reasoning.specialist_context import project
         specialist_observations.extend(project(payload.get("specialist_evidence")))
-        context = payload.get("listening_context") or {}
-        if isinstance(context, dict) and context.get("covenant"):
-            covenant = deepcopy(context["covenant"])
         claims = payload.get("claim_summary") or {}
         inherited = []
         for category, values in claims.items():

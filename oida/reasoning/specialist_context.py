@@ -18,7 +18,7 @@ def project(lanes):
         result = evidence.get("result")
         if not isinstance(result, dict):
             continue
-        if task not in {"tag_events", "track_beats", "transcribe"}:
+        if task not in {"tag_events", "track_beats", "transcribe", "speech_quality"}:
             continue
         data = {}
         if task == "transcribe":
@@ -36,8 +36,14 @@ def project(lanes):
                 )[:10]
                 if isinstance(x, dict)
                 and isinstance(x.get("score"), (int, float))
-                and math.isfinite(x["score"])
+                and not isinstance(x["score"], bool)
+                and math.isfinite(x["score"]) and 0 <= x["score"] <= 1
             ]
+        elif task == "speech_quality":
+            data = {key: value for key in ("sig", "bak", "ovrl")
+                    if isinstance(value := result.get(key), (int, float))
+                    and not isinstance(value, bool) and math.isfinite(value) and 1 <= value <= 5}
+            data["limitation"] = "Uncalibrated speech-domain quality hypothesis; not a general sound-quality measurement"
         else:
             data["beats_seconds"] = [
                 x
@@ -46,7 +52,7 @@ def project(lanes):
                     if isinstance(result.get("beats_seconds"), list)
                     else []
                 )[:100]
-                if isinstance(x, (int, float)) and math.isfinite(x) and x >= 0
+                if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x >= 0
             ]
         output.append(
             dict(

@@ -190,6 +190,9 @@ class ProviderRegistry:
         return self.probe(provider_id).locality
 
     def complete(self, request: ProviderRequest) -> ProviderResult:
+        from oida.operation_control import checkpoint, remaining_timeout
+        checkpoint()
+        request = request.model_copy(update={"timeout_seconds": remaining_timeout(request.timeout_seconds)})
         entry = self._providers.get(request.provider_id)
         if entry is None:
             return error_result(request, f"Unknown reasoning provider: {request.provider_id}")
@@ -203,7 +206,9 @@ class ProviderRegistry:
         if request.model_id is None and entry.configured and entry.configured.default_model:
             request = request.model_copy(update={"model_id": entry.configured.default_model})
         try:
-            return entry.adapter.complete(request)
+            result = entry.adapter.complete(request)
+            checkpoint()
+            return result
         except Exception as exc:
             return error_result(request, f"Provider adapter failed: {type(exc).__name__}")
 

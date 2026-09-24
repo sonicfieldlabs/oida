@@ -2320,6 +2320,7 @@ dependencies = [
     { name = "akousma" },
     { name = "akousmata" },
     { name = "fastapi" },
+    { name = "httpx2" },
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "numpy" },
@@ -2332,7 +2333,6 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "httpx2" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "twine" },
@@ -2357,7 +2357,7 @@ requires-dist = [
     { name = "akousmata", editable = "../akousmata" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'songid'", specifier = ">=0.2.2" },
     { name = "fastapi", specifier = ">=0.139" },
-    { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.12,<3" },
+    { name = "httpx2", specifier = ">=2.12,<3" },
     { name = "jsonschema", specifier = ">=4.22" },
     { name = "mcp", specifier = ">=1.27,<2" },
     { name = "numpy", specifier = ">=1.26" },

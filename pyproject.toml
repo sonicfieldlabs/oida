@@ -26,6 +26,7 @@ dependencies = [
   "akousma>=0.8.1",
   "akousmata>=0.8.1",
   "fastapi>=0.139",
+  "httpx2>=2.12,<3",
   "jsonschema>=4.22",
   "mcp>=1.27,<2",
   "numpy>=1.26",
@@ -56,7 +57,6 @@ moss = [
   "torchcodec==0.10.0"
 ]
 dev = [
-  "httpx2>=2.12,<3",
   "pytest>=8.2",
   "ruff>=0.15,<0.16",
   "twine>=7,<8",

@@ -140,6 +140,12 @@ def test_an_opted_in_listening_keeps_exactly_its_input_and_says_so(setup, tmp_pa
     assert row["attestation"] == ATTESTATION and row["exportable"] is False
     assert "file" not in row and str(root) not in json.dumps(rows)
 
+    location = client.get(f"/sources/research-samples/{sample['id']}/resolve")
+    assert location.status_code == 200
+    assert location.json()["contract"] == "oida/research-sample-location/v1"
+    assert location.json()["sample"] == row
+    assert Path(location.json()["path"]).is_file()
+
     audio = client.get(f"/sources/research-samples/{sample['id']}/audio")
     assert audio.status_code == 200
     assert hashlib.sha256(audio.content).hexdigest() == heard
@@ -312,3 +318,23 @@ def test_the_operator_can_delete_a_sample_early_with_a_receipt(store, tmp_path):
     assert not any(samples.root.iterdir())
     with pytest.raises(KeyError):
         samples.delete(kept["id"])
+
+
+def test_research_sample_reads_reject_symlinks(store, tmp_path):
+    samples, _ = store
+    kept = keep(store, tmp_path)
+    path, _ = samples.audio(kept["id"])
+    path.unlink()
+    path.symlink_to(tmp_path / "capture.wav")
+    with pytest.raises(KeyError):
+        samples.audio(kept["id"])
+
+
+def test_research_sample_digest_enforces_byte_limit(tmp_path, monkeypatch):
+    import oida.research_samples as module
+
+    path = tmp_path / "oversized.wav"
+    path.write_bytes(b"12345")
+    monkeypatch.setattr(module, "MAX_BYTES", 4)
+    with pytest.raises(ResearchSampleRefused, match="byte limit"):
+        module._sha256(path)

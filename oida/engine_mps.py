@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import re
 import sys
 import threading
@@ -113,6 +114,12 @@ class MpsMossEngine(MossEngine):
             model_source = snapshot_download(repo_id=model_source, revision=revision,
                 local_files_only=self.config.hf_hub_offline)
         weights = weight_inventory(Path(model_source))
+        # Transformers 5 loads checkpoint tensors on a thread pool by default.
+        # On macOS/Python 3.13 this can deadlock inside safetensors' PyO3
+        # initialization while holding the GIL, leaving the owner unable even
+        # to answer health requests. Keep this MPS owner on the synchronous
+        # checkpoint path unless the operator explicitly overrides it.
+        os.environ.setdefault("HF_DEACTIVATE_ASYNC_LOAD", "1")
         model = MossAudioModel.from_pretrained(
             model_source,
             dtype="auto",

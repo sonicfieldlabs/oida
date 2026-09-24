@@ -321,9 +321,15 @@ class ReportRequest(PathRequest):
 
 class ListenEventRequest(PathRequest):
     aperture: Aperture | None = None
-    specialist_tasks: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(
-        default_factory=list, max_length=3
-    )
+    specialist_tasks: list[
+        Literal["tag_events", "track_beats", "transcribe", "speech_quality"]
+    ] = Field(default_factory=list, max_length=3)
+    # T5: explicit specialist deployment per task; task-only selections keep
+    # the owner's configured default. An unknown deployment is reported
+    # unavailable in its lane; nothing is substituted.
+    specialist_deployments: dict[
+        Literal["tag_events", "track_beats", "transcribe", "speech_quality"], str
+    ] = Field(default_factory=dict, max_length=3)
     speech_vad: bool = True
     speech_alignment: bool = False
     speech_language: Literal["English", "Spanish", "Portuguese"] | None = None
@@ -2833,7 +2839,7 @@ def create_app(
             models.append(
                 dict(
                     id=item.id,
-                    name=key,
+                    name=f"Configured local · {key}",
                     capabilities=item.capabilities,
                     description=checkpoint_meta.get(
                         "description", "Local audio understanding model"
@@ -2948,7 +2954,16 @@ def create_app(
             models.append(
                 dict(
                     id=audio_selector(spec).deployment_id,
-                    name=spec.name,
+                    name=(
+                        spec.name
+                        + (
+                            " · registered ID / local checkpoint"
+                            if local_installed
+                            else " · pinned Hugging Face revision"
+                        )
+                    )
+                    if spec.provider_id == "oida_moss" and "/" in spec.id
+                    else spec.name,
                     audio_model=audio_selector(spec).model_dump(),
                     capabilities=spec.capabilities,
                     description=spec.notes or "Registered audio deployment",
@@ -3023,6 +3038,10 @@ def create_app(
             raise HTTPException(400, "Duplicate explicit pass")
         if len(req.specialist_tasks) != len(set(req.specialist_tasks)):
             raise HTTPException(400, "Duplicate specialist task")
+        if set(req.specialist_deployments) - set(req.specialist_tasks):
+            raise HTTPException(
+                400, "A specialist deployment names a task that was not selected"
+            )
         model = validate_listening_selection(
             req.model_id,
             req.listening_mode,
@@ -3273,6 +3292,7 @@ def create_app(
                         "alignment": req.speech_alignment,
                         "language": req.speech_language,
                     },
+                    deployments=req.specialist_deployments,
                 )
                 if req.specialist_tasks
                 else []
@@ -4735,6 +4755,18 @@ def create_app(
         try:
             settings = reasoning_settings.load()
             provider = settings.providers.get(provider_id)
+            if provider_id == "typesafe":
+                # The TypeSafe credential lives in the secret store only; the
+                # provider stays out of the reasoning registry so Jev remains
+                # selectable under decision routing, never language reasoning.
+                reasoning_secrets.set(provider_id, body.credential, "api_key")
+                if reasoning_budget is not None:
+                    reasoning_budget.invalidate_probes(provider_id)
+                return {
+                    "provider_id": provider_id,
+                    "credential_saved": True,
+                    "stored_securely": True,
+                }
             if provider is None or (
                 provider.kind.value not in {"openai_compatible", "openrouter", "google"}
                 and provider_id != "opencode"
@@ -4773,6 +4805,11 @@ def create_app(
         require_local_admin(request)
         try:
             settings = reasoning_settings.load()
+            if provider_id == "typesafe":
+                deleted = reasoning_secrets.delete(provider_id, "api_key")
+                if reasoning_budget is not None:
+                    reasoning_budget.invalidate_probes(provider_id)
+                return {"provider_id": provider_id, "credential_deleted": deleted}
             provider = settings.providers.get(provider_id)
             if provider is None:
                 raise HTTPException(

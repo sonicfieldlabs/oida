@@ -50,9 +50,12 @@ class AcquisitionRequest(BaseModel):
     context_refs: list[str] | None = Field(default=None, max_length=7)
     focus_question: str | None = Field(default=None, max_length=4096)
     aperture: Aperture | None = None
-    specialist_tasks: list[Literal["tag_events", "track_beats", "transcribe"]] = Field(
-        default_factory=list, max_length=3
-    )
+    specialist_tasks: list[
+        Literal["tag_events", "track_beats", "transcribe", "speech_quality"]
+    ] = Field(default_factory=list, max_length=3)
+    specialist_deployments: dict[
+        Literal["tag_events", "track_beats", "transcribe", "speech_quality"], str
+    ] = Field(default_factory=dict, max_length=3)
     speech_vad: bool = True
     speech_alignment: bool = False
     speech_language: Literal["English", "Spanish", "Portuguese"] | None = None
@@ -386,6 +389,7 @@ def source_router(
                             ),
                             listening_mode=req.listening_mode,
                             specialist_tasks=req.specialist_tasks,
+                            specialist_deployments=req.specialist_deployments,
                             speech_vad=req.speech_vad,
                             speech_alignment=req.speech_alignment,
                             speech_language=req.speech_language,
@@ -469,8 +473,7 @@ def source_router(
             item.update(
                 status="failed",
                 reason=(
-                    "acquisition or listening failed "
-                    f"({type(exc).__name__}: {exc})"
+                    f"acquisition or listening failed ({type(exc).__name__}: {exc})"
                 ),
             )
         except Exception:
@@ -524,6 +527,17 @@ def source_router(
         except KeyError as exc:
             raise HTTPException(404, "No such research sample, or it expired") from exc
         return {k: v for k, v in receipt.items() if k != "file"}
+
+    @router.get("/sources/research-samples/{identifier}/resolve")
+    def research_sample_location(identifier: str):
+        try:
+            path, value = samples.audio(identifier)
+        except KeyError as exc:
+            raise HTTPException(404, "No such research sample, or it expired") from exc
+        except ResearchSampleRefused as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"contract": "oida/research-sample-location/v1", "path": str(path.resolve()),
+                "sample": {k: v for k, v in value.items() if k != "file"}}
 
     @router.get("/sources/research-samples/{identifier}/audio")
     def research_sample_audio(identifier: str):

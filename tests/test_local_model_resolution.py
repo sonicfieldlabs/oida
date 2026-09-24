@@ -63,6 +63,9 @@ def test_http_resolves_explicitly_configured_external_checkpoint(
     assert option["available"] == (expected == 200)
     if requested == "OpenMOSS-Team/MOSS-Audio-4B-Instruct":
         assert option["installed"] is installed
+        assert option["name"].endswith(
+            "registered ID / local checkpoint" if installed else "pinned Hugging Face revision"
+        )
         assert option["inference_tested"] is False
         if expected == 200:
             assert option["qualification_level"] == "local_runtime_detected"

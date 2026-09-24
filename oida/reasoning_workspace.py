@@ -10,6 +10,7 @@ from copy import deepcopy
 import hashlib
 import json
 import threading
+import time
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -43,6 +44,9 @@ class Ask(Selection):
     conversation_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,100}$")
     question: str = Field(min_length=1, max_length=8000)
     web_query: str = Field(default="", max_length=240)
+    record_refs: list[str] = Field(default_factory=list, max_length=8)
+    inquiry_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    deadline_at: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 class Automatic(Selection):
@@ -167,6 +171,18 @@ class Workspace:
 
     def enqueue(self, req, mode="manual"):
         with self.lock:
+            if req.deadline_at is not None and req.deadline_at <= time.time():
+                raise HTTPException(409, "Inquiry deadline expired")
+            selection = None
+            if req.record_refs or req.inquiry_sha256:
+                from oida.routing.archive import inquiry
+                if req.record_refs and not req.scope.memories:
+                    raise HTTPException(409, "Selected relations require memory context")
+                selection = inquiry(self, req.record_id, req.record_refs)
+                if req.inquiry_sha256 and req.inquiry_sha256 != selection["sha256"]:
+                    raise HTTPException(409, "Inquiry evidence changed before admission")
+                if req.web_query and req.web_query != selection["web_query"]:
+                    raise HTTPException(409, "Inquiry query differs from the selected evidence")
             payload = req.model_dump()
             digest = hashlib.sha256(canonical(payload).encode()).hexdigest()
             old = self.journal.get("reasoning_job", req.request_id)
@@ -201,10 +217,9 @@ class Workspace:
                     .get("research", {})
                     .get("record_sha256")
                 )
-            else:
-                record = self.reader(req.record_id)
-                event = retained_event(record)
-                record_hash = self.journal.record_digest(record)
+            record = self.reader(req.record_id)
+            event = retained_event(record)
+            record_hash = self.journal.record_digest(record)
             event = self.event_policy(deepcopy(event))
             if event.get("privacy_mode") == "incognito":
                 raise HTTPException(
@@ -224,6 +239,7 @@ class Workspace:
                 event=event,
                 provider_id=req.provider_id,
                 model_id=req.model_id,
+                inquiry_selection=selection,
             )
             self.save_job(job)
             self.wake.set()
@@ -293,21 +309,64 @@ class Workspace:
             job = min(queued, key=lambda j: j["created_at"])
             self.save_job({**job, "status": "running"})
         try:
+            admitted_memories = {}
 
             def run():
                 req = Ask.model_validate(job["request"])
+                def check_inquiry():
+                    current = self.journal.get("reasoning_job", job["id"]) or {}
+                    if current.get("cancel_requested") or (req.deadline_at is not None and time.time() >= req.deadline_at):
+                        raise HTTPException(409, "Inquiry cancelled or deadline expired")
+                check_inquiry()
                 self.validate_selection(req)
-                event = self.event_policy(deepcopy(job["event"]))
+                record = self.reader(req.record_id)
+                if self.journal.record_digest(record) != job["record_sha256"]:
+                    raise HTTPException(409, "Inquiry anchor changed while queued")
+                event = self.event_policy(retained_event(record))
                 if event.get("privacy_mode") == "incognito":
                     raise HTTPException(
                         423, "Persistent research is unavailable in incognito mode"
                     )
+                selection = None
+                if req.record_refs or req.inquiry_sha256:
+                    from oida.routing.archive import inquiry
+                    selection = inquiry(self, req.record_id, req.record_refs)
+                    if req.inquiry_sha256 and selection["sha256"] != req.inquiry_sha256:
+                        raise HTTPException(409, "Inquiry evidence changed while queued")
                 sources, notes, query = self.retriever(
                     event, req.question, req.scope.model_dump(), req.web_query
                 )
+                if selection and req.scope.memories:
+                    selected = selection["sources"]
+                    selected_refs = {item["reference"] for item in selected}
+                    sources = selected + [item for item in sources if item.get("reference") not in selected_refs]
+                # Search hits are locators, not an enduring permission grant.
+                from oida.routing.archive import archive_view
+                admitted_sources = []
+                for source in sources[:12]:
+                    if source.get("kind") == "memory":
+                        ref = source.get("reference")
+                        if not ref:
+                            continue
+                        try:
+                            current = archive_view(self, ref)
+                            if current["view"]["state"] != "available":
+                                notes.append("A memory reference is no longer readable")
+                                continue
+                            from oida.reasoning.evidence import safe_external_text
+                            text = safe_external_text(current["events"][ref]["aggregate"]["short_summary"], limit=1200)
+                            source = {**source, "text": text or "", "title": (text or "Retained account")[:160], "record_sha256": self.journal.record_digest(current["record"])}
+                            admitted_memories[ref] = (source["record_sha256"], hashlib.sha256(canonical(current["events"][ref]).encode()).hexdigest())
+                            source["permitted_event_sha256"] = admitted_memories[ref][1]
+                        except HTTPException:
+                            notes.append("A memory reference could not be revalidated")
+                            continue
+                    admitted_sources.append(source)
+                sources = admitted_sources
                 from oida.operation_control import checkpoint
 
                 checkpoint()
+                check_inquiry()
                 result = self.reasoning.ask(
                     event=event,
                     question=req.question,
@@ -330,12 +389,39 @@ class Workspace:
                             sources=sources,
                             retrieval_notes=notes,
                             query=query,
+                            inquiry_selection=selection,
+                            input_sources_sha256=hashlib.sha256(canonical(sources).encode()).hexdigest(),
                         ),
                     ),
                 )
+                check_inquiry()
                 return result
 
-            result = self.operations.run("reason_" + job["id"][:73], run)
+            def recheck():
+                current = self.journal.get("reasoning_job", job["id"]) or {}
+                if current.get("cancel_requested"):
+                    raise HTTPException(409, "Inquiry cancelled")
+                from oida.reasoning.evidence import covenant_blocks_untyped_prose
+                record = self.reader(job["record_id"])
+                if self.journal.record_digest(record) != job["record_sha256"]:
+                    raise HTTPException(409, "Inquiry anchor changed")
+                current_event = self.event_policy(retained_event(record))
+                if current_event.get("privacy_mode") == "incognito" or covenant_blocks_untyped_prose(current_event.get("covenant")):
+                    raise HTTPException(423, "Inquiry permission changed")
+                if job.get("inquiry_selection"):
+                    from oida.routing.archive import inquiry
+                    selection = job["inquiry_selection"]
+                    if inquiry(self, job["record_id"], selection["record_refs"])["sha256"] != selection["sha256"]:
+                        raise HTTPException(409, "Selected inquiry evidence changed")
+                from oida.routing.archive import archive_view
+                for ref, expected in admitted_memories.items():
+                    projection = archive_view(self, ref)
+                    if projection["view"]["state"] != "available":
+                        raise HTTPException(423, "Retrieved memory permission changed")
+                    actual = (self.journal.record_digest(projection["record"]), hashlib.sha256(canonical(projection["events"][ref]).encode()).hexdigest())
+                    if actual != expected:
+                        raise HTTPException(409, "Retrieved memory evidence changed")
+            result = self.operations.run("reason_" + job["id"][:73], run, recheck=recheck, deadline_at=job["request"].get("deadline_at"))
             self.save_job(
                 {
                     **job,
@@ -346,14 +432,30 @@ class Workspace:
                 }
             )
         except Exception as exc:
+            cancelled = (self.journal.get("reasoning_job", job["id"]) or {}).get("cancel_requested")
             self.save_job(
                 {
                     **job,
-                    "status": "failed",
+                    "status": "cancelled" if cancelled else "failed",
                     "detail": str(getattr(exc, "detail", str(exc)))[:600],
                 }
             )
         return True
+
+    def cancel_job(self, identifier):
+        with self.lock:
+            job = self.journal.get("reasoning_job", identifier)
+            if job is None:
+                raise HTTPException(404, "Inquiry job not found")
+            if job["status"] in {"queued", "running"}:
+                operation_id = "reason_" + identifier[:73]
+                accepted = self.operations.cancel(operation_id)
+                operation = self.journal.get("operation", operation_id) or {}
+                if not accepted and operation.get("status") in {"committing", "complete"}:
+                    return self.public_job(job)
+                job.update(cancel_requested=True, status="cancelled" if job["status"] == "queued" else job["status"])
+                self.save_job(job)
+            return self.public_job(job)
 
     def start(self):
         if self.thread and self.thread.is_alive():
@@ -408,6 +510,8 @@ class Workspace:
             self.wake.wait(2)
 
     def close(self):
+        if getattr(self, "routing_queue", None):
+            self.routing_queue.close()
         self.stopped.set()
         self.wake.set()
         if self.thread:
@@ -505,6 +609,26 @@ def workspace_router(
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @router.get("/jobs/{identifier}")
+    def job(identifier: str):
+        value = workspace.journal.get("reasoning_job", identifier)
+        if value is None:
+            raise HTTPException(404, "Inquiry job not found")
+        from oida.routing.archive import archive_view
+        projection = archive_view(workspace, value["record_id"])
+        if projection["view"]["state"] != "available":
+            raise HTTPException(423 if projection["view"]["state"] == "withheld" else 404, "Inquiry anchor is not readable")
+        event = projection["events"][value["record_id"]]
+        from oida.reasoning.evidence import covenant_blocks_untyped_prose
+        if event.get("privacy_mode") == "incognito" or covenant_blocks_untyped_prose(event.get("covenant")):
+            raise HTTPException(423, "Inquiry is withheld by current policy")
+        return workspace.public_job(value)
+
+    @router.post("/jobs/{identifier}/cancel")
+    def cancel_job(identifier: str, request: Request):
+        require_admin(request)
+        return workspace.cancel_job(identifier)
+
     @router.post("/automatic")
     def automatic(req: Automatic, request: Request):
         require_admin(request)
@@ -516,4 +640,7 @@ def workspace_router(
     from oida.situated_listener import situated_router
 
     router.include_router(situated_router(workspace, require_admin))
+    from oida.routing.service import routing_router
+
+    router.include_router(routing_router(workspace, require_admin))
     return router

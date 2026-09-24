@@ -1,4 +1,11 @@
-"""Owner task dispatch, bounded queue, isolated workers and additive evidence."""
+"""Owner task dispatch, bounded queue, isolated workers and additive evidence.
+
+T5: a task may carry several admitted deployments (for example EfficientAT
+``mn04_as`` and a separately pinned ``mn10_as``); the listener selects one
+explicitly or takes the configured default. A named deployment that is not
+admitted is reported unavailable with its own reason — no analysis is
+substituted and no unavailable lane becomes a positive finding.
+"""
 
 from __future__ import annotations
 import hashlib
@@ -18,11 +25,16 @@ TASKS = {
     "transcribe": ("qwen3-asr-06b", "Qwen3 ASR · 0.6B (MLX 4-bit)"),
     "tag_events": ("efficientat-mn04", "EfficientAT · mn04_as"),
     "track_beats": ("beat-this-small", "Beat This! · small0"),
+    "speech_quality": ("dnsmos-p835", "DNSMOS · P.835 speech quality"),
 }
 
 
 def worker_path(task):
-    return Path(__file__).with_name("speech_worker.py" if task == "transcribe" else "worker.py")
+    if task == "transcribe":
+        return Path(__file__).with_name("speech_worker.py")
+    if task == "speech_quality":
+        return Path(__file__).with_name("quality_worker.py")
+    return Path(__file__).with_name("worker.py")
 
 
 def digest(path):
@@ -36,7 +48,8 @@ def digest(path):
 class Specialists:
     def __init__(self, config_path=None):
         self.registry = DeploymentRegistry("oida")
-        self.entries = {}
+        self.entries = {}  # (task, deployment id) -> entry
+        self.defaults = {}  # task -> deployment id (first admitted wins)
         self.errors = {}
         self.slot = threading.BoundedSemaphore(1)
         self.waiters = threading.BoundedSemaphore(4)
@@ -48,28 +61,45 @@ class Specialists:
                 continue
             try:
                 entries = json.loads(Path(path).read_text())["deployments"]
-                if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
+                if not isinstance(entries, list) or any(
+                    not isinstance(entry, dict) for entry in entries
+                ):
                     raise ValueError("Invalid deployment collection")
                 configs.extend(entries)
             except (OSError, ValueError, KeyError, TypeError):
-                self.errors["configuration"] = "Optional specialist configuration unavailable"
+                self.errors["configuration"] = (
+                    "Optional specialist configuration unavailable"
+                )
         for entry in configs:
             task = entry.get("task", "unknown")
+            manifest_id = (entry.get("manifest") or {}).get("id") or entry.get(
+                "deployment_id"
+            )
+            key = (task, manifest_id)
             try:
-                identifier = TASKS[task][0]
-                if task in self.entries:
-                    raise ValueError("Duplicate specialist task")
+                if manifest_id is None:
+                    raise ValueError("Deployment identity missing")
+                if task not in TASKS:
+                    raise ValueError("Unknown specialist task")
+                if key in self.entries:
+                    raise ValueError("Duplicate specialist deployment")
+                # A deployment names its own adapter identity; the task's
+                # canonical adapter id remains the default so the original
+                # single-deployment manifests verify unchanged.
+                entry.setdefault("adapter", TASKS[task][0])
                 self.registry.register_adapter(
-                    identifier, [task], verify=lambda manifest, e=entry: self.verify(e)
+                    manifest_id, [task], verify=lambda e=entry: self.verify(e)
                 )
                 self.registry.admit(entry["manifest"])
-                self.entries[task] = entry
+                self.entries[key] = entry
+                self.defaults.setdefault(task, manifest_id)
             except (ValueError, KeyError, TypeError) as exc:
                 self.errors[task] = f"Specialist not admitted: {type(exc).__name__}"
 
     def verify(self, entry):
         try:
-            if entry["manifest"]["adapter"] != TASKS[entry["task"]][0]:
+            expected_adapter = entry.get("adapter") or TASKS[entry["task"]][0]
+            if entry["manifest"]["adapter"] != expected_adapter:
                 return ["Adapter identity mismatch"]
             files = entry["files"]
             required = [
@@ -89,10 +119,7 @@ class Specialists:
             manifest = entry["manifest"]
             if manifest["components"][0]["sha256"] != files[entry["checkpoint"]]:
                 return ["Checkpoint manifest mismatch"]
-            if (
-                manifest["runtime_revision"]
-                != files[str(worker_path(entry["task"]))]
-            ):
+            if manifest["runtime_revision"] != files[str(worker_path(entry["task"]))]:
                 return ["Worker revision mismatch"]
             if (
                 manifest["license_review"] != files[entry["license"]]
@@ -121,10 +148,23 @@ class Specialists:
     def options(self):
         options = []
         for task, (identifier, name) in TASKS.items():
-            problems = (
-                self.verify(self.entries[task])
-                if task in self.entries
-                else [
+            deployments = []
+            for deployment_id, entry in self.entries.items():
+                if deployment_id[0] != task:
+                    continue
+                problems = self.verify(entry)
+                deployments.append(
+                    dict(
+                        id=deployment_id[1],
+                        available=not problems,
+                        default=deployment_id[1] == self.defaults.get(task),
+                        detail="Local specialist · verified artifacts"
+                        if not problems
+                        else "; ".join(problems),
+                    )
+                )
+            if not deployments:
+                problems = [
                     self.errors.get(
                         task,
                         self.errors.get(
@@ -132,19 +172,32 @@ class Specialists:
                         ),
                     )
                 ]
-            )
+                deployments.append(
+                    dict(
+                        id=identifier,
+                        available=False,
+                        default=True,
+                        detail="; ".join(problems),
+                    )
+                )
             options.append(
                 dict(
                     id=task,
                     name=name,
                     model_id=identifier,
-                    available=not problems,
-                    detail=("Local MLX · transcription hypotheses" if task == "transcribe" else "Local CPU · experimental hypotheses")
-                    if not problems
-                    else "; ".join(problems),
+                    available=any(d["available"] for d in deployments),
+                    detail="Select a deployment per listening; old task-only requests keep the configured default",
+                    deployments=deployments,
                 )
             )
         return options
+
+    def _entry_for(self, task, deployment=None):
+        """The admitted entry for an explicit or default deployment selection."""
+        wanted = deployment or self.defaults.get(task)
+        if wanted is not None:
+            return self.entries.get((task, wanted))
+        return None
 
     def execute(
         self,
@@ -156,16 +209,33 @@ class Specialists:
         covenant=None,
         source_sha256=None,
         speech_options=None,
+        deployments=None,
     ):
         if len(tasks) != len(set(tasks)) or any(t not in TASKS for t in tasks):
             raise ValueError("Invalid specialist task selection")
+        deployments = deployments or {}
+        unknown = [t for t in deployments if t not in TASKS]
+        if unknown:
+            raise ValueError(f"Invalid specialist deployment selection: {unknown[0]}")
+        orphans = [t for t in deployments if t not in tasks]
+        if orphans:
+            raise ValueError(
+                f"Deployment selection names a task that was not selected: {orphans[0]}"
+            )
         expected_hash = source_sha256 or digest(path)
         if digest(path) != expected_hash:
             raise ValueError("Source changed before specialist analysis")
         results = []
         for task in tasks:
             checkpoint()
-            item = dict(task=task, model=TASKS[task][1])
+            selected = self._entry_for(task, deployments.get(task))
+            item = dict(
+                task=task,
+                model=TASKS[task][1],
+                deployment_id=selected["manifest"]["id"]
+                if selected
+                else deployments.get(task),
+            )
             # Whole event ontology and beat traces cannot bypass content restrictions.
             if covenant is not None and (
                 covenant.covenant.rules_for("ignore")
@@ -179,16 +249,23 @@ class Specialists:
                     )
                 )
                 continue
-            if task not in self.entries:
+            if selected is None:
+                if deployments.get(task):
+                    reason = (
+                        f"Selected specialist deployment {deployments[task]!r} is not "
+                        "admitted; no analysis was substituted"
+                    )
+                else:
+                    reason = "Specialist deployment is not admitted"
                 results.append(
                     dict(
                         **item,
                         status="unavailable",
-                        reason="Specialist deployment is not admitted",
+                        reason=reason,
                     )
                 )
                 continue
-            entry = self.entries[task]
+            entry = selected
             if task == "transcribe":
                 entry = {**entry, "request_options": speech_options or {}}
             try:
@@ -200,6 +277,7 @@ class Specialists:
                 )
                 if task == "transcribe":
                     from oida.specialists.speech_validation import validate_transcript
+
                     validate_transcript(value["result"], value["duration_seconds"])
                 frame_id = "frame_" + uuid4().hex
                 end = start_seconds + value["duration_seconds"]
@@ -221,7 +299,9 @@ class Specialists:
                     evidence_kind="undetermined"
                     if value["result"]["status"] == "undetermined"
                     else "model_hypothesis",
-                    confidence_kind="not_provided" if task == "transcribe" else "uncalibrated_score",
+                    confidence_kind="not_provided"
+                    if task == "transcribe"
+                    else "uncalibrated_score",
                     result=value["result"],
                     limitations=value["limitations"],
                 )
@@ -245,7 +325,14 @@ class Specialists:
                         peak_memory_mib=value["peak_memory_mib"],
                     )
                 )
-            except (ValueError, RuntimeError, OSError, TimeoutError, KeyError, TypeError) as exc:
+            except (
+                ValueError,
+                RuntimeError,
+                OSError,
+                TimeoutError,
+                KeyError,
+                TypeError,
+            ) as exc:
                 results.append(dict(**item, status="failed", reason=str(exc)[:300]))
         checkpoint()
         if digest(path) != expected_hash:
@@ -299,9 +386,14 @@ class Specialists:
                 )
                 from contextlib import ExitStack
                 from akousma.resource_admission import heavy_lease
+
                 with ExitStack() as stack:
                     if task == "transcribe":
-                        stack.enter_context(heavy_lease("oida", "transcribe", timeout=120, checkpoint=checkpoint))
+                        stack.enter_context(
+                            heavy_lease(
+                                "oida", "transcribe", timeout=120, checkpoint=checkpoint
+                            )
+                        )
                     log = stack.enter_context((tmp / "stderr").open("w+"))
                     process = subprocess.Popen(
                         [
@@ -318,7 +410,9 @@ class Specialists:
                     )
                     try:
                         worker_started = time.monotonic()
-                        deadline = worker_started + (300 if task == "transcribe" else 60)
+                        deadline = worker_started + (
+                            300 if task == "transcribe" else 60
+                        )
                         while process.poll() is None:
                             checkpoint()
                             if time.monotonic() > deadline:
