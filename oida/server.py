@@ -3181,21 +3181,24 @@ def create_app(
                 metadata["capture"] = capture_info
             if location:
                 metadata["location"] = location
-            segment = audio_segment_from_path(
-                path,
-                source=source_for_path(
+            from oida.stage_timing import stage
+
+            with stage("prepare_segment"):
+                segment = audio_segment_from_path(
                     path,
-                    source_type=source_type,
-                    label=req.source_label,
-                    device_id=req.device_id,
-                ),
-                privacy_mode=privacy_mode,
-                ephemeral=raw_audio_policy in {"temp", "not_stored"},
-                captured_at=req.source_admission.source_time
-                if req.source_admission
-                else None,
-                metadata=metadata,
-            )
+                    source=source_for_path(
+                        path,
+                        source_type=source_type,
+                        label=req.source_label,
+                        device_id=req.device_id,
+                    ),
+                    privacy_mode=privacy_mode,
+                    ephemeral=raw_audio_policy in {"temp", "not_stored"},
+                    captured_at=req.source_admission.source_time
+                    if req.source_admission
+                    else None,
+                    metadata=metadata,
+                )
             if req.source_admission is not None:
                 # Covenants may narrow retention after the first policy check.
                 req.source_admission.check_policy(source_type, raw_audio_policy)
@@ -3274,33 +3277,35 @@ def create_app(
             ):
                 from oida.specialists.dispatch import interpret
 
-                perception, interpretation_status = interpret(
-                    engine,
-                    str(path),
-                    "oida",
-                    passes=passes,
-                    partial=bool(req.specialist_tasks),
-                    report_fn=report,
-                    chunk_seconds=config.moss_chunk_seconds,
-                    overlap_seconds=_chunk_overlap(config),
+                with stage("interpret"):
+                    perception, interpretation_status = interpret(
+                        engine,
+                        str(path),
+                        "oida",
+                        passes=passes,
+                        partial=bool(req.specialist_tasks),
+                        report_fn=report,
+                        chunk_seconds=config.moss_chunk_seconds,
+                        overlap_seconds=_chunk_overlap(config),
+                    )
+            with stage("specialists"):
+                specialist_evidence = (
+                    specialists.execute(
+                        path,
+                        req.specialist_tasks,
+                        asset_id=segment.id,
+                        covenant=covenant_engine,
+                        source_sha256=segment.data_ref.sha256,
+                        speech_options={
+                            "vad": req.speech_vad,
+                            "alignment": req.speech_alignment,
+                            "language": req.speech_language,
+                        },
+                        deployments=req.specialist_deployments,
+                    )
+                    if req.specialist_tasks
+                    else []
                 )
-            specialist_evidence = (
-                specialists.execute(
-                    path,
-                    req.specialist_tasks,
-                    asset_id=segment.id,
-                    covenant=covenant_engine,
-                    source_sha256=segment.data_ref.sha256,
-                    speech_options={
-                        "vad": req.speech_vad,
-                        "alignment": req.speech_alignment,
-                        "language": req.speech_language,
-                    },
-                    deployments=req.specialist_deployments,
-                )
-                if req.specialist_tasks
-                else []
-            )
             for lane in specialist_evidence:
                 lane["time_origin"] = (
                     metadata.get("file_window")
@@ -3418,7 +3423,8 @@ def create_app(
 
                 event["acoustics"] = receipt(native_analysis)
             checkpoint(seal=True)
-            event = memory.enrich_event(event)
+            with stage("memory_similarity"):
+                event = memory.enrich_event(event)
             if getattr(req, "ephemeral_delivery", False):
                 # Public delivery may not become history even when an owner opts
                 # into retaining ordinary incognito sessions.
@@ -3498,7 +3504,7 @@ def create_app(
             return native_listen(native_request)
         return operations.run(
             req.operation_id,
-            lambda: gateway_listen_impl(req),
+            timed(lambda: gateway_listen_impl(req)),
             deadline_at=checked_deadline(req.deadline_at),
         )
 
@@ -3569,8 +3575,20 @@ def create_app(
                 raise HTTPException(400, str(exc)) from exc
 
         return operations.run(
-            req.operation_id, execute_window, deadline_at=checked_deadline(req.deadline_at)
+            req.operation_id, timed(execute_window), deadline_at=checked_deadline(req.deadline_at)
         )
+
+    def timed(callback):
+        """Run a listening and return where its time went beside its result."""
+        from oida import stage_timing
+
+        def run():
+            with stage_timing.collecting() as summary:
+                result = callback()
+                timings = summary()
+            return {**result, "timings": timings} if isinstance(result, dict) else result
+
+        return run
 
     def checked_deadline(value):
         """A deadline must lie in the future and within four hours; anything else is refused."""
@@ -3712,15 +3730,18 @@ def create_app(
                 {"rule": "do_not_retain", "subject": "memory", "count": 1}
             )
         elif req.remember and req.privacy_mode != "incognito":
-            remembered = remember_event(
-                event,
-                native_analysis=native_analysis,
-                user_notes=req.user_notes,
-                human_listener_id=req.human_listener_id,
-                human_display_name=req.human_display_name,
-                tags=req.tags,
-                declared_lineage=req.declared_lineage,
-            )
+            from oida.stage_timing import stage
+
+            with stage("remember"):
+                remembered = remember_event(
+                    event,
+                    native_analysis=native_analysis,
+                    user_notes=req.user_notes,
+                    human_listener_id=req.human_listener_id,
+                    human_display_name=req.human_display_name,
+                    tags=req.tags,
+                    declared_lineage=req.declared_lineage,
+                )
             trace = remembered["trace"]
         if native_analysis is not None and req.aperture.views:
             saved_native = bool(remembered and remembered.get("akousma_id"))
@@ -3745,30 +3766,32 @@ def create_app(
             )
         elif req.retain_library_audio:
             from oida.library_capture import retain_capture
+            from oida.stage_timing import stage
 
             checker = covenant_store.engine(override_name=req.covenant)
-            library_audio = retain_capture(
-                Path(req.path),
-                uploads_dir(),
-                record_id=remembered.get("akousma_id") if remembered else None,
-                event_id=str(event.get("id") or ""),
-                label=req.source_label or Path(req.path).name,
-                duration_seconds=(event.get("features") or {}).get("duration_s")
-                or req.capture_seconds,
-                source_type=req.source_type,
-                file_window=file_window,
-                parent_sound_id=req.library_parent_sound_id,
-                blocked=req.privacy_mode == "incognito"
-                or req.raw_audio_policy == "not_stored"
-                or req.ephemeral_delivery
-                or bool(
-                    checker
-                    and (
-                        checker.forbids_retention("raw-audio")
-                        or checker.forbids_retention("memory")
-                    )
-                ),
-            )
+            with stage("library_retain"):
+                library_audio = retain_capture(
+                    Path(req.path),
+                    uploads_dir(),
+                    record_id=remembered.get("akousma_id") if remembered else None,
+                    event_id=str(event.get("id") or ""),
+                    label=req.source_label or Path(req.path).name,
+                    duration_seconds=(event.get("features") or {}).get("duration_s")
+                    or req.capture_seconds,
+                    source_type=req.source_type,
+                    file_window=file_window,
+                    parent_sound_id=req.library_parent_sound_id,
+                    blocked=req.privacy_mode == "incognito"
+                    or req.raw_audio_policy == "not_stored"
+                    or req.ephemeral_delivery
+                    or bool(
+                        checker
+                        and (
+                            checker.forbids_retention("raw-audio")
+                            or checker.forbids_retention("memory")
+                        )
+                    ),
+                )
         if req.response_mode == "summary":
             from oida.listening_response import compact_listening_result
 

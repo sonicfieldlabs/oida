@@ -169,3 +169,31 @@ def test_listen_routes_refuse_a_passed_or_distant_deadline_and_honour_a_current_
         json={**body, "deadline_at": time.time() + 120, "operation_id": "op-window-deadline"},
     )
     assert current.status_code == 200, current.text
+    timings = current.json()["timings"]
+    assert timings["contract"] == "oida/listen-timings/v1" and timings["total_ms"] >= 0
+    assert "dsp" in {row["stage"] for row in timings["stages"]}
+
+
+def test_a_cold_pass_records_its_load_apart_from_generation(loaded):  # noqa: F811
+    engine, _, _ = loaded
+    model, processor = engine._load_pair("x")
+    resident = engine._models.pop("fixture-resident")
+
+    def load(model_id):
+        engine._models[model_id] = resident
+        engine._load_receipts[model_id] = {
+            "load_ms": 1234,
+            "inventory_ms": 12,
+            "weights_verification": {"method": "stat-cache", "files_reused": 3},
+        }
+        return model, processor
+
+    engine._load_pair = load
+    cold = engine.generate("fixture.wav", "fixture", get_recipe("caption_dense").settings)
+    generation = cold.pass_provenance[0]["generation"]
+    assert generation["cold_load"] is True and generation["inventory_ms"] == 12
+    assert cold.pass_provenance[0]["weights_verification"]["method"] == "stat-cache"
+    warm = engine.generate("fixture.wav", "fixture", get_recipe("caption_dense").settings)
+    assert warm.pass_provenance[0]["generation"]["cold_load"] is False
+    assert warm.pass_provenance[0]["generation"]["load_ms"] == 0
+    assert "weights_verification" not in warm.pass_provenance[0]

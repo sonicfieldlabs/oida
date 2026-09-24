@@ -16,7 +16,8 @@ from pathlib import Path
 from oida.config import HF_INSTRUCT_ID, HF_THINKING_ID, OidaConfig
 from oida.engine_base import EngineResult, EngineUnavailable, MossEngine
 from oida.recipes import GenerationSettings
-from oida.pass_provenance import pass_receipt, weight_inventory
+from oida import stage_timing
+from oida.pass_provenance import WeightHashCache, pass_receipt, weight_inventory
 from oida.input_binding import input_array_receipt, binding_for_receipt, verify_input_binding, unknown_binding
 
 LOGGER = logging.getLogger(__name__)
@@ -39,6 +40,11 @@ class MpsMossEngine(MossEngine):
         self._loaded_revisions: dict[str, str | None] = {}
         self._processors: dict[str, object] = {}
         self._model_overrides: dict[str, str] = {}
+        self._load_receipts: dict[str, dict] = {}
+        data_dir = getattr(config, "data_dir", None)
+        self._weight_cache = WeightHashCache(
+            Path(data_dir) / "cache" / "weight-inventory.json" if data_dir else None
+        )
         self._lock = threading.Lock()
         if config.moss_audio_repo:
             src = config.moss_audio_repo
@@ -113,7 +119,12 @@ class MpsMossEngine(MossEngine):
             from huggingface_hub import snapshot_download
             model_source = snapshot_download(repo_id=model_source, revision=revision,
                 local_files_only=self.config.hf_hub_offline)
-        weights = weight_inventory(Path(model_source))
+        loading = time.perf_counter()
+        verification: dict = {}
+        weights = weight_inventory(
+            Path(model_source), cache=self._weight_cache, verification=verification
+        )
+        inventory_ms = round((time.perf_counter() - loading) * 1000)
         # Transformers 5 loads checkpoint tensors on a thread pool by default.
         # On macOS/Python 3.13 this can deadlock inside safetensors' PyO3
         # initialization while holding the GIL, leaving the owner unable even
@@ -136,9 +147,16 @@ class MpsMossEngine(MossEngine):
         if weights.get("status") == "known":
             # Attribute the resident model to the same on-disk inventory that
             # surrounded loading; never relabel a resident model after a file edit.
-            if weight_inventory(Path(model_source)) != weights:
+            # With the cache this re-reads each file's identity on disk, not its bytes:
+            # a write during loading changes the identity and forces a fresh hash.
+            if weight_inventory(Path(model_source), cache=self._weight_cache) != weights:
                 raise EngineUnavailable("Weights changed during model loading")
         self._weight_provenance[model_id] = weights
+        self._load_receipts[model_id] = {
+            "load_ms": round((time.perf_counter() - loading) * 1000),
+            "inventory_ms": inventory_ms,
+            "weights_verification": verification or None,
+        }
         self._loaded_revisions[model_id] = revision or getattr(getattr(model, "config", None), "_commit_hash", None)
         self._models[model_id] = model
         self._processors[model_id] = processor
@@ -263,6 +281,7 @@ class MpsMossEngine(MossEngine):
         self._processors = {key: value for key, value in self._processors.items() if key == except_model}
         self._weight_provenance = {key: value for key, value in self._weight_provenance.items() if key == except_model}
         self._loaded_revisions = {key: value for key, value in self._loaded_revisions.items() if key == except_model}
+        self._load_receipts = {key: value for key, value in self._load_receipts.items() if key == except_model}
         try:
             import gc
             import torch
@@ -314,7 +333,10 @@ class MpsMossEngine(MossEngine):
             )
         wait_ms = round((time.perf_counter() - waiting) * 1000)
         try:
+            cold = model_id not in self._models
+            loading = time.perf_counter()
             model, processor = self._load_pair(model_id)
+            load_ms = round((time.perf_counter() - loading) * 1000)
             start = time.perf_counter()
             raw_audio = load_audio(str(Path(audio_path)), sample_rate=processor.config.mel_sr)
             rate = int(processor.config.mel_sr)
@@ -369,14 +391,25 @@ class MpsMossEngine(MossEngine):
                 stop = "deadline"
             else:
                 stop = "other"
+            loaded = self._load_receipts.get(model_id) or {}
             provenance["generation"] = {
                 "engine_wait_ms": wait_ms,
+                # A cold pass loaded its model first; the load is not generation time.
+                "cold_load": cold,
+                "load_ms": load_ms if cold else 0,
+                **({"inventory_ms": loaded.get("inventory_ms")} if cold else {}),
+                "preprocess_ms": round((generating - start) * 1000),
                 "generate_ms": round((time.perf_counter() - generating) * 1000),
                 "new_tokens": generated,
                 "max_new_tokens": settings.max_new_tokens,
                 "stop_reason": stop,
                 "deadline_bound": deadline is not None,
             }
+            if cold and loaded.get("weights_verification"):
+                provenance["weights_verification"] = loaded["weights_verification"]
+            if cold:
+                stage_timing.record("model_load", load_ms)
+            stage_timing.record("generate", provenance["generation"]["generate_ms"])
             if stop == "deadline":
                 raise DeadlineReached(
                     "operation deadline reached during generation; the partial output was discarded"

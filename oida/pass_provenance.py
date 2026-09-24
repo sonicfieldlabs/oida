@@ -9,11 +9,75 @@ from pathlib import Path
 from typing import Any
 
 
-def weight_inventory(directory: Path) -> dict[str, Any]:
+def _file_state(path: Path) -> list[int]:
+    stat = path.stat()
+    return [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
+
+
+class WeightHashCache:
+    """The SHA-256 of a weight file, reused while the file's identity on disk is unchanged.
+
+    Hashing MOSS-Audio's 10.4 GB took 5.4 s on an M1 Max, and every load hashed twice, so a
+    swap between two models cost about 22 s before any tensor moved. A digest is reused only
+    while device, inode, size, modification and change times all match the ones recorded
+    around the hashing that produced it; any write to the file changes at least one. What a
+    reuse attests is said in the load's verification record, never inside the inventory,
+    so a model's identity does not depend on how its bytes were last checked.
+    """
+
+    def __init__(self, path: Path | None):
+        self.path = path
+        self._rows: dict[str, dict] = {}
+        if path is not None:
+            try:
+                value = json.loads(path.read_text())
+                if isinstance(value, dict) and value.get("version") == 1:
+                    self._rows = {
+                        key: row
+                        for key, row in (value.get("files") or {}).items()
+                        if isinstance(row, dict)
+                    }
+            except (OSError, ValueError):
+                self._rows = {}
+
+    def get(self, path: Path, state: list[int]) -> dict | None:
+        row = self._rows.get(str(path.resolve()))
+        if row and row.get("state") == state and isinstance(row.get("sha256"), str):
+            return row
+        return None
+
+    def put(self, path: Path, state: list[int], sha256: str) -> dict:
+        from datetime import datetime, timezone
+
+        row = {
+            "state": state,
+            "sha256": sha256,
+            "hashed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._rows[str(path.resolve())] = row
+        if self.path is not None:
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = self.path.with_suffix(".tmp")
+                temporary.write_text(json.dumps({"version": 1, "files": self._rows}))
+                os.replace(temporary, self.path)
+            except OSError:
+                pass  # A cache that cannot be written only means the next load hashes again.
+        return row
+
+
+def weight_inventory(
+    directory: Path,
+    *,
+    cache: WeightHashCache | None = None,
+    verification: dict | None = None,
+) -> dict[str, Any]:
     """Hash local safetensors at load time, never infer bytes from a model name.
 
     The digest identifies a sorted filename/digest manifest, not concatenated
-    tensors. Call while loading, and retain alongside the resident model.
+    tensors. Call while loading, and retain alongside the resident model. With a
+    cache, a file whose on-disk identity is unchanged since it was hashed keeps that
+    digest; ``verification`` (if given) is filled with what was hashed and what reused.
     """
     files = sorted(directory.glob("*.safetensors"))
     if not files:
@@ -22,17 +86,42 @@ def weight_inventory(directory: Path) -> dict[str, Any]:
             "reason": "No local safetensors inventory available",
         }
     inventory = []
+    hashed = reused = 0
+    hashed_at: list[str] = []
     for path in files:
+        before = _file_state(path)
+        row = cache.get(path, before) if cache is not None else None
+        if row is not None:
+            reused += 1
+            hashed_at.append(row["hashed_at"])
+            inventory.append(
+                {"file": path.name, "sha256": row["sha256"], "bytes": before[2]}
+            )
+            continue
         digest = hashlib.sha256()
-        before = path.stat()
         with path.open("rb") as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(block)
-        after = path.stat()
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        after = _file_state(path)
+        if before != after:
             raise ValueError("Weights changed while their provenance was being read")
+        hashed += 1
+        if cache is not None:
+            hashed_at.append(cache.put(path, after, digest.hexdigest())["hashed_at"])
         inventory.append(
-            {"file": path.name, "sha256": digest.hexdigest(), "bytes": after.st_size}
+            {"file": path.name, "sha256": digest.hexdigest(), "bytes": after[2]}
+        )
+    if verification is not None:
+        verification.update(
+            method="sha256" if not reused else "stat-cache" if not hashed else "mixed",
+            files_hashed=hashed,
+            files_reused=reused,
+            **({"oldest_hash_at": min(hashed_at)} if hashed_at else {}),
+            basis=(
+                "every file hashed now"
+                if not reused
+                else "reused digests: device, inode, size, mtime and ctime unchanged since hashing"
+            ),
         )
     encoded = json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()
     return {

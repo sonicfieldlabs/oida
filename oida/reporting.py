@@ -287,7 +287,10 @@ def report(
     if not audio_path.is_file():
         raise ValueError(f"audio path is not a file: {audio_path.resolve()}")
     selected = _normalize_passes(passes)
-    dsp = inspect_path(path)
+    from oida.stage_timing import stage
+
+    with stage("dsp"):
+        dsp = inspect_path(path)
     features = dsp.get("features", {})
     signal_interpretation = signal_reading_dict(dsp)
     chunks = plan_chunks(path, chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds)
