@@ -374,6 +374,7 @@ class MpsMossEngine(MossEngine):
                     )
                 # transformers stops generating once this much wall time has passed.
                 generation_kwargs["max_time"] = remaining
+            memory_at_start = host_memory()
             generating = time.perf_counter()
             with torch.no_grad():
                 out = model.generate(
@@ -404,6 +405,11 @@ class MpsMossEngine(MossEngine):
                 "max_new_tokens": settings.max_new_tokens,
                 "stop_reason": stop,
                 "deadline_bound": deadline is not None,
+                **(
+                    {"host_memory": {"start": memory_at_start, "end": host_memory()}}
+                    if memory_at_start
+                    else {}
+                ),
             }
             if cold and loaded.get("weights_verification"):
                 provenance["weights_verification"] = loaded["weights_verification"]
@@ -428,6 +434,40 @@ class MpsMossEngine(MossEngine):
             wall_ms=wall_ms,
             pass_provenance=[provenance],
         )
+
+
+def host_memory() -> dict | None:
+    """The machine's memory state around a pass, for reading a slow one afterwards.
+
+    A pass on 24 September ran at 0.6 tokens/s and nothing retained could say why. That
+    evening this Mac had 38.7 GB of 39.9 GB of swap in use, and a second, long-running
+    MOSS process held 25 GB; the Testing owner's own model was mostly compressed. Swap,
+    available memory and the kernel's pressure level (1 normal, 2 warning, 4 critical)
+    are cheap to read and name no content.
+    """
+    try:
+        import psutil
+
+        virtual, swap = psutil.virtual_memory(), psutil.swap_memory()
+        value = {
+            "available_mb": round(virtual.available / 2**20),
+            "swap_used_mb": round(swap.used / 2**20),
+        }
+    except Exception:
+        return None
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+
+            level = subprocess.run(
+                ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+                capture_output=True, text=True, timeout=1,
+            ).stdout.strip()
+            if level.isdigit():
+                value["pressure_level"] = int(level)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return value
 
 
 def _safe_decode(processor, token_ids) -> str:

@@ -197,3 +197,22 @@ def test_a_cold_pass_records_its_load_apart_from_generation(loaded):  # noqa: F8
     assert warm.pass_provenance[0]["generation"]["cold_load"] is False
     assert warm.pass_provenance[0]["generation"]["load_ms"] == 0
     assert "weights_verification" not in warm.pass_provenance[0]
+
+
+def test_a_pass_records_the_host_memory_around_it(loaded, monkeypatch):  # noqa: F811
+    engine, _, _ = loaded
+    import oida.engine_mps as mps
+
+    states = iter([{"available_mb": 900, "swap_used_mb": 38000, "pressure_level": 2},
+                   {"available_mb": 700, "swap_used_mb": 38100, "pressure_level": 4}])
+    monkeypatch.setattr(mps, "host_memory", lambda: next(states))
+    result = engine.generate("fixture.wav", "fixture", get_recipe("caption_dense").settings)
+    memory = result.pass_provenance[0]["generation"]["host_memory"]
+    assert memory["start"]["pressure_level"] == 2 and memory["end"]["swap_used_mb"] == 38100
+
+
+def test_host_memory_reads_the_machine_without_content():
+    from oida.engine_mps import host_memory
+
+    value = host_memory()
+    assert value is None or {"available_mb", "swap_used_mb"} <= set(value)
