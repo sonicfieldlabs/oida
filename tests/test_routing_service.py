@@ -223,6 +223,32 @@ def test_archive_visibility_batches_current_policy(client, monkeypatch):
     assert c.post("/routing/archive/visibility", json={"ids": ["akm_one"], "unused": True}).status_code == 422
 
 
+def test_archive_digests_give_state_and_the_digest_germ_compares_without_content(client, monkeypatch):
+    import hashlib
+    import json as j
+
+    c, _ = client
+    record = {"akousma_id": "akm_one", "summary": "Réverbération", "value": 1.5}
+
+    def view(workspace, identifier):
+        if identifier == "akm_hidden":
+            return {"view": {"state": "withheld"}, "record": None}
+        return {"view": {"state": "available"}, "record": record}
+
+    monkeypatch.setattr("oida.routing.archive.archive_view", view)
+    response = c.post("/routing/archive/digests", json={"ids": ["akm_one", "akm_hidden"]})
+    assert response.status_code == 200
+    views = response.json()["views"]
+    expected = hashlib.sha256(
+        j.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    ).hexdigest()
+    assert views["akm_one"] == {"state": "available", "record_sha256": expected}
+    assert views["akm_hidden"] == {"state": "withheld", "record_sha256": None}
+    assert "Réverbération" not in response.text, "no record content travels"
+    assert c.post("/routing/archive/digests", json={"ids": []}).status_code == 422
+    assert c.post("/routing/archive/digests", json={"ids": ["a", "a"]}).status_code == 400
+
+
 def test_production_workspace_mounts_routing(workspace):
     from oida.reasoning_workspace import workspace_router
 

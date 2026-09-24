@@ -62,6 +62,21 @@ class ArchiveVisibilityRequest(BaseModel):
     ids: list[str] = Field(max_length=101)
 
 
+class ArchiveDigestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
+def record_digest(record) -> str | None:
+    """The digest GERM computes over an admitted record (sorted keys, compact, UTF-8)."""
+    if record is None:
+        return None
+    return hashlib.sha256(
+        json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    ).hexdigest()
+
+
 def _context_binding(req: RoutingRequest, *, execution: bool):
     if req.context:
         workspace_id = os.getenv("LISTENINGSTACK_WORKSPACE_ID")
@@ -432,6 +447,30 @@ def routing_router(workspace, require_admin):
         from oida.routing.archive import archive_view
         value = archive_view(workspace, identifier)
         return {"view": value["view"], "record": value["record"]}
+
+    @router.post("/archive/digests")
+    def archive_digests(payload: ArchiveDigestRequest):
+        """Current policy and content digest for many records, without their content.
+
+        GERM checks every memory a library listing depends on. Reading each view on
+        its own sent 68 requests and about 10 MB of records per listing (24 September
+        2026) to compare one digest each. The view is computed exactly as for
+        ``/archive/{identifier}``; only its state and the record's digest are returned.
+        """
+        if len(set(payload.ids)) != len(payload.ids) or any(
+            not re.fullmatch(r"[A-Za-z0-9_:-]{1,100}", identifier) for identifier in payload.ids
+        ):
+            raise HTTPException(400, "Choose distinct valid Auditum references")
+        from oida.routing.archive import archive_view
+
+        views = {}
+        for identifier in payload.ids:
+            value = archive_view(workspace, identifier)
+            views[identifier] = {
+                "state": value["view"]["state"],
+                "record_sha256": record_digest(value["record"]),
+            }
+        return {"contract": "oida/archive-digests/v1", "views": views}
 
     @router.post("/archive/visibility")
     def archive_visibility(payload: ArchiveVisibilityRequest, request: Request):
