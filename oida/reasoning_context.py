@@ -26,6 +26,27 @@ def read_record(identifier):
         store.close()
 
 
+def read_raw_records(identifiers):
+    """The stored text of many records in one query: id to text, or None when absent."""
+    from akousmata_app.paths import open_store
+
+    ids = list(dict.fromkeys(identifiers))
+    store = open_store()
+    try:
+        found = {}
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            rows = store.conn.execute(
+                "SELECT akousma_id, record FROM akousmata WHERE akousma_id IN (%s)"
+                % ",".join("?" * len(chunk)),
+                chunk,
+            ).fetchall()
+            found.update({row[0]: row[1] for row in rows})
+        return {identifier: found.get(identifier) for identifier in ids}
+    finally:
+        store.close()
+
+
 def retained_event(record):
     """No audio paths or fresh measurement claims; canonical record is never written."""
     routes = []

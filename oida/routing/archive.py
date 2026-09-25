@@ -117,6 +117,104 @@ def archive_state(workspace, identifier):
     return {"state": state, "record": record}
 
 
+class _Pure:
+    """What a stored record yields independently of any policy, keyed by the SHA-256 of its
+    stored text: whether it is a valid Auditum for its id, its retained event and its canonical
+    digest. Each is a pure function of those bytes, so a memo keyed by them is exact; nothing
+    about permission is kept. A memory render drew on up to 110 records of about 300 KB each,
+    and parsing and re-deriving them on every playback request cost seconds (25 September)."""
+
+    def __init__(self, limit=1024):
+        import threading
+        from collections import OrderedDict
+
+        self.limit, self.items, self.lock = limit, OrderedDict(), threading.Lock()
+
+    def get(self, identifier, raw):
+        key = hashlib.sha256(raw.encode()).hexdigest()
+        with self.lock:
+            hit = self.items.get(key)
+            if hit is not None and hit[0] == identifier:
+                self.items.move_to_end(key)
+                return hit[1]
+        import json
+
+        from akousma import validation_errors
+
+        from oida.routing.service import record_digest
+
+        record = json.loads(raw)
+        value = None
+        if isinstance(record, dict) and record.get("auditum"):
+            identity = record.get("akousma_id") == identifier
+            value = {
+                "identity": identity,
+                "event": retained_event(record) if identity else None,
+                "schema_ok": not validation_errors(record),
+                "digest": record_digest(record),
+            }
+        with self.lock:
+            self.items[key] = (identifier, value)
+            while len(self.items) > self.limit:
+                self.items.popitem(last=False)
+        return value
+
+
+_PURE = _Pure()
+
+
+def archive_states(workspace, identifiers):
+    """State and digest for many anchors, resolved as ``archive_state`` resolves one.
+
+    With a workspace that reads the canonical store directly, the records are read in one query
+    and their pure derivations come from ``_PURE``; policy (``event_policy``, the covenant check,
+    forgetting receipts) is applied afresh to every one. Any other workspace is read one record
+    at a time through ``archive_state``.
+    """
+    from oida.routing.service import record_digest
+
+    raw_records = getattr(workspace, "raw_records", None)
+    if raw_records is None:
+        out = {}
+        for identifier in identifiers:
+            value = archive_state(workspace, identifier)
+            out[identifier] = {"state": value["state"], "record_sha256": record_digest(value["record"])}
+        return out
+    from akousma.auditum_view import forgetting_receipt_view
+
+    _records, _events, _permitted, receipt = _resolvers(workspace)
+
+    def resolve(identifier, raw):
+        # The same order as archive_state: identity, then policy, then schema validation.
+        pure = _PURE.get(identifier, raw) if raw is not None else None
+        if pure is not None:
+            if not pure["identity"]:
+                raise ValueError("Archive record identity does not match its reference")
+            try:
+                event = workspace.event_policy(deepcopy(pure["event"]))
+            except HTTPException as exc:
+                if exc.status_code in {401, 403, 423}:
+                    return "withheld", None
+                raise
+            if event.get("privacy_mode") == "incognito" or covenant_blocks_untyped_prose(event.get("covenant")):
+                return "withheld", None
+            if not pure["schema_ok"]:
+                raise ValueError("Invalid or mismatched resolved record")
+            return "available", pure["digest"]
+        found = receipt(identifier)
+        if found is None:
+            return "unavailable", None
+        forgetting_receipt_view(found, identifier)
+        return "forgotten", None
+
+    raws = _archive_errors(lambda: raw_records(list(identifiers)))
+    out = {}
+    for identifier in identifiers:
+        state, digest = _archive_errors(lambda: resolve(identifier, raws.get(identifier)))
+        out[identifier] = {"state": state, "record_sha256": digest}
+    return out
+
+
 def inquiry(workspace, identifier, selected_refs=None):
     projection = archive_view(workspace, identifier)
     view = projection["view"]

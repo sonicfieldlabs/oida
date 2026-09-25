@@ -462,16 +462,9 @@ def routing_router(workspace, require_admin):
             not re.fullmatch(r"[A-Za-z0-9_:-]{1,100}", identifier) for identifier in payload.ids
         ):
             raise HTTPException(400, "Choose distinct valid Auditum references")
-        from oida.routing.archive import archive_state
+        from oida.routing.archive import archive_states
 
-        views = {}
-        for identifier in payload.ids:
-            value = archive_state(workspace, identifier)
-            views[identifier] = {
-                "state": value["state"],
-                "record_sha256": record_digest(value["record"]),
-            }
-        return {"contract": "oida/archive-digests/v1", "views": views}
+        return {"contract": "oida/archive-digests/v1", "views": archive_states(workspace, payload.ids)}
 
     @router.post("/archive/visibility")
     def archive_visibility(payload: ArchiveVisibilityRequest, request: Request):

@@ -217,3 +217,41 @@ def test_archive_state_is_the_views_anchor_state_without_resolving_references():
         view = archive_view(workspace, child["akousma_id"])
         assert state["state"] == view["view"]["state"] == case
         assert state["record"] == view["record"]
+
+
+def test_batch_archive_states_match_archive_state_and_apply_policy_every_time():
+    import json
+    from types import SimpleNamespace
+    import akousma
+    from oida.routing import archive
+    from oida.routing.service import record_digest
+
+    def account():
+        return akousma.auditum(route_decisions=[akousma.route_decision("fixture-stop", gate="input", outcome="abstain", subject="synthetic fixture", reason="No inference performed", actor="test")])
+
+    a = akousma.new_akousma(audio={"asset_id": "a"}, originating_app="oida", summary="Soft impacts", auditum=account())
+    b = akousma.new_akousma(audio={"asset_id": "b"}, originating_app="oida", summary="Bright impacts", auditum=account())
+    records = {r["akousma_id"]: r for r in (a, b)}
+    withheld, policy_calls = set(), []
+
+    def policy(event):
+        policy_calls.append(event["id"])
+        if event["id"] in withheld:
+            raise HTTPException(423, "withheld")
+        return event
+
+    plain = SimpleNamespace(reader=records.get, event_policy=policy, forgetting_reader=lambda ref: None)
+    batch = SimpleNamespace(reader=records.get, event_policy=policy, forgetting_reader=lambda ref: None,
+                            raw_records=lambda ids: {i: (json.dumps(records[i]) if i in records else None) for i in ids})
+    ids = [a["akousma_id"], b["akousma_id"], "akm_missing"]
+    for round_ in range(3):
+        if round_ == 1:
+            withheld.add(b["akousma_id"])
+        if round_ == 2:
+            records[a["akousma_id"]]["summary"] = "Changed account"
+        expected = {i: {"state": archive.archive_state(plain, i)["state"],
+                        "record_sha256": record_digest(archive.archive_state(plain, i)["record"])} for i in ids}
+        policy_calls.clear()
+        assert archive.archive_states(batch, ids) == expected
+        assert sorted(policy_calls) == sorted(ids[:2]), "policy runs on every record, every request"
+    assert expected[a["akousma_id"]]["record_sha256"] == record_digest(records[a["akousma_id"]])

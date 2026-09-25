@@ -82,6 +82,11 @@ class Workspace:
             event_policy,
         )
         self.reader, self.retriever = reader, retriever
+        if reader is read_record:
+            # The canonical reader reads the store; batch archive digests may read it too.
+            from oida.reasoning_context import read_raw_records
+
+            self.raw_records = read_raw_records
         self.lock = threading.RLock()
         self.stopped, self.wake = threading.Event(), threading.Event()
         self.thread = None
