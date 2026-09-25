@@ -72,8 +72,33 @@ def test_gateway_artifact_changes_block_inference(tmp_path, monkeypatch):
                 dict(role="system", content="Bounded"),
                 dict(role="user", content="Data"),
             ],
-            response_format={"json_schema": {"schema": {"type": "object"}}},
+            response_format={"json_schema": {"schema": {"type": "object", "$defs": {"Move": {}}}}},
             max_tokens=100,
         ),
     )
     assert response.status_code == 503 and "artifacts changed" in response.text
+
+
+def test_gateway_serves_only_admitted_task_families(tmp_path, monkeypatch):
+    client, _ = setup(tmp_path, monkeypatch)
+    request = dict(
+        model="test",
+        messages=[dict(role="system", content="Bounded"), dict(role="user", content="{}")],
+        max_tokens=100,
+    )
+    headers = {"Authorization": "Bearer " + "x" * 40}
+    routing = {"type": "object", "properties": {"candidate_id": {"type": "string"}}}
+    # A deployment without a task list was admitted for situated planning only.
+    response = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={**request, "response_format": {"json_schema": {"schema": routing}}},
+    )
+    assert response.status_code == 422 and "not admitted" in response.text and "routing" in response.text
+    unknown = {"type": "object", "properties": {"text": {"type": "string"}}}
+    response = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={**request, "response_format": {"json_schema": {"schema": unknown}}},
+    )
+    assert response.status_code == 422

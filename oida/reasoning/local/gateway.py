@@ -14,6 +14,8 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from akousma.resource_admission import heavy_lease
 
+from oida.reasoning.local.worker import task_of
+
 
 def sha(path):
     with Path(path).open("rb") as stream:
@@ -193,8 +195,13 @@ def create_app(config_path=None):
                 raise ValueError("Invalid planning messages")
             if body.get("stream") or not 1 <= body.get("max_tokens", 1024) <= 4096:
                 raise ValueError("Invalid planning bound")
+            family = task_of(schema)
         except (ValueError, KeyError, TypeError, AttributeError, StopIteration):
             raise HTTPException(422, "Invalid bounded planning request")
+        # A deployment serves only the task families its evaluation admitted; one
+        # provisioned before routing and inquiry were evaluated admits planning only.
+        if family not in entry.get("tasks", ["planning"]):
+            raise HTTPException(422, f"Local reasoning task not admitted for this deployment: {family}")
         stop = threading.Event()
         task = asyncio.create_task(asyncio.to_thread(execute, entry, body, stop))
         try:

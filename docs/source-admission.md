@@ -110,7 +110,7 @@ What is kept, and where:
 - **Local only.** `GET /sources/research-samples` (`oida/research-samples/v1`) lists
   unexpired samples as metadata, without paths, with `audience: "local"` and
   `exportable: false`. `GET /sources/research-samples/{id}/audio` serves the file after
-  checking its bytes against the recorded digest (409 if they changed). Telar reads
+  checking its bytes against the recorded digest (409 if they changed). Khipu reads
   these for its Listening Station section and never packages them.
 - **Expiring.** A sweep deletes a sample at `expires_at`. It runs every 30 s, and also
   at startup and before every listing, read and retention. Each deletion is journaled as a
