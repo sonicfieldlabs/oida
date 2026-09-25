@@ -20,6 +20,27 @@ def sha(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+# The worker's own refusals, by the words it raises them with. Only the category travels:
+# the worker's log may quote model output, which is not the gateway's to return.
+FAILURES = (
+    ("exceeds the validated 8192-token planning context", "prompt exceeds the validated 8192-token context"),
+    ("output token budget exhausted", "output token budget exhausted before a complete plan"),
+    ("No complete JSON planning object", "no complete JSON plan"),
+    ("ValidationError", "the plan did not match the offered schema"),
+    ("Planning requires", "the request offered no evidence or actions"),
+    ("No supported planning action offered", "no supported action offered"),
+)
+
+
+def failure_category(log_path) -> str:
+    """Name why the worker refused, from a fixed list, never quoting its log."""
+    try:
+        text = Path(log_path).read_text(errors="replace")[-20000:]
+    except OSError:
+        return "unknown (no worker log)"
+    return next((category for needle, category in FAILURES if needle in text), "unknown")
+
+
 def create_app(config_path=None):
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     path = Path(config_path or os.environ["OIDA_LOCAL_REASONING_CONFIG"])
@@ -127,7 +148,8 @@ def create_app(config_path=None):
                             time.sleep(0.05)
                         if process.returncode:
                             raise ValueError(
-                                "Local model failed to produce a valid bounded plan"
+                                "Local model failed to produce a valid bounded plan: "
+                                + failure_category(root / "error.log")
                             )
                         if out.stat().st_size > 128 * 1024:
                             raise ValueError("Planning output too large")
