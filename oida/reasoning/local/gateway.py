@@ -29,6 +29,8 @@ FAILURES = (
     ("ValidationError", "the plan did not match the offered schema"),
     ("Planning requires", "the request offered no evidence or actions"),
     ("No supported planning action offered", "no supported action offered"),
+    ("Routing requires offered candidates", "the routing request offered no candidates"),
+    ("Unsupported local reasoning task", "a task the admitted worker does not serve"),
 )
 
 

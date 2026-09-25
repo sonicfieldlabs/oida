@@ -53,6 +53,12 @@ class TurnOptions:
     research: dict[str, Any] = field(default_factory=dict)
 
 
+def _inquiry_bound(provider_id):
+    from oida.reasoning.bounded import BOUNDED_CONTEXT
+
+    return (BOUNDED_CONTEXT.get(provider_id) or {}).get("inquiry_chars")
+
+
 @dataclass
 class _TurnContext:
     event: dict[str, Any]
@@ -227,6 +233,7 @@ class ReasoningOrchestrator:
                     profile=context.profile,
                     route_instructions=context.route_instructions,
                     listening_identity=context.listening_identity,
+                    evidence_chars=_inquiry_bound(context.provider_id),
                     conversation_history=self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
@@ -327,6 +334,7 @@ class ReasoningOrchestrator:
             route_instructions=route_instructions,
             listening_identity=listening_identity,
             conversation_history=history,
+            evidence_chars=_inquiry_bound(selected_provider),
         )
         conversation_prepared = self.conversations.prepare(
             event=event,
@@ -408,6 +416,7 @@ class ReasoningOrchestrator:
                     profile=context.profile,
                     route_instructions=context.route_instructions,
                     listening_identity=context.listening_identity,
+                    evidence_chars=_inquiry_bound(context.provider_id),
                     conversation_history=self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,

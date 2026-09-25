@@ -78,7 +78,14 @@ class PromptCompiler:
         route_instructions: str | None = None,
         listening_identity: str | None = None,
         conversation_history: list[dict[str, Any]] | None = None,
+        evidence_chars: int | None = None,
     ) -> CompiledPrompt:
+        if evidence_chars:
+            # A provider with a bounded validated context sees whole items within its budget;
+            # the validator still checks citations against the full packet.
+            from oida.reasoning.bounded import bound_packet
+
+            packet, _ = bound_packet(packet, evidence_chars)
         route = _bounded(route_instructions, 8000)
         identity = _bounded(listening_identity, MAX_LISTENING_IDENTITY_CHARS).strip()
         profile_block = {

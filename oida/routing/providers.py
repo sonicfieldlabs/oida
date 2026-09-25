@@ -136,6 +136,19 @@ class TextDecisionProvider:
             from oida.routing.typesafe import external_state
 
             payload = external_state(context)
+        else:
+            from oida.reasoning.bounded import BOUNDED_CONTEXT, bound_evidence
+
+            bound = BOUNDED_CONTEXT.get(self.provider_id)
+            if bound:
+                # The admitted local planner's validated context is 8192 tokens; send it whole
+                # evidence items within its budget. The proposal does not list what was withheld.
+                payload["evidence"], payload["choices"], _ = bound_evidence(
+                    [e for e in payload["evidence"] if isinstance(e, dict)],
+                    payload["choices"],
+                    evidence_chars=bound["routing_chars"],
+                    max_choices=bound["max_choices"],
+                )
         try:
             checkpoint()
             response = self.adapter.complete(

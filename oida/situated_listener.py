@@ -19,40 +19,7 @@ from oida.reasoning_context import retained_event
 
 
 
-# A provider whose validated context is bounded receives at most this much evidence. The
-# admitted local planner (local_ecology, Qwen3.5-4B) was evaluated within an 8192-token
-# prompt and refuses anything longer. On 24 September a five-second listening produced 24
-# evidence items (about 20 KB with its choices), 8647 prompt tokens, and every situated
-# decision it was asked for was refused. The budget below brought that request to 7344.
-BOUNDED_CONTEXT = {"local_ecology": {"evidence_chars": 8000, "max_choices": 20}}
-
-_EVIDENCE_PRIORITY = {"event_anchor": 0, "summary": 1, "reference": 2}
-
-
-def bound_evidence(items, choices, *, evidence_chars, max_choices):
-    """Keep the anchor, then summaries and references, then claims in order, within a budget.
-
-    Nothing is summarised or rewritten: whole items are sent or withheld, and the receipt
-    says how many of each were withheld, so a decision is read against what was offered.
-    """
-    ranked = sorted(enumerate(items), key=lambda pair: (_EVIDENCE_PRIORITY.get(pair[1].get("kind"), 3), pair[0]))
-    kept, used = set(), 0
-    for index, item in ranked:
-        size = len(json.dumps(item, ensure_ascii=False))
-        if item.get("kind") == "event_anchor" or used + size <= evidence_chars:
-            kept.add(index)
-            used += size
-    sent = [item for index, item in enumerate(items) if index in kept]
-    receipt = dict(
-        offered=len(items),
-        sent=len(sent),
-        withheld_refs=[item["ref"] for index, item in enumerate(items) if index not in kept],
-        choices_offered=len(choices),
-        choices_sent=min(len(choices), max_choices),
-        evidence_chars=used,
-        basis="the provider's validated context is bounded; whole items were withheld, none rewritten",
-    )
-    return sent, choices[:max_choices], receipt
+from oida.reasoning.bounded import BOUNDED_CONTEXT, bound_evidence  # noqa: E402,F401
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
