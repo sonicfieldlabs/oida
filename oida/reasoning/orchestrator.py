@@ -302,7 +302,11 @@ class ReasoningOrchestrator:
             selected_provider = "local_structured"
             model_id = None
             forced_fallback = "Incognito mode forced local-only reasoning and disabled persistence."
-        elif requested_provider != "local_structured" and (configured is None or not configured.enabled):
+        elif (
+            requested_provider != "local_structured"
+            and (configured is None or not configured.enabled)
+            and not self._admitted_local_planner(requested_provider, settings)
+        ):
             selected_provider = "local_structured"
             model_id = None
             forced_fallback = f"The selected provider {requested_provider!r} is not explicitly enabled."
@@ -721,6 +725,17 @@ class ReasoningOrchestrator:
                 history.append({"role": "assistant", "content": answer})
         return history
 
+    def _admitted_local_planner(self, provider_id: str, settings: ReasoningSettings) -> bool:
+        """The admitted local planner is registered at startup from its deployment, not persisted
+        as a provider setting. It counts as enabled when that registration exists; its gateway
+        still refuses any task family the deployment's evaluation did not admit."""
+        if provider_id != "local_ecology":
+            return False
+        try:
+            return self.registry_factory(settings).get(provider_id) is not None
+        except Exception:
+            return False
+
     def _history_for_packet(
         self,
         conversation_id: str | None,
@@ -789,7 +804,8 @@ def _provider_locality(
     model_id: str | None,
     settings: ReasoningSettings,
 ) -> ProviderLocality:
-    if provider_id in {"local_structured", "oida_moss"}:
+    # local_ecology is registered only for a loopback endpoint (registry.py refuses any other).
+    if provider_id in {"local_structured", "oida_moss", "local_ecology"}:
         return ProviderLocality.LOCAL
     configured = settings.providers.get(provider_id)
     if provider_id == "ollama":

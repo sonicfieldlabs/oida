@@ -515,3 +515,39 @@ def test_prepare_commit_can_issue_exactly_one_relisten_followup_packet() -> None
 
     assert relistener.calls == 1
     assert committed["turn"]["audit"]["targeted_relisten_count"] == 1
+
+
+class _LocalPlanner(_QueuedProvider):
+    provider_id = "local_ecology"
+
+    def probe(self):
+        return ProviderDescriptor(id="local_ecology", name="Local planning", kind="openai_compatible",
+                                  locality="local", enabled=True, available=True)
+
+
+def test_admitted_local_planner_answers_an_inquiry_without_a_persisted_setting() -> None:
+    """local_ecology is registered from its deployment at startup, never persisted as a provider
+    setting; when registered it answers, and when absent the turn falls back visibly."""
+    planner = _LocalPlanner([_valid])
+    with tempfile.TemporaryDirectory() as tmp:
+        settings_store = ReasoningSettingsStore(Path(tmp) / "reasoning.json")
+        settings_store.save(ReasoningSettings())
+        registry = ProviderRegistry()
+        registry.register(planner, enabled=True)
+        service = ReasoningOrchestrator(
+            settings_store=settings_store, secret_store=EnvironmentSecretStore({}),
+            conversations=ConversationStore(Path(tmp) / "conversations"),
+            memory=AkousmataStore(root=Path(tmp) / "memory"), relistener=None,
+            registry_factory=(lambda _settings: registry),
+        )
+        result = service.ask(event=_event(), question="What do you hear?",
+                             options=TurnOptions(provider_id="local_ecology", model_id="qwen-test"))
+        assert len(planner.requests) == 1
+        assert not (result["turn"].get("fallback") or {}).get("used")
+
+        empty = ProviderRegistry()
+        service.registry_factory = lambda _settings: empty
+        result = service.ask(event=_event(), question="What do you hear?",
+                             options=TurnOptions(provider_id="local_ecology", model_id="qwen-test"))
+        assert result["turn"]["fallback"]["used"] is True
+        assert result["turn"]["reasoner"]["provider_id"] == "local_structured"
