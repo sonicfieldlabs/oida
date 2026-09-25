@@ -454,20 +454,21 @@ def routing_router(workspace, require_admin):
 
         GERM checks every memory a library listing depends on. Reading each view on
         its own sent 68 requests and about 10 MB of records per listing (24 September
-        2026) to compare one digest each. The view is computed exactly as for
-        ``/archive/{identifier}``; only its state and the record's digest are returned.
+        2026) to compare one digest each. The anchor's state is resolved exactly as for
+        ``/archive/{identifier}``, without its references; only that state and the record's
+        digest are returned.
         """
         if len(set(payload.ids)) != len(payload.ids) or any(
             not re.fullmatch(r"[A-Za-z0-9_:-]{1,100}", identifier) for identifier in payload.ids
         ):
             raise HTTPException(400, "Choose distinct valid Auditum references")
-        from oida.routing.archive import archive_view
+        from oida.routing.archive import archive_state
 
         views = {}
         for identifier in payload.ids:
-            value = archive_view(workspace, identifier)
+            value = archive_state(workspace, identifier)
             views[identifier] = {
-                "state": value["view"]["state"],
+                "state": value["state"],
                 "record_sha256": record_digest(value["record"]),
             }
         return {"contract": "oida/archive-digests/v1", "views": views}

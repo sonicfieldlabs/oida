@@ -180,3 +180,40 @@ def test_canonical_inquiry_binds_relations_and_current_permissions():
     assert archive_view(workspace, child["akousma_id"])["view"]["references"][0]["state"] == "withheld"
     with pytest.raises(HTTPException, match="readable relations"):
         inquiry(workspace, child["akousma_id"], [parent["akousma_id"]])
+
+
+def test_archive_state_is_the_views_anchor_state_without_resolving_references():
+    from types import SimpleNamespace
+    import akousma
+    from oida.routing.archive import archive_state, archive_view
+
+    def account():
+        return akousma.auditum(route_decisions=[akousma.route_decision("fixture-stop", gate="input", outcome="abstain", subject="synthetic fixture", reason="No inference performed", actor="test")])
+
+    parent = akousma.new_akousma(audio={"asset_id": "p"}, originating_app="oida", summary="Soft impacts", auditum=account())
+    child = akousma.new_akousma(audio={"asset_id": "c"}, originating_app="oida", summary="Bright impacts", auditum=account(), parent_akousma_ids=[parent["akousma_id"]])
+    records = {r["akousma_id"]: r for r in (parent, child)}
+    withheld, reads = set(), []
+
+    def reader(ref):
+        reads.append(ref)
+        return records.get(ref)
+
+    def policy(event):
+        if event["id"] in withheld:
+            raise HTTPException(423, "withheld")
+        return event
+
+    workspace = SimpleNamespace(reader=reader, event_policy=policy, forgetting_reader=lambda ref: None)
+    for case in ("available", "withheld", "unavailable"):
+        if case == "withheld":
+            withheld.add(child["akousma_id"])
+        if case == "unavailable":
+            withheld.clear()
+            records.pop(child["akousma_id"])
+        reads.clear()
+        state = archive_state(workspace, child["akousma_id"])
+        assert reads == [child["akousma_id"]], "no reference is read"
+        view = archive_view(workspace, child["akousma_id"])
+        assert state["state"] == view["view"]["state"] == case
+        assert state["record"] == view["record"]

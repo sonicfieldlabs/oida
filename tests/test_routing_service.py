@@ -230,12 +230,12 @@ def test_archive_digests_give_state_and_the_digest_germ_compares_without_content
     c, _ = client
     record = {"akousma_id": "akm_one", "summary": "Réverbération", "value": 1.5}
 
-    def view(workspace, identifier):
+    def state(workspace, identifier):
         if identifier == "akm_hidden":
-            return {"view": {"state": "withheld"}, "record": None}
-        return {"view": {"state": "available"}, "record": record}
+            return {"state": "withheld", "record": None}
+        return {"state": "available", "record": record}
 
-    monkeypatch.setattr("oida.routing.archive.archive_view", view)
+    monkeypatch.setattr("oida.routing.archive.archive_state", state)
     response = c.post("/routing/archive/digests", json={"ids": ["akm_one", "akm_hidden"]})
     assert response.status_code == 200
     views = response.json()["views"]
