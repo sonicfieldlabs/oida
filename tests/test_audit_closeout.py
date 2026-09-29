@@ -8,8 +8,8 @@ from oida.routing.costs import RoutingCosts, CostSettings, CostReconciliation
 from oida.reasoning.specialist_context import project
 from oida.reasoning.evidence import EvidencePacketBuilder
 from oida.routing.typesafe import external_state
-from test_routing_service import client, payload  # noqa: F401
-from test_reasoning_workspace import workspace  # noqa: F401
+from test_routing_service import client as client, payload
+from test_reasoning_workspace import workspace as workspace
 
 
 @pytest.mark.parametrize("revocation", ["anchor", "comparison", "missing", "changed"])

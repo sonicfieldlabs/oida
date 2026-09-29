@@ -3,8 +3,8 @@ from copy import deepcopy
 
 import pytest
 
-from test_routing_service import client, payload  # noqa: F401
-from test_reasoning_workspace import workspace  # noqa: F401
+from test_routing_service import client as client, payload
+from test_reasoning_workspace import workspace as workspace
 
 
 def decision(client, monkeypatch):

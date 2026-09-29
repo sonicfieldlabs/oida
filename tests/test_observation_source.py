@@ -238,3 +238,33 @@ def test_unknown_unit_does_not_invent_receiving_claim(
         ]
         == "observation"
     )
+
+
+@pytest.mark.parametrize("name", ["expired", "fresh", "future", "archive", "fixture"])
+def test_owner_built_masa_preserves_source_and_reports_receiving_freshness(setup, validator_module, monkeypatch, name):
+    from datetime import datetime
+    import oida.observation_source as receiver
+    data = json.loads((Path(__file__).parent / "fixtures/cosmo-freshness.json").read_text())
+    case = next(c for c in data["cases"] if c["name"] == name)
+    class Clock:
+        @staticmethod
+        def now(_tz):
+            return datetime.fromisoformat(data["evaluatedAt"].replace("Z", "+00:00"))
+    monkeypatch.setattr(receiver, "datetime", Clock)
+    response = setup().post("/sources/observations", json=dict(source_record=case["record"], observation_ref=case["observationRef"], producer_id="cosmo-fixture-builder", consent="granted", consent_ref="test-permission"))
+    assert response.status_code == 200, response.text
+    received = response.json()
+    assert received["effective_freshness"]["current"] is (name == "fresh")
+    assert received["effective_freshness"]["execution"] == "not_requested"
+    assert received["record"]["listening"]["akouo.observation"]["payload"]["source_snapshot"] == case["record"]
+    assert received["record"]["listening"]["oida.source"]["payload"]["effective_freshness"] == received["effective_freshness"]
+
+
+def test_source_declared_current_expires_at_reception():
+    from oida.observation_freshness import evaluate_observation
+    data = json.loads((Path(__file__).parent / "fixtures/cosmo-freshness.json").read_text())
+    case = next(c for c in data["cases"] if c["name"] == "fresh")
+    observation = next(o for o in case["record"]["observations"] if o["id"] == case["observationRef"])
+    result = evaluate_observation(case["record"], observation, now="2026-09-26T12:30:00Z")
+    assert result["status"] == "expired"
+    assert observation["freshness"]["status"] == "current"

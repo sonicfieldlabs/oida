@@ -22,9 +22,10 @@ classifiers = [
   "Topic :: Multimedia :: Sound/Audio :: Analysis",
 ]
 dependencies = [
+  "anyio>=4.14.2,<5",
   "akouo-contract>=0.10.0",
-  "akousma>=0.8.1",
-  "akousmata>=0.8.1",
+  "akousma>=0.8.3",
+  "akousmata>=0.8.2",
   "fastapi>=0.139",
   "httpx2>=2.12,<3",
   "jsonschema>=4.22",
@@ -43,10 +44,10 @@ Repository = "https://github.com/sonicfieldlabs/oida"
 Issues = "https://github.com/sonicfieldlabs/oida/issues"
 
 [tool.uv.sources]
-akousma = { path = "../earworm/packages/py-akousma", editable = true }
-# AKOÚŌ bundles schemas through wheel force-include; editable installs omit them.
-akouo-contract = { path = "../akouo" }
-akousmata = { path = "../akousmata", editable = true }
+# Reviewed wheels include packaged resources and cannot be masked by siblings.
+akousma = { path = "vendor/akousma-0.8.3-py3-none-any.whl" }
+akouo-contract = { path = "vendor/akouo_contract-0.10.0-py3-none-any.whl" }
+akousmata = { path = "vendor/akousmata-0.8.2-py3-none-any.whl" }
 
 [project.optional-dependencies]
 moss = [

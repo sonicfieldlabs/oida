@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — observation freshness at reception
+
+- Add `effective_freshness` to observation reception and its persisted source-admission metadata, evaluated against the receiving clock and declared expiry.
+- Preserve source snapshots, hashes, producer freshness and receiving claim boundaries. Stale/future/archive observations remain attributable accounts; reception requests no execution and does not make them current.
+
 ## 0.11.1 — Station aperture integration and phases 0–3 audit
 
 - Preserve the selected gateway route while adding native DSP from the same frozen excerpt.

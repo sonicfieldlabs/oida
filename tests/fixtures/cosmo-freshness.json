@@ -1,0 +1,4927 @@
+{
+  "contract": "cosmo/freshness-fixtures/v1",
+  "evaluatedAt": "2026-09-26T12:00:00.000Z",
+  "cases": [
+    {
+      "name": "expired",
+      "snapshot": {
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "mode": "live",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "sourceId": "carbon_intensity_gb",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-07-01T00:00:00.000Z",
+            "staleAfterSeconds": 1800,
+            "confidence": "high",
+            "temporalCharacter": "aggregate",
+            "epistemicStatus": "reported",
+            "signalKind": "observation"
+          }
+        ],
+        "sources": []
+      },
+      "record": {
+        "$schema": "https://masa.sonicfield.org/schemas/0.2.0/matter-record.schema.json",
+        "@context": "https://masa.sonicfield.org/contexts/0.2.0/masa.jsonld",
+        "masaVersion": "0.2.0",
+        "id": "urn:cosmoaudition:masa:record:f444e4cd4cc178c52c12578e:0",
+        "type": "masa:MatterRecord",
+        "revision": 1,
+        "profiles": [
+          "core",
+          "observation",
+          "mapping"
+        ],
+        "createdAt": "2026-09-26T12:00:00.000Z",
+        "createdBy": "urn:cosmoaudition:masa:operator:f444e4cd4cc178c52c12578e:1",
+        "title": "COSMOAUDITION snapshot 2026-09-26T12:00:00.000Z",
+        "description": "One bounded MASA account of a COSMOAUDITION snapshot. Sources, canonical parsed representations, raw observations, derived normalized observations, authored mappings, and control-frame representations remain distinct and traceable.",
+        "disclosure": "private",
+        "registers": [
+          "digital-technical",
+          "compositional-transformational",
+          "ecological-territorial"
+        ],
+        "scales": [
+          "object-event",
+          "environmental",
+          "infrastructural",
+          "planetary"
+        ],
+        "actors": [
+          {
+            "id": "urn:cosmoaudition:masa:operator:f444e4cd4cc178c52c12578e:1",
+            "type": "masa:Actor",
+            "actorKind": "human",
+            "roles": [
+              "local-operator",
+              "record-creator"
+            ],
+            "name": {
+              "state": "unknown",
+              "reason": "The snapshot request did not include an operator name.",
+              "reasonCode": "not_provided"
+            },
+            "disclosure": "private",
+            "extensions": {}
+          },
+          {
+            "id": "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2",
+            "type": "masa:Actor",
+            "actorKind": "software",
+            "roles": [
+              "canonical-parser",
+              "observation-deriver",
+              "mapping-engine"
+            ],
+            "name": {
+              "state": "known",
+              "value": "COSMOAUDITION MASA snapshot adapter"
+            },
+            "attribution": "Sonic Matter Framework / Cosmoaudition System",
+            "disclosure": "private",
+            "extensions": {}
+          }
+        ],
+        "sources": [
+          {
+            "id": "urn:cosmoaudition:masa:source:f444e4cd4cc178c52c12578e:6",
+            "type": "masa:Source",
+            "sourceKind": "public-api",
+            "identification": {
+              "state": "known",
+              "value": {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "acquisitionMode": "live",
+                "fixture": false
+              }
+            },
+            "locator": {
+              "state": "known",
+              "value": "https://api.carbonintensity.org.uk/intensity"
+            },
+            "authority": {
+              "state": "unknown",
+              "reason": "The source definition does not by itself establish provider authority.",
+              "reasonCode": "not_verified"
+            },
+            "rights": {
+              "state": "known",
+              "value": {
+                "note": "Public API attribution required.",
+                "verification": "source declaration; provider terms require review before publication"
+              }
+            },
+            "coverage": {
+              "state": "known",
+              "value": {
+                "layers": [
+                  "earth",
+                  "cloud"
+                ],
+                "limitation": "Great Britain grid data only."
+              }
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "expired",
+              "observedAt": "2026-07-01T00:00:00.000Z",
+              "reason": "age-limit-exceeded",
+              "ageSeconds": 7560000,
+              "expiresAt": "2026-07-01T00:30:00.000Z"
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:f444e4cd4cc178c52c12578e:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:source": {
+                "originalSourceId": "carbon_intensity_gb",
+                "fixture": false,
+                "route": "api-proxy"
+              }
+            }
+          }
+        ],
+        "representations": [
+          {
+            "id": "urn:cosmoaudition:masa:canonical-representation:f444e4cd4cc178c52c12578e:7",
+            "type": "masa:Representation",
+            "role": "data",
+            "mediaType": "application/json",
+            "format": {
+              "state": "known",
+              "value": "COSMOAUDITION canonical parsed source snapshot 0.2.0"
+            },
+            "availability": "available",
+            "locator": {
+              "state": "known",
+              "value": "urn:sha256:df830ff90a0fb585572a65b9366f42db5eb6fb5a2b12712ae9b4bdc55e44f5d3"
+            },
+            "extent": {
+              "state": "known",
+              "value": {
+                "byteLength": 1007
+              }
+            },
+            "integrity": {
+              "state": "known",
+              "value": {
+                "algorithm": "sha-256",
+                "digest": "df830ff90a0fb585572a65b9366f42db5eb6fb5a2b12712ae9b4bdc55e44f5d3",
+                "byteLength": 1007,
+                "status": "verified"
+              }
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:f444e4cd4cc178c52c12578e:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:canonicalPayload": {
+                "schema": "cosmoaudition:canonical-source-snapshot:0.2.0",
+                "generatedAt": "2026-09-26T12:00:00.000Z",
+                "mode": "live",
+                "sourceId": "carbon_intensity_gb",
+                "definition": {
+                  "id": "carbon_intensity_gb",
+                  "label": "Carbon Intensity GB",
+                  "status": "ready",
+                  "layers": [
+                    "earth",
+                    "cloud"
+                  ],
+                  "sphere": "human",
+                  "temporalCharacter": "aggregate",
+                  "endpoint": "https://api.carbonintensity.org.uk/intensity",
+                  "route": "api-proxy",
+                  "ttlSeconds": 1800,
+                  "unit": "gCO2/kWh",
+                  "parser": "JSON data[0].intensity.actual/forecast/index",
+                  "limitation": "Great Britain grid data only.",
+                  "fallback": "Last-known-good cache as stale; otherwise null-valued signal.",
+                  "licenseNote": "Public API attribution required."
+                },
+                "health": null,
+                "cache": null,
+                "signals": [
+                  {
+                    "id": "carbon_intensity_actual",
+                    "label": "Carbon",
+                    "sourceId": "carbon_intensity_gb",
+                    "layer": "earth",
+                    "unit": "gCO2/kWh",
+                    "value": 250,
+                    "normalized": 0.5,
+                    "timestamp": "2026-07-01T00:00:00.000Z",
+                    "staleAfterSeconds": 1800,
+                    "confidence": "high",
+                    "temporalCharacter": "aggregate",
+                    "epistemicStatus": "reported",
+                    "signalKind": "observation"
+                  }
+                ]
+              },
+              "cosmo:fixture": false
+            }
+          }
+        ],
+        "encounters": [],
+        "apertures": [],
+        "listeningPasses": [],
+        "claims": [],
+        "measurements": [],
+        "regions": [],
+        "observations": [
+          {
+            "id": "urn:cosmoaudition:masa:observation:f444e4cd4cc178c52c12578e:9",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:f444e4cd4cc178c52c12578e:6",
+            "field": "carbon_intensity_actual",
+            "observedAt": "2026-07-01T00:00:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "label": "Carbon",
+                "layer": "earth",
+                "acquisitionMode": "live"
+              }
+            },
+            "value": {
+              "state": "known",
+              "value": 250
+            },
+            "unit": {
+              "state": "known",
+              "value": "gCO2/kWh"
+            },
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "method": {
+              "name": "COSMOAUDITION canonical source parsing",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "parser": "JSON data[0].intensity.actual/forecast/index",
+                "canonicalRepresentationRef": "urn:cosmoaudition:masa:canonical-representation:f444e4cd4cc178c52c12578e:7",
+                "fixture": false
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "expired",
+              "observedAt": "2026-07-01T00:00:00.000Z",
+              "ageSeconds": 7560000,
+              "expiresAt": "2026-07-01T00:30:00.000Z",
+              "reason": "age-limit-exceeded"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:effectiveFreshness": {
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "sourceTimestamp": "2026-07-01T00:00:00.000Z",
+                "status": "expired",
+                "reason": "age-limit-exceeded",
+                "ageSeconds": 7560000,
+                "expiresAt": "2026-07-01T00:30:00.000Z",
+                "mappingAllowed": false
+              },
+              "cosmo:signal": {
+                "originalSignalId": "carbon_intensity_actual",
+                "confidence": "high"
+              },
+              "cosmo:representationRef": "urn:cosmoaudition:masa:canonical-representation:f444e4cd4cc178c52c12578e:7"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:derived-observation:f444e4cd4cc178c52c12578e:b",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:f444e4cd4cc178c52c12578e:6",
+            "field": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "observedAt": "2026-07-01T00:00:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "sourceObservationRef": "urn:cosmoaudition:masa:observation:f444e4cd4cc178c52c12578e:9",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "normalizationDomain": [
+                  0,
+                  1
+                ]
+              }
+            },
+            "value": {
+              "state": "unknown",
+              "reason": "The core mapping decision produced no normalized value: stale-input.",
+              "reasonCode": "mapping_input_not_executable"
+            },
+            "unit": {
+              "state": "known",
+              "value": "normalized-ratio"
+            },
+            "epistemicStatus": "derived",
+            "temporalCharacter": "context",
+            "signalKind": "derived",
+            "method": {
+              "name": "COSMOAUDITION core mapping normalization",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "sourceField": "carbon_intensity_actual",
+                "scale": "linear",
+                "inputRange": [
+                  0,
+                  500
+                ],
+                "clipping": "clamp"
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "expired",
+              "observedAt": "2026-07-01T00:00:00.000Z",
+              "ageSeconds": 7560000,
+              "expiresAt": "2026-07-01T00:30:00.000Z",
+              "reason": "age-limit-exceeded"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:sourceObservationRef": "urn:cosmoaudition:masa:observation:f444e4cd4cc178c52c12578e:9",
+              "cosmo:controlDecision": {
+                "status": "refused",
+                "reason": "stale-input"
+              }
+            }
+          }
+        ],
+        "mappings": [
+          {
+            "id": "urn:cosmoaudition:masa:mapping:f444e4cd4cc178c52c12578e:d",
+            "type": "masa:Mapping",
+            "sourceObservationRefs": [
+              "urn:cosmoaudition:masa:derived-observation:f444e4cd4cc178c52c12578e:b"
+            ],
+            "sourceField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "sourceUnit": "normalized-ratio",
+            "inputRange": [
+              0,
+              1
+            ],
+            "normalization": {
+              "method": "linear",
+              "clipping": "clamp",
+              "parameters": {
+                "sourceMappingScale": "linear",
+                "sourceInputRange": [
+                  0,
+                  500
+                ],
+                "normalizedObservationAlreadyDerived": true
+              }
+            },
+            "target": "earth.carbonDrone.filterCutoff",
+            "outputRange": [
+              260,
+              2600
+            ],
+            "curve": "linear",
+            "smoothingMs": 1200,
+            "cadence": "once per accepted snapshot",
+            "missingData": "hold-explicitly",
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls. This control relation is authored; it is not the source's voice or an identity claim.",
+            "actors": [
+              "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2"
+            ],
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "extensions": {
+              "cosmo:mappingCatalogId": "carbon-intensity-filter",
+              "cosmo:description": "Reported Great Britain grid carbon intensity opens the carbon drone filter and exposes more upper partials.",
+              "cosmo:layer": "earth",
+              "cosmo:decisionImplementation": "@cosmoaudition/core.executeMapping"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "id": "urn:cosmoaudition:masa:relation:f444e4cd4cc178c52c12578e:a",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:observation:f444e4cd4cc178c52c12578e:9",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:canonical-representation:f444e4cd4cc178c52c12578e:7",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:f444e4cd4cc178c52c12578e:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:f444e4cd4cc178c52c12578e:8",
+            "extensions": {
+              "cosmo:relationRole": "canonical-representation-to-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:f444e4cd4cc178c52c12578e:f",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:derived-observation:f444e4cd4cc178c52c12578e:b",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:observation:f444e4cd4cc178c52c12578e:9",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:derive-receipt:f444e4cd4cc178c52c12578e:c",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:derive-receipt:f444e4cd4cc178c52c12578e:c",
+            "extensions": {
+              "cosmo:relationRole": "raw-to-mapping-normalized-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:f444e4cd4cc178c52c12578e:g",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:canonical-representation:f444e4cd4cc178c52c12578e:7",
+            "predicate": "masa:captured-from",
+            "object": "urn:cosmoaudition:masa:source:f444e4cd4cc178c52c12578e:6",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:f444e4cd4cc178c52c12578e:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:f444e4cd4cc178c52c12578e:8",
+            "extensions": {}
+          }
+        ],
+        "policies": [
+          {
+            "id": "urn:cosmoaudition:masa:policy:f444e4cd4cc178c52c12578e:3",
+            "type": "masa:Policy",
+            "policyKind": "composite",
+            "issuer": "urn:cosmoaudition:masa:operator:f444e4cd4cc178c52c12578e:1",
+            "status": "active",
+            "validFrom": "2026-09-26T12:00:00.000Z",
+            "disclosure": "private",
+            "rules": [
+              {
+                "id": "urn:cosmoaudition:masa:policy-rule:f444e4cd4cc178c52c12578e:4",
+                "effect": "permission",
+                "actions": [
+                  "read",
+                  "validate",
+                  "derive",
+                  "map",
+                  "export"
+                ],
+                "targets": [
+                  "urn:cosmoaudition:masa:record:f444e4cd4cc178c52c12578e:0"
+                ],
+                "subjects": [
+                  "urn:cosmoaudition:masa:operator:f444e4cd4cc178c52c12578e:1",
+                  "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2"
+                ],
+                "authorityBasis": {
+                  "state": "known",
+                  "value": "Local operator request for a private COSMOAUDITION snapshot record."
+                },
+                "constraints": {
+                  "recordCountPerSnapshot": 1,
+                  "maximumSignals": 256,
+                  "maximumSources": 64,
+                  "disclosure": "private",
+                  "publicProjectionRequiresReview": true
+                },
+                "duties": [
+                  "Preserve source attribution, fixture status, unknown values, staleness, mapping decisions, and lineage.",
+                  "Do not interpret a completed mapping receipt as evidence that sound was heard."
+                ]
+              }
+            ],
+            "review": {
+              "contact": {
+                "state": "unknown",
+                "reason": "No external review contact is configured for this local record.",
+                "reasonCode": "not_configured"
+              },
+              "route": {
+                "state": "known",
+                "value": "Review the private MASA record before any publication or external bundle export."
+              }
+            },
+            "extensions": {}
+          }
+        ],
+        "contexts": [],
+        "agentRuns": [],
+        "capabilities": [],
+        "integrity": {
+          "state": "known",
+          "value": {
+            "algorithm": "sha-256",
+            "digest": "f444e4cd4cc178c52c12578e6e8c8204ab9f0efd25e32480f38e1b8fae3f1311",
+            "byteLength": 399,
+            "scope": "canonical input snapshot before MASA projection"
+          }
+        },
+        "history": {
+          "mode": "embedded",
+          "events": [
+            {
+              "id": "urn:cosmoaudition:masa:observe-receipt:f444e4cd4cc178c52c12578e:8",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:f444e4cd4cc178c52c12578e:0",
+              "sequence": 0,
+              "operationType": "matter.observe-source-snapshot",
+              "effectClass": "read",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:source:f444e4cd4cc178c52c12578e:6"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:canonical-representation:f444e4cd4cc178c52c12578e:7",
+                "urn:cosmoaudition:masa:observation:f444e4cd4cc178c52c12578e:9"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:f444e4cd4cc178c52c12578e:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "sourceId": "carbon_intensity_gb",
+                "acquisitionMode": "live",
+                "fixture": false,
+                "canonicalSha256": "df830ff90a0fb585572a65b9366f42db5eb6fb5a2b12712ae9b4bdc55e44f5d3"
+              },
+              "policyEvaluation": {
+                "action": "read",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:f444e4cd4cc178c52c12578e:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:f444e4cd4cc178c52c12578e:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:f444e4cd4cc178c52c12578e:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:f444e4cd4cc178c52c12578e:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:derive-receipt:f444e4cd4cc178c52c12578e:c",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:f444e4cd4cc178c52c12578e:0",
+              "sequence": 1,
+              "operationType": "matter.derive-observation",
+              "effectClass": "derive",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:observation:f444e4cd4cc178c52c12578e:9",
+                "urn:cosmoaudition:masa:canonical-representation:f444e4cd4cc178c52c12578e:7"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:derived-observation:f444e4cd4cc178c52c12578e:b"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:f444e4cd4cc178c52c12578e:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "sourceField": "carbon_intensity_actual",
+                "outputField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+                "decision": "refused",
+                "reason": "stale-input"
+              },
+              "policyEvaluation": {
+                "action": "derive",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:f444e4cd4cc178c52c12578e:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:f444e4cd4cc178c52c12578e:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:f444e4cd4cc178c52c12578e:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:f444e4cd4cc178c52c12578e:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "The derived observation preserves an explicit unknown value; no numeric substitute was created."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:mapping-receipt:f444e4cd4cc178c52c12578e:e",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:f444e4cd4cc178c52c12578e:0",
+              "sequence": 2,
+              "operationType": "matter.map",
+              "effectClass": "map",
+              "finalStatus": "refused",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:f444e4cd4cc178c52c12578e:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:derived-observation:f444e4cd4cc178c52c12578e:b"
+              ],
+              "outputs": [],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:f444e4cd4cc178c52c12578e:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "mappingRef": "urn:cosmoaudition:masa:mapping:f444e4cd4cc178c52c12578e:d",
+                "target": "earth.carbonDrone.filterCutoff",
+                "missingData": "hold-explicitly",
+                "decision": "refused",
+                "reason": "stale-input"
+              },
+              "policyEvaluation": {
+                "action": "map",
+                "targets": [
+                  "urn:cosmoaudition:masa:mapping:f444e4cd4cc178c52c12578e:d"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:f444e4cd4cc178c52c12578e:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:f444e4cd4cc178c52c12578e:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:f444e4cd4cc178c52c12578e:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "interface_reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "The core mapping decision refused output: stale-input."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            }
+          ]
+        },
+        "extensions": {
+          "cosmo:observation-series": [],
+          "cosmo:snapshot": {
+            "generatedAt": "2026-09-26T12:00:00.000Z",
+            "mode": "live",
+            "signalCount": 1,
+            "sourceCount": 1,
+            "recordCardinality": "one-record-per-snapshot"
+          },
+          "cosmo:adapter": {
+            "package": "@cosmoaudition/masa",
+            "version": "0.2.1",
+            "completionSemantics": "scheduled-not-heard"
+          }
+        }
+      },
+      "observationRef": "urn:cosmoaudition:masa:observation:f444e4cd4cc178c52c12578e:9",
+      "generation": {
+        "contract": "cosmo/generation-frame/v1",
+        "frameId": "cosmo:frame:2026-09-26T12:00:00.000Z",
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "acquisitionMode": "live",
+        "originMode": "live",
+        "relation": {
+          "of": "signal"
+        },
+        "sourceRegister": "non-acoustic",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-07-01T00:00:00.000Z",
+            "sourceId": "carbon_intensity_gb",
+            "confidence": "high",
+            "staleAfterSeconds": 1800,
+            "acquisitionMode": "live",
+            "freshness": {
+              "evaluatedAt": "2026-09-26T12:00:00.000Z",
+              "sourceTimestamp": "2026-07-01T00:00:00.000Z",
+              "status": "expired",
+              "reason": "age-limit-exceeded",
+              "ageSeconds": 7560000,
+              "expiresAt": "2026-07-01T00:30:00.000Z",
+              "mappingAllowed": false
+            },
+            "sphere": "human",
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "normalization": {
+              "method": "linear",
+              "inputRange": [
+                0,
+                500
+              ],
+              "outputRange": [
+                0,
+                1
+              ],
+              "clipping": "clamp",
+              "basis": "Authored operational envelope for bounded modulation; not a physical minimum, maximum, threshold, or forecast."
+            }
+          }
+        ],
+        "receipts": [
+          {
+            "mappingId": "germ-carbon-duration",
+            "signalId": "carbon_intensity_actual",
+            "layer": "earth",
+            "target": "duration",
+            "inputValue": 250,
+            "previousOutput": null,
+            "confidence": "high",
+            "smoothingMs": 0,
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls.",
+            "status": "refused",
+            "reason": "stale-input",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-carbon-duration",
+            "sourceClock": "2026-07-01T00:00:00.000Z",
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": "reported",
+            "inputRange": [
+              0,
+              500
+            ],
+            "outputRange": [
+              0.1,
+              30
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": [
+              {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "provider": "https://api.carbonintensity.org.uk/intensity",
+                "licenseNote": "Public API attribution required.",
+                "limitation": "Great Britain grid data only.",
+                "originalAcquisitionMode": "live"
+              }
+            ]
+          },
+          {
+            "mappingId": "germ-quake-steps",
+            "signalId": "earthquake_count_1h",
+            "layer": "earth",
+            "target": "steps",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Earthquake events are not spectacle; zero events is valid data and network failure is not.",
+            "status": "skipped",
+            "reason": "missing-signal",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-quake-steps",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              30
+            ],
+            "outputRange": [
+              1,
+              250
+            ],
+            "curve": "quantized",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          },
+          {
+            "mappingId": "germ-coal-guidance",
+            "signalId": "generation_mix_coal",
+            "layer": "earth",
+            "target": "cfg_scale",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Fuel share is a regional generation mix value and should remain labelled by geography.",
+            "status": "skipped",
+            "reason": "missing-signal",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-coal-guidance",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              100
+            ],
+            "outputRange": [
+              0,
+              25
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          }
+        ],
+        "execution": "not_requested",
+        "perceptualAccess": "not_established"
+      }
+    },
+    {
+      "name": "fresh",
+      "snapshot": {
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "mode": "live",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "sourceId": "carbon_intensity_gb",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-09-26T11:59:00.000Z",
+            "staleAfterSeconds": 1800,
+            "confidence": "high",
+            "temporalCharacter": "aggregate",
+            "epistemicStatus": "reported",
+            "signalKind": "observation"
+          }
+        ],
+        "sources": []
+      },
+      "record": {
+        "$schema": "https://masa.sonicfield.org/schemas/0.2.0/matter-record.schema.json",
+        "@context": "https://masa.sonicfield.org/contexts/0.2.0/masa.jsonld",
+        "masaVersion": "0.2.0",
+        "id": "urn:cosmoaudition:masa:record:83e1946765cd9a02fc3885c6:0",
+        "type": "masa:MatterRecord",
+        "revision": 1,
+        "profiles": [
+          "core",
+          "observation",
+          "mapping"
+        ],
+        "createdAt": "2026-09-26T12:00:00.000Z",
+        "createdBy": "urn:cosmoaudition:masa:operator:83e1946765cd9a02fc3885c6:1",
+        "title": "COSMOAUDITION snapshot 2026-09-26T12:00:00.000Z",
+        "description": "One bounded MASA account of a COSMOAUDITION snapshot. Sources, canonical parsed representations, raw observations, derived normalized observations, authored mappings, and control-frame representations remain distinct and traceable.",
+        "disclosure": "private",
+        "registers": [
+          "digital-technical",
+          "compositional-transformational",
+          "ecological-territorial"
+        ],
+        "scales": [
+          "object-event",
+          "environmental",
+          "infrastructural",
+          "planetary"
+        ],
+        "actors": [
+          {
+            "id": "urn:cosmoaudition:masa:operator:83e1946765cd9a02fc3885c6:1",
+            "type": "masa:Actor",
+            "actorKind": "human",
+            "roles": [
+              "local-operator",
+              "record-creator"
+            ],
+            "name": {
+              "state": "unknown",
+              "reason": "The snapshot request did not include an operator name.",
+              "reasonCode": "not_provided"
+            },
+            "disclosure": "private",
+            "extensions": {}
+          },
+          {
+            "id": "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2",
+            "type": "masa:Actor",
+            "actorKind": "software",
+            "roles": [
+              "canonical-parser",
+              "observation-deriver",
+              "mapping-engine"
+            ],
+            "name": {
+              "state": "known",
+              "value": "COSMOAUDITION MASA snapshot adapter"
+            },
+            "attribution": "Sonic Matter Framework / Cosmoaudition System",
+            "disclosure": "private",
+            "extensions": {}
+          }
+        ],
+        "sources": [
+          {
+            "id": "urn:cosmoaudition:masa:source:83e1946765cd9a02fc3885c6:6",
+            "type": "masa:Source",
+            "sourceKind": "public-api",
+            "identification": {
+              "state": "known",
+              "value": {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "acquisitionMode": "live",
+                "fixture": false
+              }
+            },
+            "locator": {
+              "state": "known",
+              "value": "https://api.carbonintensity.org.uk/intensity"
+            },
+            "authority": {
+              "state": "unknown",
+              "reason": "The source definition does not by itself establish provider authority.",
+              "reasonCode": "not_verified"
+            },
+            "rights": {
+              "state": "known",
+              "value": {
+                "note": "Public API attribution required.",
+                "verification": "source declaration; provider terms require review before publication"
+              }
+            },
+            "coverage": {
+              "state": "known",
+              "value": {
+                "layers": [
+                  "earth",
+                  "cloud"
+                ],
+                "limitation": "Great Britain grid data only."
+              }
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "current",
+              "observedAt": "2026-09-26T11:59:00.000Z",
+              "reason": "within-age-limit",
+              "ageSeconds": 60,
+              "expiresAt": "2026-09-26T12:29:00.000Z"
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:83e1946765cd9a02fc3885c6:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:source": {
+                "originalSourceId": "carbon_intensity_gb",
+                "fixture": false,
+                "route": "api-proxy"
+              }
+            }
+          }
+        ],
+        "representations": [
+          {
+            "id": "urn:cosmoaudition:masa:canonical-representation:83e1946765cd9a02fc3885c6:7",
+            "type": "masa:Representation",
+            "role": "data",
+            "mediaType": "application/json",
+            "format": {
+              "state": "known",
+              "value": "COSMOAUDITION canonical parsed source snapshot 0.2.0"
+            },
+            "availability": "available",
+            "locator": {
+              "state": "known",
+              "value": "urn:sha256:dda87376acce2e9dd6479a9d9477d7abc043fe91f92ac4ceaa890288a8ba24ae"
+            },
+            "extent": {
+              "state": "known",
+              "value": {
+                "byteLength": 1007
+              }
+            },
+            "integrity": {
+              "state": "known",
+              "value": {
+                "algorithm": "sha-256",
+                "digest": "dda87376acce2e9dd6479a9d9477d7abc043fe91f92ac4ceaa890288a8ba24ae",
+                "byteLength": 1007,
+                "status": "verified"
+              }
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:83e1946765cd9a02fc3885c6:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:canonicalPayload": {
+                "schema": "cosmoaudition:canonical-source-snapshot:0.2.0",
+                "generatedAt": "2026-09-26T12:00:00.000Z",
+                "mode": "live",
+                "sourceId": "carbon_intensity_gb",
+                "definition": {
+                  "id": "carbon_intensity_gb",
+                  "label": "Carbon Intensity GB",
+                  "status": "ready",
+                  "layers": [
+                    "earth",
+                    "cloud"
+                  ],
+                  "sphere": "human",
+                  "temporalCharacter": "aggregate",
+                  "endpoint": "https://api.carbonintensity.org.uk/intensity",
+                  "route": "api-proxy",
+                  "ttlSeconds": 1800,
+                  "unit": "gCO2/kWh",
+                  "parser": "JSON data[0].intensity.actual/forecast/index",
+                  "limitation": "Great Britain grid data only.",
+                  "fallback": "Last-known-good cache as stale; otherwise null-valued signal.",
+                  "licenseNote": "Public API attribution required."
+                },
+                "health": null,
+                "cache": null,
+                "signals": [
+                  {
+                    "id": "carbon_intensity_actual",
+                    "label": "Carbon",
+                    "sourceId": "carbon_intensity_gb",
+                    "layer": "earth",
+                    "unit": "gCO2/kWh",
+                    "value": 250,
+                    "normalized": 0.5,
+                    "timestamp": "2026-09-26T11:59:00.000Z",
+                    "staleAfterSeconds": 1800,
+                    "confidence": "high",
+                    "temporalCharacter": "aggregate",
+                    "epistemicStatus": "reported",
+                    "signalKind": "observation"
+                  }
+                ]
+              },
+              "cosmo:fixture": false
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:control-frame:83e1946765cd9a02fc3885c6:g",
+            "type": "masa:Representation",
+            "role": "data",
+            "mediaType": "application/vnd.cosmoaudition.control-frame+json",
+            "format": {
+              "state": "known",
+              "value": "COSMOAUDITION ControlFrame 0.2.0"
+            },
+            "availability": "available",
+            "locator": {
+              "state": "known",
+              "value": "urn:sha256:77bb7239acd4a3d4b2f14f73110f6444b8c9453cbbfb69c7e68d7b2671e25b97"
+            },
+            "extent": {
+              "state": "known",
+              "value": {
+                "byteLength": 584
+              }
+            },
+            "integrity": {
+              "state": "known",
+              "value": {
+                "algorithm": "sha-256",
+                "digest": "77bb7239acd4a3d4b2f14f73110f6444b8c9453cbbfb69c7e68d7b2671e25b97",
+                "byteLength": 584,
+                "status": "verified"
+              }
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:83e1946765cd9a02fc3885c6:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:controlFrame": {
+                "type": "cosmo:ControlFrame",
+                "version": "0.2.1",
+                "mappingRef": "urn:cosmoaudition:masa:mapping:83e1946765cd9a02fc3885c6:d",
+                "catalogMappingId": "carbon-intensity-filter",
+                "sourceObservationRef": "urn:cosmoaudition:masa:derived-observation:83e1946765cd9a02fc3885c6:b",
+                "target": "earth.carbonDrone.filterCutoff",
+                "rawNormalizedValue": 0.5,
+                "normalizedValue": 0.5,
+                "mappingAmount": 1,
+                "outputValue": 1430,
+                "decisionStatus": "applied",
+                "decisionReason": "mapped",
+                "confidence": "high",
+                "smoothingMs": 1200,
+                "generatedAt": "2026-09-26T12:00:00.000Z",
+                "scheduledOnly": true,
+                "completionSemantics": "scheduled-not-heard"
+              }
+            }
+          }
+        ],
+        "encounters": [],
+        "apertures": [],
+        "listeningPasses": [],
+        "claims": [],
+        "measurements": [],
+        "regions": [],
+        "observations": [
+          {
+            "id": "urn:cosmoaudition:masa:observation:83e1946765cd9a02fc3885c6:9",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:83e1946765cd9a02fc3885c6:6",
+            "field": "carbon_intensity_actual",
+            "observedAt": "2026-09-26T11:59:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "label": "Carbon",
+                "layer": "earth",
+                "acquisitionMode": "live"
+              }
+            },
+            "value": {
+              "state": "known",
+              "value": 250
+            },
+            "unit": {
+              "state": "known",
+              "value": "gCO2/kWh"
+            },
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "method": {
+              "name": "COSMOAUDITION canonical source parsing",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "parser": "JSON data[0].intensity.actual/forecast/index",
+                "canonicalRepresentationRef": "urn:cosmoaudition:masa:canonical-representation:83e1946765cd9a02fc3885c6:7",
+                "fixture": false
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "current",
+              "observedAt": "2026-09-26T11:59:00.000Z",
+              "ageSeconds": 60,
+              "expiresAt": "2026-09-26T12:29:00.000Z",
+              "reason": "within-age-limit"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:effectiveFreshness": {
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "sourceTimestamp": "2026-09-26T11:59:00.000Z",
+                "status": "current",
+                "reason": "within-age-limit",
+                "ageSeconds": 60,
+                "expiresAt": "2026-09-26T12:29:00.000Z",
+                "mappingAllowed": true
+              },
+              "cosmo:signal": {
+                "originalSignalId": "carbon_intensity_actual",
+                "confidence": "high"
+              },
+              "cosmo:representationRef": "urn:cosmoaudition:masa:canonical-representation:83e1946765cd9a02fc3885c6:7"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:derived-observation:83e1946765cd9a02fc3885c6:b",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:83e1946765cd9a02fc3885c6:6",
+            "field": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "observedAt": "2026-09-26T11:59:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "sourceObservationRef": "urn:cosmoaudition:masa:observation:83e1946765cd9a02fc3885c6:9",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "normalizationDomain": [
+                  0,
+                  1
+                ]
+              }
+            },
+            "value": {
+              "state": "known",
+              "value": 0.5
+            },
+            "unit": {
+              "state": "known",
+              "value": "normalized-ratio"
+            },
+            "epistemicStatus": "derived",
+            "temporalCharacter": "context",
+            "signalKind": "derived",
+            "method": {
+              "name": "COSMOAUDITION core mapping normalization",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "sourceField": "carbon_intensity_actual",
+                "scale": "linear",
+                "inputRange": [
+                  0,
+                  500
+                ],
+                "clipping": "clamp"
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "current",
+              "observedAt": "2026-09-26T11:59:00.000Z",
+              "ageSeconds": 60,
+              "expiresAt": "2026-09-26T12:29:00.000Z",
+              "reason": "within-age-limit"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:sourceObservationRef": "urn:cosmoaudition:masa:observation:83e1946765cd9a02fc3885c6:9",
+              "cosmo:controlDecision": {
+                "status": "applied",
+                "reason": "mapped"
+              }
+            }
+          }
+        ],
+        "mappings": [
+          {
+            "id": "urn:cosmoaudition:masa:mapping:83e1946765cd9a02fc3885c6:d",
+            "type": "masa:Mapping",
+            "sourceObservationRefs": [
+              "urn:cosmoaudition:masa:derived-observation:83e1946765cd9a02fc3885c6:b"
+            ],
+            "sourceField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "sourceUnit": "normalized-ratio",
+            "inputRange": [
+              0,
+              1
+            ],
+            "normalization": {
+              "method": "linear",
+              "clipping": "clamp",
+              "parameters": {
+                "sourceMappingScale": "linear",
+                "sourceInputRange": [
+                  0,
+                  500
+                ],
+                "normalizedObservationAlreadyDerived": true
+              }
+            },
+            "target": "earth.carbonDrone.filterCutoff",
+            "outputRange": [
+              260,
+              2600
+            ],
+            "curve": "linear",
+            "smoothingMs": 1200,
+            "cadence": "once per accepted snapshot",
+            "missingData": "hold-explicitly",
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls. This control relation is authored; it is not the source's voice or an identity claim.",
+            "actors": [
+              "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2"
+            ],
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "extensions": {
+              "cosmo:mappingCatalogId": "carbon-intensity-filter",
+              "cosmo:description": "Reported Great Britain grid carbon intensity opens the carbon drone filter and exposes more upper partials.",
+              "cosmo:layer": "earth",
+              "cosmo:decisionImplementation": "@cosmoaudition/core.executeMapping"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "id": "urn:cosmoaudition:masa:relation:83e1946765cd9a02fc3885c6:a",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:observation:83e1946765cd9a02fc3885c6:9",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:canonical-representation:83e1946765cd9a02fc3885c6:7",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:83e1946765cd9a02fc3885c6:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:83e1946765cd9a02fc3885c6:8",
+            "extensions": {
+              "cosmo:relationRole": "canonical-representation-to-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:83e1946765cd9a02fc3885c6:f",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:derived-observation:83e1946765cd9a02fc3885c6:b",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:observation:83e1946765cd9a02fc3885c6:9",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:derive-receipt:83e1946765cd9a02fc3885c6:c",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:derive-receipt:83e1946765cd9a02fc3885c6:c",
+            "extensions": {
+              "cosmo:relationRole": "raw-to-mapping-normalized-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:83e1946765cd9a02fc3885c6:h",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:control-frame:83e1946765cd9a02fc3885c6:g",
+            "predicate": "masa:mapped-from",
+            "object": "urn:cosmoaudition:masa:derived-observation:83e1946765cd9a02fc3885c6:b",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:mapping-receipt:83e1946765cd9a02fc3885c6:e",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:mapping-receipt:83e1946765cd9a02fc3885c6:e",
+            "extensions": {
+              "cosmo:mappingRef": "urn:cosmoaudition:masa:mapping:83e1946765cd9a02fc3885c6:d"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:83e1946765cd9a02fc3885c6:i",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:canonical-representation:83e1946765cd9a02fc3885c6:7",
+            "predicate": "masa:captured-from",
+            "object": "urn:cosmoaudition:masa:source:83e1946765cd9a02fc3885c6:6",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:83e1946765cd9a02fc3885c6:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:83e1946765cd9a02fc3885c6:8",
+            "extensions": {}
+          }
+        ],
+        "policies": [
+          {
+            "id": "urn:cosmoaudition:masa:policy:83e1946765cd9a02fc3885c6:3",
+            "type": "masa:Policy",
+            "policyKind": "composite",
+            "issuer": "urn:cosmoaudition:masa:operator:83e1946765cd9a02fc3885c6:1",
+            "status": "active",
+            "validFrom": "2026-09-26T12:00:00.000Z",
+            "disclosure": "private",
+            "rules": [
+              {
+                "id": "urn:cosmoaudition:masa:policy-rule:83e1946765cd9a02fc3885c6:4",
+                "effect": "permission",
+                "actions": [
+                  "read",
+                  "validate",
+                  "derive",
+                  "map",
+                  "export"
+                ],
+                "targets": [
+                  "urn:cosmoaudition:masa:record:83e1946765cd9a02fc3885c6:0"
+                ],
+                "subjects": [
+                  "urn:cosmoaudition:masa:operator:83e1946765cd9a02fc3885c6:1",
+                  "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2"
+                ],
+                "authorityBasis": {
+                  "state": "known",
+                  "value": "Local operator request for a private COSMOAUDITION snapshot record."
+                },
+                "constraints": {
+                  "recordCountPerSnapshot": 1,
+                  "maximumSignals": 256,
+                  "maximumSources": 64,
+                  "disclosure": "private",
+                  "publicProjectionRequiresReview": true
+                },
+                "duties": [
+                  "Preserve source attribution, fixture status, unknown values, staleness, mapping decisions, and lineage.",
+                  "Do not interpret a completed mapping receipt as evidence that sound was heard."
+                ]
+              }
+            ],
+            "review": {
+              "contact": {
+                "state": "unknown",
+                "reason": "No external review contact is configured for this local record.",
+                "reasonCode": "not_configured"
+              },
+              "route": {
+                "state": "known",
+                "value": "Review the private MASA record before any publication or external bundle export."
+              }
+            },
+            "extensions": {}
+          }
+        ],
+        "contexts": [],
+        "agentRuns": [],
+        "capabilities": [],
+        "integrity": {
+          "state": "known",
+          "value": {
+            "algorithm": "sha-256",
+            "digest": "83e1946765cd9a02fc3885c6dbc4c8a9fcc6d9d9959192916ea1eff3c9514ccb",
+            "byteLength": 399,
+            "scope": "canonical input snapshot before MASA projection"
+          }
+        },
+        "history": {
+          "mode": "embedded",
+          "events": [
+            {
+              "id": "urn:cosmoaudition:masa:observe-receipt:83e1946765cd9a02fc3885c6:8",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:83e1946765cd9a02fc3885c6:0",
+              "sequence": 0,
+              "operationType": "matter.observe-source-snapshot",
+              "effectClass": "read",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:source:83e1946765cd9a02fc3885c6:6"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:canonical-representation:83e1946765cd9a02fc3885c6:7",
+                "urn:cosmoaudition:masa:observation:83e1946765cd9a02fc3885c6:9"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:83e1946765cd9a02fc3885c6:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "sourceId": "carbon_intensity_gb",
+                "acquisitionMode": "live",
+                "fixture": false,
+                "canonicalSha256": "dda87376acce2e9dd6479a9d9477d7abc043fe91f92ac4ceaa890288a8ba24ae"
+              },
+              "policyEvaluation": {
+                "action": "read",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:83e1946765cd9a02fc3885c6:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:83e1946765cd9a02fc3885c6:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:83e1946765cd9a02fc3885c6:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:83e1946765cd9a02fc3885c6:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:derive-receipt:83e1946765cd9a02fc3885c6:c",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:83e1946765cd9a02fc3885c6:0",
+              "sequence": 1,
+              "operationType": "matter.derive-observation",
+              "effectClass": "derive",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:observation:83e1946765cd9a02fc3885c6:9",
+                "urn:cosmoaudition:masa:canonical-representation:83e1946765cd9a02fc3885c6:7"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:derived-observation:83e1946765cd9a02fc3885c6:b"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:83e1946765cd9a02fc3885c6:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "sourceField": "carbon_intensity_actual",
+                "outputField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+                "decision": "applied",
+                "reason": "mapped"
+              },
+              "policyEvaluation": {
+                "action": "derive",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:83e1946765cd9a02fc3885c6:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:83e1946765cd9a02fc3885c6:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:83e1946765cd9a02fc3885c6:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:83e1946765cd9a02fc3885c6:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:mapping-receipt:83e1946765cd9a02fc3885c6:e",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:83e1946765cd9a02fc3885c6:0",
+              "sequence": 2,
+              "operationType": "matter.map",
+              "effectClass": "map",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:83e1946765cd9a02fc3885c6:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:derived-observation:83e1946765cd9a02fc3885c6:b"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:control-frame:83e1946765cd9a02fc3885c6:g"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:83e1946765cd9a02fc3885c6:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "mappingRef": "urn:cosmoaudition:masa:mapping:83e1946765cd9a02fc3885c6:d",
+                "target": "earth.carbonDrone.filterCutoff",
+                "missingData": "hold-explicitly",
+                "decision": "applied",
+                "reason": "mapped",
+                "normalizedValue": 0.5,
+                "outputValue": 1430,
+                "scheduledOnly": true,
+                "completionSemantics": "scheduled-not-heard"
+              },
+              "policyEvaluation": {
+                "action": "map",
+                "targets": [
+                  "urn:cosmoaudition:masa:mapping:83e1946765cd9a02fc3885c6:d"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:83e1946765cd9a02fc3885c6:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:83e1946765cd9a02fc3885c6:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:83e1946765cd9a02fc3885c6:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "interface_reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "Completion records a produced control frame scheduled for the interface; it does not claim that sound was rendered, heard, or verified."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            }
+          ]
+        },
+        "extensions": {
+          "cosmo:observation-series": [],
+          "cosmo:snapshot": {
+            "generatedAt": "2026-09-26T12:00:00.000Z",
+            "mode": "live",
+            "signalCount": 1,
+            "sourceCount": 1,
+            "recordCardinality": "one-record-per-snapshot"
+          },
+          "cosmo:adapter": {
+            "package": "@cosmoaudition/masa",
+            "version": "0.2.1",
+            "completionSemantics": "scheduled-not-heard"
+          }
+        }
+      },
+      "observationRef": "urn:cosmoaudition:masa:observation:83e1946765cd9a02fc3885c6:9",
+      "generation": {
+        "contract": "cosmo/generation-frame/v1",
+        "frameId": "cosmo:frame:2026-09-26T12:00:00.000Z",
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "acquisitionMode": "live",
+        "originMode": "live",
+        "relation": {
+          "of": "signal"
+        },
+        "sourceRegister": "non-acoustic",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-09-26T11:59:00.000Z",
+            "sourceId": "carbon_intensity_gb",
+            "confidence": "high",
+            "staleAfterSeconds": 1800,
+            "acquisitionMode": "live",
+            "freshness": {
+              "evaluatedAt": "2026-09-26T12:00:00.000Z",
+              "sourceTimestamp": "2026-09-26T11:59:00.000Z",
+              "status": "current",
+              "reason": "within-age-limit",
+              "ageSeconds": 60,
+              "expiresAt": "2026-09-26T12:29:00.000Z",
+              "mappingAllowed": true
+            },
+            "sphere": "human",
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "normalization": {
+              "method": "linear",
+              "inputRange": [
+                0,
+                500
+              ],
+              "outputRange": [
+                0,
+                1
+              ],
+              "clipping": "clamp",
+              "basis": "Authored operational envelope for bounded modulation; not a physical minimum, maximum, threshold, or forecast."
+            }
+          }
+        ],
+        "receipts": [
+          {
+            "mappingId": "germ-carbon-duration",
+            "signalId": "carbon_intensity_actual",
+            "layer": "earth",
+            "target": "duration",
+            "inputValue": 250,
+            "previousOutput": null,
+            "confidence": "high",
+            "smoothingMs": 0,
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls.",
+            "status": "applied",
+            "reason": "mapped",
+            "rawNormalizedInput": 0.5,
+            "normalizedInput": 0.5,
+            "mappingAmount": 1,
+            "outputValue": 15.049999999999999,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-carbon-duration",
+            "sourceClock": "2026-09-26T11:59:00.000Z",
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": "reported",
+            "inputRange": [
+              0,
+              500
+            ],
+            "outputRange": [
+              0.1,
+              30
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": [
+              {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "provider": "https://api.carbonintensity.org.uk/intensity",
+                "licenseNote": "Public API attribution required.",
+                "limitation": "Great Britain grid data only.",
+                "originalAcquisitionMode": "live"
+              }
+            ]
+          },
+          {
+            "mappingId": "germ-quake-steps",
+            "signalId": "earthquake_count_1h",
+            "layer": "earth",
+            "target": "steps",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Earthquake events are not spectacle; zero events is valid data and network failure is not.",
+            "status": "skipped",
+            "reason": "missing-signal",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-quake-steps",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              30
+            ],
+            "outputRange": [
+              1,
+              250
+            ],
+            "curve": "quantized",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          },
+          {
+            "mappingId": "germ-coal-guidance",
+            "signalId": "generation_mix_coal",
+            "layer": "earth",
+            "target": "cfg_scale",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Fuel share is a regional generation mix value and should remain labelled by geography.",
+            "status": "skipped",
+            "reason": "missing-signal",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-coal-guidance",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              100
+            ],
+            "outputRange": [
+              0,
+              25
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          }
+        ],
+        "execution": "not_requested",
+        "perceptualAccess": "not_established"
+      }
+    },
+    {
+      "name": "future",
+      "snapshot": {
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "mode": "live",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "sourceId": "carbon_intensity_gb",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-09-26T12:01:00.000Z",
+            "staleAfterSeconds": 1800,
+            "confidence": "high",
+            "temporalCharacter": "aggregate",
+            "epistemicStatus": "reported",
+            "signalKind": "observation"
+          }
+        ],
+        "sources": []
+      },
+      "record": {
+        "$schema": "https://masa.sonicfield.org/schemas/0.2.0/matter-record.schema.json",
+        "@context": "https://masa.sonicfield.org/contexts/0.2.0/masa.jsonld",
+        "masaVersion": "0.2.0",
+        "id": "urn:cosmoaudition:masa:record:f6e0b69b6a61ab78923c461d:0",
+        "type": "masa:MatterRecord",
+        "revision": 1,
+        "profiles": [
+          "core",
+          "observation",
+          "mapping"
+        ],
+        "createdAt": "2026-09-26T12:00:00.000Z",
+        "createdBy": "urn:cosmoaudition:masa:operator:f6e0b69b6a61ab78923c461d:1",
+        "title": "COSMOAUDITION snapshot 2026-09-26T12:00:00.000Z",
+        "description": "One bounded MASA account of a COSMOAUDITION snapshot. Sources, canonical parsed representations, raw observations, derived normalized observations, authored mappings, and control-frame representations remain distinct and traceable.",
+        "disclosure": "private",
+        "registers": [
+          "digital-technical",
+          "compositional-transformational",
+          "ecological-territorial"
+        ],
+        "scales": [
+          "object-event",
+          "environmental",
+          "infrastructural",
+          "planetary"
+        ],
+        "actors": [
+          {
+            "id": "urn:cosmoaudition:masa:operator:f6e0b69b6a61ab78923c461d:1",
+            "type": "masa:Actor",
+            "actorKind": "human",
+            "roles": [
+              "local-operator",
+              "record-creator"
+            ],
+            "name": {
+              "state": "unknown",
+              "reason": "The snapshot request did not include an operator name.",
+              "reasonCode": "not_provided"
+            },
+            "disclosure": "private",
+            "extensions": {}
+          },
+          {
+            "id": "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2",
+            "type": "masa:Actor",
+            "actorKind": "software",
+            "roles": [
+              "canonical-parser",
+              "observation-deriver",
+              "mapping-engine"
+            ],
+            "name": {
+              "state": "known",
+              "value": "COSMOAUDITION MASA snapshot adapter"
+            },
+            "attribution": "Sonic Matter Framework / Cosmoaudition System",
+            "disclosure": "private",
+            "extensions": {}
+          }
+        ],
+        "sources": [
+          {
+            "id": "urn:cosmoaudition:masa:source:f6e0b69b6a61ab78923c461d:6",
+            "type": "masa:Source",
+            "sourceKind": "public-api",
+            "identification": {
+              "state": "known",
+              "value": {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "acquisitionMode": "live",
+                "fixture": false
+              }
+            },
+            "locator": {
+              "state": "known",
+              "value": "https://api.carbonintensity.org.uk/intensity"
+            },
+            "authority": {
+              "state": "unknown",
+              "reason": "The source definition does not by itself establish provider authority.",
+              "reasonCode": "not_verified"
+            },
+            "rights": {
+              "state": "known",
+              "value": {
+                "note": "Public API attribution required.",
+                "verification": "source declaration; provider terms require review before publication"
+              }
+            },
+            "coverage": {
+              "state": "known",
+              "value": {
+                "layers": [
+                  "earth",
+                  "cloud"
+                ],
+                "limitation": "Great Britain grid data only."
+              }
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-09-26T12:01:00.000Z",
+              "reason": "future-source-time"
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:f6e0b69b6a61ab78923c461d:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:source": {
+                "originalSourceId": "carbon_intensity_gb",
+                "fixture": false,
+                "route": "api-proxy"
+              }
+            }
+          }
+        ],
+        "representations": [
+          {
+            "id": "urn:cosmoaudition:masa:canonical-representation:f6e0b69b6a61ab78923c461d:7",
+            "type": "masa:Representation",
+            "role": "data",
+            "mediaType": "application/json",
+            "format": {
+              "state": "known",
+              "value": "COSMOAUDITION canonical parsed source snapshot 0.2.0"
+            },
+            "availability": "available",
+            "locator": {
+              "state": "known",
+              "value": "urn:sha256:839e1e309746035bee8430f862b315433b8d6961f5eb2664a37ac9f34d71391a"
+            },
+            "extent": {
+              "state": "known",
+              "value": {
+                "byteLength": 1007
+              }
+            },
+            "integrity": {
+              "state": "known",
+              "value": {
+                "algorithm": "sha-256",
+                "digest": "839e1e309746035bee8430f862b315433b8d6961f5eb2664a37ac9f34d71391a",
+                "byteLength": 1007,
+                "status": "verified"
+              }
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:f6e0b69b6a61ab78923c461d:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:canonicalPayload": {
+                "schema": "cosmoaudition:canonical-source-snapshot:0.2.0",
+                "generatedAt": "2026-09-26T12:00:00.000Z",
+                "mode": "live",
+                "sourceId": "carbon_intensity_gb",
+                "definition": {
+                  "id": "carbon_intensity_gb",
+                  "label": "Carbon Intensity GB",
+                  "status": "ready",
+                  "layers": [
+                    "earth",
+                    "cloud"
+                  ],
+                  "sphere": "human",
+                  "temporalCharacter": "aggregate",
+                  "endpoint": "https://api.carbonintensity.org.uk/intensity",
+                  "route": "api-proxy",
+                  "ttlSeconds": 1800,
+                  "unit": "gCO2/kWh",
+                  "parser": "JSON data[0].intensity.actual/forecast/index",
+                  "limitation": "Great Britain grid data only.",
+                  "fallback": "Last-known-good cache as stale; otherwise null-valued signal.",
+                  "licenseNote": "Public API attribution required."
+                },
+                "health": null,
+                "cache": null,
+                "signals": [
+                  {
+                    "id": "carbon_intensity_actual",
+                    "label": "Carbon",
+                    "sourceId": "carbon_intensity_gb",
+                    "layer": "earth",
+                    "unit": "gCO2/kWh",
+                    "value": 250,
+                    "normalized": 0.5,
+                    "timestamp": "2026-09-26T12:01:00.000Z",
+                    "staleAfterSeconds": 1800,
+                    "confidence": "high",
+                    "temporalCharacter": "aggregate",
+                    "epistemicStatus": "reported",
+                    "signalKind": "observation"
+                  }
+                ]
+              },
+              "cosmo:fixture": false
+            }
+          }
+        ],
+        "encounters": [],
+        "apertures": [],
+        "listeningPasses": [],
+        "claims": [],
+        "measurements": [],
+        "regions": [],
+        "observations": [
+          {
+            "id": "urn:cosmoaudition:masa:observation:f6e0b69b6a61ab78923c461d:9",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:f6e0b69b6a61ab78923c461d:6",
+            "field": "carbon_intensity_actual",
+            "observedAt": "2026-09-26T12:01:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "label": "Carbon",
+                "layer": "earth",
+                "acquisitionMode": "live"
+              }
+            },
+            "value": {
+              "state": "known",
+              "value": 250
+            },
+            "unit": {
+              "state": "known",
+              "value": "gCO2/kWh"
+            },
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "method": {
+              "name": "COSMOAUDITION canonical source parsing",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "parser": "JSON data[0].intensity.actual/forecast/index",
+                "canonicalRepresentationRef": "urn:cosmoaudition:masa:canonical-representation:f6e0b69b6a61ab78923c461d:7",
+                "fixture": false
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-09-26T12:01:00.000Z",
+              "reason": "future-source-time"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:effectiveFreshness": {
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "sourceTimestamp": "2026-09-26T12:01:00.000Z",
+                "status": "unknown",
+                "reason": "future-source-time",
+                "mappingAllowed": false
+              },
+              "cosmo:signal": {
+                "originalSignalId": "carbon_intensity_actual",
+                "confidence": "high"
+              },
+              "cosmo:representationRef": "urn:cosmoaudition:masa:canonical-representation:f6e0b69b6a61ab78923c461d:7"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:derived-observation:f6e0b69b6a61ab78923c461d:b",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:f6e0b69b6a61ab78923c461d:6",
+            "field": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "observedAt": "2026-09-26T12:01:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "sourceObservationRef": "urn:cosmoaudition:masa:observation:f6e0b69b6a61ab78923c461d:9",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "normalizationDomain": [
+                  0,
+                  1
+                ]
+              }
+            },
+            "value": {
+              "state": "unknown",
+              "reason": "The core mapping decision produced no normalized value: future-input.",
+              "reasonCode": "mapping_input_not_executable"
+            },
+            "unit": {
+              "state": "known",
+              "value": "normalized-ratio"
+            },
+            "epistemicStatus": "derived",
+            "temporalCharacter": "context",
+            "signalKind": "derived",
+            "method": {
+              "name": "COSMOAUDITION core mapping normalization",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "sourceField": "carbon_intensity_actual",
+                "scale": "linear",
+                "inputRange": [
+                  0,
+                  500
+                ],
+                "clipping": "clamp"
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-09-26T12:01:00.000Z",
+              "reason": "future-source-time"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:sourceObservationRef": "urn:cosmoaudition:masa:observation:f6e0b69b6a61ab78923c461d:9",
+              "cosmo:controlDecision": {
+                "status": "refused",
+                "reason": "future-input"
+              }
+            }
+          }
+        ],
+        "mappings": [
+          {
+            "id": "urn:cosmoaudition:masa:mapping:f6e0b69b6a61ab78923c461d:d",
+            "type": "masa:Mapping",
+            "sourceObservationRefs": [
+              "urn:cosmoaudition:masa:derived-observation:f6e0b69b6a61ab78923c461d:b"
+            ],
+            "sourceField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "sourceUnit": "normalized-ratio",
+            "inputRange": [
+              0,
+              1
+            ],
+            "normalization": {
+              "method": "linear",
+              "clipping": "clamp",
+              "parameters": {
+                "sourceMappingScale": "linear",
+                "sourceInputRange": [
+                  0,
+                  500
+                ],
+                "normalizedObservationAlreadyDerived": true
+              }
+            },
+            "target": "earth.carbonDrone.filterCutoff",
+            "outputRange": [
+              260,
+              2600
+            ],
+            "curve": "linear",
+            "smoothingMs": 1200,
+            "cadence": "once per accepted snapshot",
+            "missingData": "hold-explicitly",
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls. This control relation is authored; it is not the source's voice or an identity claim.",
+            "actors": [
+              "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2"
+            ],
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "extensions": {
+              "cosmo:mappingCatalogId": "carbon-intensity-filter",
+              "cosmo:description": "Reported Great Britain grid carbon intensity opens the carbon drone filter and exposes more upper partials.",
+              "cosmo:layer": "earth",
+              "cosmo:decisionImplementation": "@cosmoaudition/core.executeMapping"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "id": "urn:cosmoaudition:masa:relation:f6e0b69b6a61ab78923c461d:a",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:observation:f6e0b69b6a61ab78923c461d:9",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:canonical-representation:f6e0b69b6a61ab78923c461d:7",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:f6e0b69b6a61ab78923c461d:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:f6e0b69b6a61ab78923c461d:8",
+            "extensions": {
+              "cosmo:relationRole": "canonical-representation-to-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:f6e0b69b6a61ab78923c461d:f",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:derived-observation:f6e0b69b6a61ab78923c461d:b",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:observation:f6e0b69b6a61ab78923c461d:9",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:derive-receipt:f6e0b69b6a61ab78923c461d:c",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:derive-receipt:f6e0b69b6a61ab78923c461d:c",
+            "extensions": {
+              "cosmo:relationRole": "raw-to-mapping-normalized-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:f6e0b69b6a61ab78923c461d:g",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:canonical-representation:f6e0b69b6a61ab78923c461d:7",
+            "predicate": "masa:captured-from",
+            "object": "urn:cosmoaudition:masa:source:f6e0b69b6a61ab78923c461d:6",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:f6e0b69b6a61ab78923c461d:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:f6e0b69b6a61ab78923c461d:8",
+            "extensions": {}
+          }
+        ],
+        "policies": [
+          {
+            "id": "urn:cosmoaudition:masa:policy:f6e0b69b6a61ab78923c461d:3",
+            "type": "masa:Policy",
+            "policyKind": "composite",
+            "issuer": "urn:cosmoaudition:masa:operator:f6e0b69b6a61ab78923c461d:1",
+            "status": "active",
+            "validFrom": "2026-09-26T12:00:00.000Z",
+            "disclosure": "private",
+            "rules": [
+              {
+                "id": "urn:cosmoaudition:masa:policy-rule:f6e0b69b6a61ab78923c461d:4",
+                "effect": "permission",
+                "actions": [
+                  "read",
+                  "validate",
+                  "derive",
+                  "map",
+                  "export"
+                ],
+                "targets": [
+                  "urn:cosmoaudition:masa:record:f6e0b69b6a61ab78923c461d:0"
+                ],
+                "subjects": [
+                  "urn:cosmoaudition:masa:operator:f6e0b69b6a61ab78923c461d:1",
+                  "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2"
+                ],
+                "authorityBasis": {
+                  "state": "known",
+                  "value": "Local operator request for a private COSMOAUDITION snapshot record."
+                },
+                "constraints": {
+                  "recordCountPerSnapshot": 1,
+                  "maximumSignals": 256,
+                  "maximumSources": 64,
+                  "disclosure": "private",
+                  "publicProjectionRequiresReview": true
+                },
+                "duties": [
+                  "Preserve source attribution, fixture status, unknown values, staleness, mapping decisions, and lineage.",
+                  "Do not interpret a completed mapping receipt as evidence that sound was heard."
+                ]
+              }
+            ],
+            "review": {
+              "contact": {
+                "state": "unknown",
+                "reason": "No external review contact is configured for this local record.",
+                "reasonCode": "not_configured"
+              },
+              "route": {
+                "state": "known",
+                "value": "Review the private MASA record before any publication or external bundle export."
+              }
+            },
+            "extensions": {}
+          }
+        ],
+        "contexts": [],
+        "agentRuns": [],
+        "capabilities": [],
+        "integrity": {
+          "state": "known",
+          "value": {
+            "algorithm": "sha-256",
+            "digest": "f6e0b69b6a61ab78923c461ddaf31bc8b3a9323bc3198bc1e8c5aaf3369799b4",
+            "byteLength": 399,
+            "scope": "canonical input snapshot before MASA projection"
+          }
+        },
+        "history": {
+          "mode": "embedded",
+          "events": [
+            {
+              "id": "urn:cosmoaudition:masa:observe-receipt:f6e0b69b6a61ab78923c461d:8",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:f6e0b69b6a61ab78923c461d:0",
+              "sequence": 0,
+              "operationType": "matter.observe-source-snapshot",
+              "effectClass": "read",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:source:f6e0b69b6a61ab78923c461d:6"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:canonical-representation:f6e0b69b6a61ab78923c461d:7",
+                "urn:cosmoaudition:masa:observation:f6e0b69b6a61ab78923c461d:9"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:f6e0b69b6a61ab78923c461d:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "sourceId": "carbon_intensity_gb",
+                "acquisitionMode": "live",
+                "fixture": false,
+                "canonicalSha256": "839e1e309746035bee8430f862b315433b8d6961f5eb2664a37ac9f34d71391a"
+              },
+              "policyEvaluation": {
+                "action": "read",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:f6e0b69b6a61ab78923c461d:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:f6e0b69b6a61ab78923c461d:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:f6e0b69b6a61ab78923c461d:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:f6e0b69b6a61ab78923c461d:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:derive-receipt:f6e0b69b6a61ab78923c461d:c",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:f6e0b69b6a61ab78923c461d:0",
+              "sequence": 1,
+              "operationType": "matter.derive-observation",
+              "effectClass": "derive",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:observation:f6e0b69b6a61ab78923c461d:9",
+                "urn:cosmoaudition:masa:canonical-representation:f6e0b69b6a61ab78923c461d:7"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:derived-observation:f6e0b69b6a61ab78923c461d:b"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:f6e0b69b6a61ab78923c461d:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "sourceField": "carbon_intensity_actual",
+                "outputField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+                "decision": "refused",
+                "reason": "future-input"
+              },
+              "policyEvaluation": {
+                "action": "derive",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:f6e0b69b6a61ab78923c461d:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:f6e0b69b6a61ab78923c461d:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:f6e0b69b6a61ab78923c461d:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:f6e0b69b6a61ab78923c461d:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "The derived observation preserves an explicit unknown value; no numeric substitute was created."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:mapping-receipt:f6e0b69b6a61ab78923c461d:e",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:f6e0b69b6a61ab78923c461d:0",
+              "sequence": 2,
+              "operationType": "matter.map",
+              "effectClass": "map",
+              "finalStatus": "refused",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:f6e0b69b6a61ab78923c461d:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:derived-observation:f6e0b69b6a61ab78923c461d:b"
+              ],
+              "outputs": [],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:f6e0b69b6a61ab78923c461d:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "mappingRef": "urn:cosmoaudition:masa:mapping:f6e0b69b6a61ab78923c461d:d",
+                "target": "earth.carbonDrone.filterCutoff",
+                "missingData": "hold-explicitly",
+                "decision": "refused",
+                "reason": "future-input"
+              },
+              "policyEvaluation": {
+                "action": "map",
+                "targets": [
+                  "urn:cosmoaudition:masa:mapping:f6e0b69b6a61ab78923c461d:d"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:f6e0b69b6a61ab78923c461d:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:f6e0b69b6a61ab78923c461d:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:f6e0b69b6a61ab78923c461d:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "interface_reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "The core mapping decision refused output: future-input."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            }
+          ]
+        },
+        "extensions": {
+          "cosmo:observation-series": [],
+          "cosmo:snapshot": {
+            "generatedAt": "2026-09-26T12:00:00.000Z",
+            "mode": "live",
+            "signalCount": 1,
+            "sourceCount": 1,
+            "recordCardinality": "one-record-per-snapshot"
+          },
+          "cosmo:adapter": {
+            "package": "@cosmoaudition/masa",
+            "version": "0.2.1",
+            "completionSemantics": "scheduled-not-heard"
+          }
+        }
+      },
+      "observationRef": "urn:cosmoaudition:masa:observation:f6e0b69b6a61ab78923c461d:9",
+      "generation": {
+        "contract": "cosmo/generation-frame/v1",
+        "frameId": "cosmo:frame:2026-09-26T12:00:00.000Z",
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "acquisitionMode": "live",
+        "originMode": "live",
+        "relation": {
+          "of": "signal"
+        },
+        "sourceRegister": "non-acoustic",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-09-26T12:01:00.000Z",
+            "sourceId": "carbon_intensity_gb",
+            "confidence": "high",
+            "staleAfterSeconds": 1800,
+            "acquisitionMode": "live",
+            "freshness": {
+              "evaluatedAt": "2026-09-26T12:00:00.000Z",
+              "sourceTimestamp": "2026-09-26T12:01:00.000Z",
+              "status": "unknown",
+              "reason": "future-source-time",
+              "mappingAllowed": false
+            },
+            "sphere": "human",
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "normalization": {
+              "method": "linear",
+              "inputRange": [
+                0,
+                500
+              ],
+              "outputRange": [
+                0,
+                1
+              ],
+              "clipping": "clamp",
+              "basis": "Authored operational envelope for bounded modulation; not a physical minimum, maximum, threshold, or forecast."
+            }
+          }
+        ],
+        "receipts": [
+          {
+            "mappingId": "germ-carbon-duration",
+            "signalId": "carbon_intensity_actual",
+            "layer": "earth",
+            "target": "duration",
+            "inputValue": 250,
+            "previousOutput": null,
+            "confidence": "high",
+            "smoothingMs": 0,
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls.",
+            "status": "refused",
+            "reason": "future-input",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-carbon-duration",
+            "sourceClock": "2026-09-26T12:01:00.000Z",
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": "reported",
+            "inputRange": [
+              0,
+              500
+            ],
+            "outputRange": [
+              0.1,
+              30
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": [
+              {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "provider": "https://api.carbonintensity.org.uk/intensity",
+                "licenseNote": "Public API attribution required.",
+                "limitation": "Great Britain grid data only.",
+                "originalAcquisitionMode": "live"
+              }
+            ]
+          },
+          {
+            "mappingId": "germ-quake-steps",
+            "signalId": "earthquake_count_1h",
+            "layer": "earth",
+            "target": "steps",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Earthquake events are not spectacle; zero events is valid data and network failure is not.",
+            "status": "skipped",
+            "reason": "missing-signal",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-quake-steps",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              30
+            ],
+            "outputRange": [
+              1,
+              250
+            ],
+            "curve": "quantized",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          },
+          {
+            "mappingId": "germ-coal-guidance",
+            "signalId": "generation_mix_coal",
+            "layer": "earth",
+            "target": "cfg_scale",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Fuel share is a regional generation mix value and should remain labelled by geography.",
+            "status": "skipped",
+            "reason": "missing-signal",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-coal-guidance",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              100
+            ],
+            "outputRange": [
+              0,
+              25
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          }
+        ],
+        "execution": "not_requested",
+        "perceptualAccess": "not_established"
+      }
+    },
+    {
+      "name": "archive",
+      "snapshot": {
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "mode": "archive",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "sourceId": "carbon_intensity_gb",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-09-26T11:59:00.000Z",
+            "staleAfterSeconds": 1800,
+            "confidence": "high",
+            "temporalCharacter": "aggregate",
+            "epistemicStatus": "reported",
+            "signalKind": "observation"
+          }
+        ],
+        "sources": []
+      },
+      "record": {
+        "$schema": "https://masa.sonicfield.org/schemas/0.2.0/matter-record.schema.json",
+        "@context": "https://masa.sonicfield.org/contexts/0.2.0/masa.jsonld",
+        "masaVersion": "0.2.0",
+        "id": "urn:cosmoaudition:masa:record:cac668897de0ff784bd784af:0",
+        "type": "masa:MatterRecord",
+        "revision": 1,
+        "profiles": [
+          "core",
+          "observation",
+          "mapping"
+        ],
+        "createdAt": "2026-09-26T12:00:00.000Z",
+        "createdBy": "urn:cosmoaudition:masa:operator:cac668897de0ff784bd784af:1",
+        "title": "COSMOAUDITION snapshot 2026-09-26T12:00:00.000Z",
+        "description": "One bounded MASA account of a COSMOAUDITION snapshot. Sources, canonical parsed representations, raw observations, derived normalized observations, authored mappings, and control-frame representations remain distinct and traceable.",
+        "disclosure": "private",
+        "registers": [
+          "digital-technical",
+          "compositional-transformational",
+          "ecological-territorial"
+        ],
+        "scales": [
+          "object-event",
+          "environmental",
+          "infrastructural",
+          "planetary"
+        ],
+        "actors": [
+          {
+            "id": "urn:cosmoaudition:masa:operator:cac668897de0ff784bd784af:1",
+            "type": "masa:Actor",
+            "actorKind": "human",
+            "roles": [
+              "local-operator",
+              "record-creator"
+            ],
+            "name": {
+              "state": "unknown",
+              "reason": "The snapshot request did not include an operator name.",
+              "reasonCode": "not_provided"
+            },
+            "disclosure": "private",
+            "extensions": {}
+          },
+          {
+            "id": "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2",
+            "type": "masa:Actor",
+            "actorKind": "software",
+            "roles": [
+              "canonical-parser",
+              "observation-deriver",
+              "mapping-engine"
+            ],
+            "name": {
+              "state": "known",
+              "value": "COSMOAUDITION MASA snapshot adapter"
+            },
+            "attribution": "Sonic Matter Framework / Cosmoaudition System",
+            "disclosure": "private",
+            "extensions": {}
+          }
+        ],
+        "sources": [
+          {
+            "id": "urn:cosmoaudition:masa:source:cac668897de0ff784bd784af:6",
+            "type": "masa:Source",
+            "sourceKind": "public-api",
+            "identification": {
+              "state": "known",
+              "value": {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "acquisitionMode": "archive",
+                "fixture": false
+              }
+            },
+            "locator": {
+              "state": "known",
+              "value": "https://api.carbonintensity.org.uk/intensity"
+            },
+            "authority": {
+              "state": "unknown",
+              "reason": "The source definition does not by itself establish provider authority.",
+              "reasonCode": "not_verified"
+            },
+            "rights": {
+              "state": "known",
+              "value": {
+                "note": "Public API attribution required.",
+                "verification": "source declaration; provider terms require review before publication"
+              }
+            },
+            "coverage": {
+              "state": "known",
+              "value": {
+                "layers": [
+                  "earth",
+                  "cloud"
+                ],
+                "limitation": "Great Britain grid data only."
+              }
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-09-26T11:59:00.000Z",
+              "reason": "archive"
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:cac668897de0ff784bd784af:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:source": {
+                "originalSourceId": "carbon_intensity_gb",
+                "fixture": false,
+                "route": "api-proxy"
+              }
+            }
+          }
+        ],
+        "representations": [
+          {
+            "id": "urn:cosmoaudition:masa:canonical-representation:cac668897de0ff784bd784af:7",
+            "type": "masa:Representation",
+            "role": "data",
+            "mediaType": "application/json",
+            "format": {
+              "state": "known",
+              "value": "COSMOAUDITION canonical parsed source snapshot 0.2.0"
+            },
+            "availability": "available",
+            "locator": {
+              "state": "known",
+              "value": "urn:sha256:aa68c3aecc25f946ab132b8d4b29692c7aa832ee4d6a24da37df47d6d021f408"
+            },
+            "extent": {
+              "state": "known",
+              "value": {
+                "byteLength": 1010
+              }
+            },
+            "integrity": {
+              "state": "known",
+              "value": {
+                "algorithm": "sha-256",
+                "digest": "aa68c3aecc25f946ab132b8d4b29692c7aa832ee4d6a24da37df47d6d021f408",
+                "byteLength": 1010,
+                "status": "verified"
+              }
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:cac668897de0ff784bd784af:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:canonicalPayload": {
+                "schema": "cosmoaudition:canonical-source-snapshot:0.2.0",
+                "generatedAt": "2026-09-26T12:00:00.000Z",
+                "mode": "archive",
+                "sourceId": "carbon_intensity_gb",
+                "definition": {
+                  "id": "carbon_intensity_gb",
+                  "label": "Carbon Intensity GB",
+                  "status": "ready",
+                  "layers": [
+                    "earth",
+                    "cloud"
+                  ],
+                  "sphere": "human",
+                  "temporalCharacter": "aggregate",
+                  "endpoint": "https://api.carbonintensity.org.uk/intensity",
+                  "route": "api-proxy",
+                  "ttlSeconds": 1800,
+                  "unit": "gCO2/kWh",
+                  "parser": "JSON data[0].intensity.actual/forecast/index",
+                  "limitation": "Great Britain grid data only.",
+                  "fallback": "Last-known-good cache as stale; otherwise null-valued signal.",
+                  "licenseNote": "Public API attribution required."
+                },
+                "health": null,
+                "cache": null,
+                "signals": [
+                  {
+                    "id": "carbon_intensity_actual",
+                    "label": "Carbon",
+                    "sourceId": "carbon_intensity_gb",
+                    "layer": "earth",
+                    "unit": "gCO2/kWh",
+                    "value": 250,
+                    "normalized": 0.5,
+                    "timestamp": "2026-09-26T11:59:00.000Z",
+                    "staleAfterSeconds": 1800,
+                    "confidence": "high",
+                    "temporalCharacter": "aggregate",
+                    "epistemicStatus": "reported",
+                    "signalKind": "observation"
+                  }
+                ]
+              },
+              "cosmo:fixture": false
+            }
+          }
+        ],
+        "encounters": [],
+        "apertures": [],
+        "listeningPasses": [],
+        "claims": [],
+        "measurements": [],
+        "regions": [],
+        "observations": [
+          {
+            "id": "urn:cosmoaudition:masa:observation:cac668897de0ff784bd784af:9",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:cac668897de0ff784bd784af:6",
+            "field": "carbon_intensity_actual",
+            "observedAt": "2026-09-26T11:59:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "label": "Carbon",
+                "layer": "earth",
+                "acquisitionMode": "archive"
+              }
+            },
+            "value": {
+              "state": "known",
+              "value": 250
+            },
+            "unit": {
+              "state": "known",
+              "value": "gCO2/kWh"
+            },
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "method": {
+              "name": "COSMOAUDITION canonical source parsing",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "parser": "JSON data[0].intensity.actual/forecast/index",
+                "canonicalRepresentationRef": "urn:cosmoaudition:masa:canonical-representation:cac668897de0ff784bd784af:7",
+                "fixture": false
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-09-26T11:59:00.000Z",
+              "reason": "archive"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:effectiveFreshness": {
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "sourceTimestamp": "2026-09-26T11:59:00.000Z",
+                "status": "unknown",
+                "reason": "archive",
+                "mappingAllowed": false
+              },
+              "cosmo:signal": {
+                "originalSignalId": "carbon_intensity_actual",
+                "confidence": "high"
+              },
+              "cosmo:representationRef": "urn:cosmoaudition:masa:canonical-representation:cac668897de0ff784bd784af:7"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:derived-observation:cac668897de0ff784bd784af:b",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:cac668897de0ff784bd784af:6",
+            "field": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "observedAt": "2026-09-26T11:59:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "sourceObservationRef": "urn:cosmoaudition:masa:observation:cac668897de0ff784bd784af:9",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "normalizationDomain": [
+                  0,
+                  1
+                ]
+              }
+            },
+            "value": {
+              "state": "unknown",
+              "reason": "The core mapping decision produced no normalized value: archive-input.",
+              "reasonCode": "mapping_input_not_executable"
+            },
+            "unit": {
+              "state": "known",
+              "value": "normalized-ratio"
+            },
+            "epistemicStatus": "derived",
+            "temporalCharacter": "context",
+            "signalKind": "derived",
+            "method": {
+              "name": "COSMOAUDITION core mapping normalization",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "sourceField": "carbon_intensity_actual",
+                "scale": "linear",
+                "inputRange": [
+                  0,
+                  500
+                ],
+                "clipping": "clamp"
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-09-26T11:59:00.000Z",
+              "reason": "archive"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:sourceObservationRef": "urn:cosmoaudition:masa:observation:cac668897de0ff784bd784af:9",
+              "cosmo:controlDecision": {
+                "status": "refused",
+                "reason": "archive-input"
+              }
+            }
+          }
+        ],
+        "mappings": [
+          {
+            "id": "urn:cosmoaudition:masa:mapping:cac668897de0ff784bd784af:d",
+            "type": "masa:Mapping",
+            "sourceObservationRefs": [
+              "urn:cosmoaudition:masa:derived-observation:cac668897de0ff784bd784af:b"
+            ],
+            "sourceField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "sourceUnit": "normalized-ratio",
+            "inputRange": [
+              0,
+              1
+            ],
+            "normalization": {
+              "method": "linear",
+              "clipping": "clamp",
+              "parameters": {
+                "sourceMappingScale": "linear",
+                "sourceInputRange": [
+                  0,
+                  500
+                ],
+                "normalizedObservationAlreadyDerived": true
+              }
+            },
+            "target": "earth.carbonDrone.filterCutoff",
+            "outputRange": [
+              260,
+              2600
+            ],
+            "curve": "linear",
+            "smoothingMs": 1200,
+            "cadence": "once per accepted snapshot",
+            "missingData": "hold-explicitly",
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls. This control relation is authored; it is not the source's voice or an identity claim.",
+            "actors": [
+              "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2"
+            ],
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "extensions": {
+              "cosmo:mappingCatalogId": "carbon-intensity-filter",
+              "cosmo:description": "Reported Great Britain grid carbon intensity opens the carbon drone filter and exposes more upper partials.",
+              "cosmo:layer": "earth",
+              "cosmo:decisionImplementation": "@cosmoaudition/core.executeMapping"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "id": "urn:cosmoaudition:masa:relation:cac668897de0ff784bd784af:a",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:observation:cac668897de0ff784bd784af:9",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:canonical-representation:cac668897de0ff784bd784af:7",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:cac668897de0ff784bd784af:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:cac668897de0ff784bd784af:8",
+            "extensions": {
+              "cosmo:relationRole": "canonical-representation-to-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:cac668897de0ff784bd784af:f",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:derived-observation:cac668897de0ff784bd784af:b",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:observation:cac668897de0ff784bd784af:9",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:derive-receipt:cac668897de0ff784bd784af:c",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:derive-receipt:cac668897de0ff784bd784af:c",
+            "extensions": {
+              "cosmo:relationRole": "raw-to-mapping-normalized-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:cac668897de0ff784bd784af:g",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:canonical-representation:cac668897de0ff784bd784af:7",
+            "predicate": "masa:captured-from",
+            "object": "urn:cosmoaudition:masa:source:cac668897de0ff784bd784af:6",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:cac668897de0ff784bd784af:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:cac668897de0ff784bd784af:8",
+            "extensions": {}
+          }
+        ],
+        "policies": [
+          {
+            "id": "urn:cosmoaudition:masa:policy:cac668897de0ff784bd784af:3",
+            "type": "masa:Policy",
+            "policyKind": "composite",
+            "issuer": "urn:cosmoaudition:masa:operator:cac668897de0ff784bd784af:1",
+            "status": "active",
+            "validFrom": "2026-09-26T12:00:00.000Z",
+            "disclosure": "private",
+            "rules": [
+              {
+                "id": "urn:cosmoaudition:masa:policy-rule:cac668897de0ff784bd784af:4",
+                "effect": "permission",
+                "actions": [
+                  "read",
+                  "validate",
+                  "derive",
+                  "map",
+                  "export"
+                ],
+                "targets": [
+                  "urn:cosmoaudition:masa:record:cac668897de0ff784bd784af:0"
+                ],
+                "subjects": [
+                  "urn:cosmoaudition:masa:operator:cac668897de0ff784bd784af:1",
+                  "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2"
+                ],
+                "authorityBasis": {
+                  "state": "known",
+                  "value": "Local operator request for a private COSMOAUDITION snapshot record."
+                },
+                "constraints": {
+                  "recordCountPerSnapshot": 1,
+                  "maximumSignals": 256,
+                  "maximumSources": 64,
+                  "disclosure": "private",
+                  "publicProjectionRequiresReview": true
+                },
+                "duties": [
+                  "Preserve source attribution, fixture status, unknown values, staleness, mapping decisions, and lineage.",
+                  "Do not interpret a completed mapping receipt as evidence that sound was heard."
+                ]
+              }
+            ],
+            "review": {
+              "contact": {
+                "state": "unknown",
+                "reason": "No external review contact is configured for this local record.",
+                "reasonCode": "not_configured"
+              },
+              "route": {
+                "state": "known",
+                "value": "Review the private MASA record before any publication or external bundle export."
+              }
+            },
+            "extensions": {}
+          }
+        ],
+        "contexts": [],
+        "agentRuns": [],
+        "capabilities": [],
+        "integrity": {
+          "state": "known",
+          "value": {
+            "algorithm": "sha-256",
+            "digest": "cac668897de0ff784bd784af92443847081464b8e31b82f1bf9aba134752e01c",
+            "byteLength": 402,
+            "scope": "canonical input snapshot before MASA projection"
+          }
+        },
+        "history": {
+          "mode": "embedded",
+          "events": [
+            {
+              "id": "urn:cosmoaudition:masa:observe-receipt:cac668897de0ff784bd784af:8",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:cac668897de0ff784bd784af:0",
+              "sequence": 0,
+              "operationType": "matter.observe-source-snapshot",
+              "effectClass": "read",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:source:cac668897de0ff784bd784af:6"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:canonical-representation:cac668897de0ff784bd784af:7",
+                "urn:cosmoaudition:masa:observation:cac668897de0ff784bd784af:9"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:cac668897de0ff784bd784af:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "sourceId": "carbon_intensity_gb",
+                "acquisitionMode": "archive",
+                "fixture": false,
+                "canonicalSha256": "aa68c3aecc25f946ab132b8d4b29692c7aa832ee4d6a24da37df47d6d021f408"
+              },
+              "policyEvaluation": {
+                "action": "read",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:cac668897de0ff784bd784af:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:cac668897de0ff784bd784af:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:cac668897de0ff784bd784af:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:cac668897de0ff784bd784af:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:derive-receipt:cac668897de0ff784bd784af:c",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:cac668897de0ff784bd784af:0",
+              "sequence": 1,
+              "operationType": "matter.derive-observation",
+              "effectClass": "derive",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:observation:cac668897de0ff784bd784af:9",
+                "urn:cosmoaudition:masa:canonical-representation:cac668897de0ff784bd784af:7"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:derived-observation:cac668897de0ff784bd784af:b"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:cac668897de0ff784bd784af:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "sourceField": "carbon_intensity_actual",
+                "outputField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+                "decision": "refused",
+                "reason": "archive-input"
+              },
+              "policyEvaluation": {
+                "action": "derive",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:cac668897de0ff784bd784af:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:cac668897de0ff784bd784af:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:cac668897de0ff784bd784af:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:cac668897de0ff784bd784af:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "The derived observation preserves an explicit unknown value; no numeric substitute was created."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:mapping-receipt:cac668897de0ff784bd784af:e",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:cac668897de0ff784bd784af:0",
+              "sequence": 2,
+              "operationType": "matter.map",
+              "effectClass": "map",
+              "finalStatus": "refused",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:cac668897de0ff784bd784af:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:derived-observation:cac668897de0ff784bd784af:b"
+              ],
+              "outputs": [],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:cac668897de0ff784bd784af:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "mappingRef": "urn:cosmoaudition:masa:mapping:cac668897de0ff784bd784af:d",
+                "target": "earth.carbonDrone.filterCutoff",
+                "missingData": "hold-explicitly",
+                "decision": "refused",
+                "reason": "archive-input"
+              },
+              "policyEvaluation": {
+                "action": "map",
+                "targets": [
+                  "urn:cosmoaudition:masa:mapping:cac668897de0ff784bd784af:d"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:cac668897de0ff784bd784af:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:cac668897de0ff784bd784af:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:cac668897de0ff784bd784af:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "interface_reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "The core mapping decision refused output: archive-input."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            }
+          ]
+        },
+        "extensions": {
+          "cosmo:observation-series": [],
+          "cosmo:snapshot": {
+            "generatedAt": "2026-09-26T12:00:00.000Z",
+            "mode": "archive",
+            "signalCount": 1,
+            "sourceCount": 1,
+            "recordCardinality": "one-record-per-snapshot"
+          },
+          "cosmo:adapter": {
+            "package": "@cosmoaudition/masa",
+            "version": "0.2.1",
+            "completionSemantics": "scheduled-not-heard"
+          }
+        }
+      },
+      "observationRef": "urn:cosmoaudition:masa:observation:cac668897de0ff784bd784af:9",
+      "generation": {
+        "contract": "cosmo/generation-frame/v1",
+        "frameId": "cosmo:frame:2026-09-26T12:00:00.000Z",
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "acquisitionMode": "archive",
+        "originMode": "archive",
+        "relation": {
+          "of": "signal"
+        },
+        "sourceRegister": "non-acoustic",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-09-26T11:59:00.000Z",
+            "sourceId": "carbon_intensity_gb",
+            "confidence": "high",
+            "staleAfterSeconds": 1800,
+            "acquisitionMode": "archive",
+            "freshness": {
+              "evaluatedAt": "2026-09-26T12:00:00.000Z",
+              "sourceTimestamp": "2026-09-26T11:59:00.000Z",
+              "status": "unknown",
+              "reason": "archive",
+              "mappingAllowed": false
+            },
+            "sphere": "human",
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "normalization": {
+              "method": "linear",
+              "inputRange": [
+                0,
+                500
+              ],
+              "outputRange": [
+                0,
+                1
+              ],
+              "clipping": "clamp",
+              "basis": "Authored operational envelope for bounded modulation; not a physical minimum, maximum, threshold, or forecast."
+            }
+          }
+        ],
+        "receipts": [
+          {
+            "mappingId": "germ-carbon-duration",
+            "signalId": "carbon_intensity_actual",
+            "layer": "earth",
+            "target": "duration",
+            "inputValue": 250,
+            "previousOutput": null,
+            "confidence": "high",
+            "smoothingMs": 0,
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls.",
+            "status": "refused",
+            "reason": "archive-input",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-carbon-duration",
+            "sourceClock": "2026-09-26T11:59:00.000Z",
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": "reported",
+            "inputRange": [
+              0,
+              500
+            ],
+            "outputRange": [
+              0.1,
+              30
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": [
+              {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "provider": "https://api.carbonintensity.org.uk/intensity",
+                "licenseNote": "Public API attribution required.",
+                "limitation": "Great Britain grid data only.",
+                "originalAcquisitionMode": "archive"
+              }
+            ]
+          },
+          {
+            "mappingId": "germ-quake-steps",
+            "signalId": "earthquake_count_1h",
+            "layer": "earth",
+            "target": "steps",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Earthquake events are not spectacle; zero events is valid data and network failure is not.",
+            "status": "refused",
+            "reason": "archive-input",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-quake-steps",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              30
+            ],
+            "outputRange": [
+              1,
+              250
+            ],
+            "curve": "quantized",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          },
+          {
+            "mappingId": "germ-coal-guidance",
+            "signalId": "generation_mix_coal",
+            "layer": "earth",
+            "target": "cfg_scale",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Fuel share is a regional generation mix value and should remain labelled by geography.",
+            "status": "refused",
+            "reason": "archive-input",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-coal-guidance",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              100
+            ],
+            "outputRange": [
+              0,
+              25
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          }
+        ],
+        "execution": "not_requested",
+        "perceptualAccess": "not_established"
+      }
+    },
+    {
+      "name": "fixture",
+      "snapshot": {
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "mode": "fixture",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "sourceId": "carbon_intensity_gb",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-07-01T00:00:00.000Z",
+            "staleAfterSeconds": 1800,
+            "confidence": "high",
+            "temporalCharacter": "aggregate",
+            "epistemicStatus": "reported",
+            "signalKind": "observation"
+          }
+        ],
+        "sources": []
+      },
+      "record": {
+        "$schema": "https://masa.sonicfield.org/schemas/0.2.0/matter-record.schema.json",
+        "@context": "https://masa.sonicfield.org/contexts/0.2.0/masa.jsonld",
+        "masaVersion": "0.2.0",
+        "id": "urn:cosmoaudition:masa:record:0fc1c70afb65e21c76058349:0",
+        "type": "masa:MatterRecord",
+        "revision": 1,
+        "profiles": [
+          "core",
+          "observation",
+          "mapping"
+        ],
+        "createdAt": "2026-09-26T12:00:00.000Z",
+        "createdBy": "urn:cosmoaudition:masa:operator:0fc1c70afb65e21c76058349:1",
+        "title": "COSMOAUDITION snapshot 2026-09-26T12:00:00.000Z",
+        "description": "One bounded MASA account of a COSMOAUDITION snapshot. Sources, canonical parsed representations, raw observations, derived normalized observations, authored mappings, and control-frame representations remain distinct and traceable.",
+        "disclosure": "private",
+        "registers": [
+          "digital-technical",
+          "compositional-transformational",
+          "ecological-territorial"
+        ],
+        "scales": [
+          "object-event",
+          "environmental",
+          "infrastructural",
+          "planetary"
+        ],
+        "actors": [
+          {
+            "id": "urn:cosmoaudition:masa:operator:0fc1c70afb65e21c76058349:1",
+            "type": "masa:Actor",
+            "actorKind": "human",
+            "roles": [
+              "local-operator",
+              "record-creator"
+            ],
+            "name": {
+              "state": "unknown",
+              "reason": "The snapshot request did not include an operator name.",
+              "reasonCode": "not_provided"
+            },
+            "disclosure": "private",
+            "extensions": {}
+          },
+          {
+            "id": "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2",
+            "type": "masa:Actor",
+            "actorKind": "software",
+            "roles": [
+              "canonical-parser",
+              "observation-deriver",
+              "mapping-engine"
+            ],
+            "name": {
+              "state": "known",
+              "value": "COSMOAUDITION MASA snapshot adapter"
+            },
+            "attribution": "Sonic Matter Framework / Cosmoaudition System",
+            "disclosure": "private",
+            "extensions": {}
+          }
+        ],
+        "sources": [
+          {
+            "id": "urn:cosmoaudition:masa:source:0fc1c70afb65e21c76058349:6",
+            "type": "masa:Source",
+            "sourceKind": "local-fixture",
+            "identification": {
+              "state": "known",
+              "value": {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "acquisitionMode": "fixture",
+                "fixture": true,
+                "intendedProviderLocator": "https://api.carbonintensity.org.uk/intensity"
+              }
+            },
+            "locator": {
+              "state": "known",
+              "value": "cosmoaudition-fixture:carbon_intensity_gb"
+            },
+            "authority": {
+              "state": "unknown",
+              "reason": "Fixture data does not assert live provider authority.",
+              "reasonCode": "fixture_only"
+            },
+            "rights": {
+              "state": "known",
+              "value": {
+                "note": "Public API attribution required.",
+                "verification": "applies to the intended provider; no live retrieval occurred"
+              }
+            },
+            "coverage": {
+              "state": "known",
+              "value": {
+                "layers": [
+                  "earth",
+                  "cloud"
+                ],
+                "limitation": "Great Britain grid data only."
+              }
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-07-01T00:00:00.000Z",
+              "reason": "fixture"
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:0fc1c70afb65e21c76058349:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:source": {
+                "originalSourceId": "carbon_intensity_gb",
+                "fixture": true,
+                "route": "api-proxy"
+              }
+            }
+          }
+        ],
+        "representations": [
+          {
+            "id": "urn:cosmoaudition:masa:canonical-representation:0fc1c70afb65e21c76058349:7",
+            "type": "masa:Representation",
+            "role": "data",
+            "mediaType": "application/json",
+            "format": {
+              "state": "known",
+              "value": "COSMOAUDITION canonical parsed source snapshot 0.2.0"
+            },
+            "availability": "available",
+            "locator": {
+              "state": "known",
+              "value": "urn:sha256:143ab24cc1e27d90e760dcafd52d03b7bb6ed45ad4912a4cb0a37b5ce687c5de"
+            },
+            "extent": {
+              "state": "known",
+              "value": {
+                "byteLength": 1010
+              }
+            },
+            "integrity": {
+              "state": "known",
+              "value": {
+                "algorithm": "sha-256",
+                "digest": "143ab24cc1e27d90e760dcafd52d03b7bb6ed45ad4912a4cb0a37b5ce687c5de",
+                "byteLength": 1010,
+                "status": "verified"
+              }
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:0fc1c70afb65e21c76058349:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:canonicalPayload": {
+                "schema": "cosmoaudition:canonical-source-snapshot:0.2.0",
+                "generatedAt": "2026-09-26T12:00:00.000Z",
+                "mode": "fixture",
+                "sourceId": "carbon_intensity_gb",
+                "definition": {
+                  "id": "carbon_intensity_gb",
+                  "label": "Carbon Intensity GB",
+                  "status": "ready",
+                  "layers": [
+                    "earth",
+                    "cloud"
+                  ],
+                  "sphere": "human",
+                  "temporalCharacter": "aggregate",
+                  "endpoint": "https://api.carbonintensity.org.uk/intensity",
+                  "route": "api-proxy",
+                  "ttlSeconds": 1800,
+                  "unit": "gCO2/kWh",
+                  "parser": "JSON data[0].intensity.actual/forecast/index",
+                  "limitation": "Great Britain grid data only.",
+                  "fallback": "Last-known-good cache as stale; otherwise null-valued signal.",
+                  "licenseNote": "Public API attribution required."
+                },
+                "health": null,
+                "cache": null,
+                "signals": [
+                  {
+                    "id": "carbon_intensity_actual",
+                    "label": "Carbon",
+                    "sourceId": "carbon_intensity_gb",
+                    "layer": "earth",
+                    "unit": "gCO2/kWh",
+                    "value": 250,
+                    "normalized": 0.5,
+                    "timestamp": "2026-07-01T00:00:00.000Z",
+                    "staleAfterSeconds": 1800,
+                    "confidence": "high",
+                    "temporalCharacter": "aggregate",
+                    "epistemicStatus": "reported",
+                    "signalKind": "observation"
+                  }
+                ]
+              },
+              "cosmo:fixture": true
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:control-frame:0fc1c70afb65e21c76058349:g",
+            "type": "masa:Representation",
+            "role": "data",
+            "mediaType": "application/vnd.cosmoaudition.control-frame+json",
+            "format": {
+              "state": "known",
+              "value": "COSMOAUDITION ControlFrame 0.2.0"
+            },
+            "availability": "available",
+            "locator": {
+              "state": "known",
+              "value": "urn:sha256:7e58f46330a8333909cfa55ad1787010d47f15d974702dceb50d6b6112459bb2"
+            },
+            "extent": {
+              "state": "known",
+              "value": {
+                "byteLength": 584
+              }
+            },
+            "integrity": {
+              "state": "known",
+              "value": {
+                "algorithm": "sha-256",
+                "digest": "7e58f46330a8333909cfa55ad1787010d47f15d974702dceb50d6b6112459bb2",
+                "byteLength": 584,
+                "status": "verified"
+              }
+            },
+            "policyRefs": [
+              "urn:cosmoaudition:masa:policy:0fc1c70afb65e21c76058349:3"
+            ],
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:controlFrame": {
+                "type": "cosmo:ControlFrame",
+                "version": "0.2.1",
+                "mappingRef": "urn:cosmoaudition:masa:mapping:0fc1c70afb65e21c76058349:d",
+                "catalogMappingId": "carbon-intensity-filter",
+                "sourceObservationRef": "urn:cosmoaudition:masa:derived-observation:0fc1c70afb65e21c76058349:b",
+                "target": "earth.carbonDrone.filterCutoff",
+                "rawNormalizedValue": 0.5,
+                "normalizedValue": 0.5,
+                "mappingAmount": 1,
+                "outputValue": 1430,
+                "decisionStatus": "applied",
+                "decisionReason": "mapped",
+                "confidence": "high",
+                "smoothingMs": 1200,
+                "generatedAt": "2026-09-26T12:00:00.000Z",
+                "scheduledOnly": true,
+                "completionSemantics": "scheduled-not-heard"
+              }
+            }
+          }
+        ],
+        "encounters": [],
+        "apertures": [],
+        "listeningPasses": [],
+        "claims": [],
+        "measurements": [],
+        "regions": [],
+        "observations": [
+          {
+            "id": "urn:cosmoaudition:masa:observation:0fc1c70afb65e21c76058349:9",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:0fc1c70afb65e21c76058349:6",
+            "field": "carbon_intensity_actual",
+            "observedAt": "2026-07-01T00:00:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "label": "Carbon",
+                "layer": "earth",
+                "acquisitionMode": "fixture"
+              }
+            },
+            "value": {
+              "state": "known",
+              "value": 250
+            },
+            "unit": {
+              "state": "known",
+              "value": "gCO2/kWh"
+            },
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "method": {
+              "name": "COSMOAUDITION canonical source parsing",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "parser": "JSON data[0].intensity.actual/forecast/index",
+                "canonicalRepresentationRef": "urn:cosmoaudition:masa:canonical-representation:0fc1c70afb65e21c76058349:7",
+                "fixture": true
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-07-01T00:00:00.000Z",
+              "reason": "fixture"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:effectiveFreshness": {
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "sourceTimestamp": "2026-07-01T00:00:00.000Z",
+                "status": "unknown",
+                "reason": "fixture",
+                "mappingAllowed": true
+              },
+              "cosmo:signal": {
+                "originalSignalId": "carbon_intensity_actual",
+                "confidence": "high"
+              },
+              "cosmo:representationRef": "urn:cosmoaudition:masa:canonical-representation:0fc1c70afb65e21c76058349:7"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:derived-observation:0fc1c70afb65e21c76058349:b",
+            "type": "masa:Observation",
+            "sourceRef": "urn:cosmoaudition:masa:source:0fc1c70afb65e21c76058349:6",
+            "field": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "observedAt": "2026-07-01T00:00:00.000Z",
+            "scope": {
+              "state": "known",
+              "value": {
+                "sourceObservationRef": "urn:cosmoaudition:masa:observation:0fc1c70afb65e21c76058349:9",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "normalizationDomain": [
+                  0,
+                  1
+                ]
+              }
+            },
+            "value": {
+              "state": "known",
+              "value": 0.5
+            },
+            "unit": {
+              "state": "known",
+              "value": "normalized-ratio"
+            },
+            "epistemicStatus": "derived",
+            "temporalCharacter": "context",
+            "signalKind": "derived",
+            "method": {
+              "name": "COSMOAUDITION core mapping normalization",
+              "version": {
+                "state": "known",
+                "value": "0.2.1"
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "sourceField": "carbon_intensity_actual",
+                "scale": "linear",
+                "inputRange": [
+                  0,
+                  500
+                ],
+                "clipping": "clamp"
+              },
+              "apparatusRefs": [
+                "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2"
+              ]
+            },
+            "health": {
+              "status": "healthy",
+              "checkedAt": "2026-09-26T12:00:00.000Z"
+            },
+            "freshness": {
+              "status": "unknown",
+              "observedAt": "2026-07-01T00:00:00.000Z",
+              "reason": "fixture"
+            },
+            "disclosure": "private",
+            "extensions": {
+              "cosmo:sourceObservationRef": "urn:cosmoaudition:masa:observation:0fc1c70afb65e21c76058349:9",
+              "cosmo:controlDecision": {
+                "status": "applied",
+                "reason": "mapped"
+              }
+            }
+          }
+        ],
+        "mappings": [
+          {
+            "id": "urn:cosmoaudition:masa:mapping:0fc1c70afb65e21c76058349:d",
+            "type": "masa:Mapping",
+            "sourceObservationRefs": [
+              "urn:cosmoaudition:masa:derived-observation:0fc1c70afb65e21c76058349:b"
+            ],
+            "sourceField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+            "sourceUnit": "normalized-ratio",
+            "inputRange": [
+              0,
+              1
+            ],
+            "normalization": {
+              "method": "linear",
+              "clipping": "clamp",
+              "parameters": {
+                "sourceMappingScale": "linear",
+                "sourceInputRange": [
+                  0,
+                  500
+                ],
+                "normalizedObservationAlreadyDerived": true
+              }
+            },
+            "target": "earth.carbonDrone.filterCutoff",
+            "outputRange": [
+              260,
+              2600
+            ],
+            "curve": "linear",
+            "smoothingMs": 1200,
+            "cadence": "once per accepted snapshot",
+            "missingData": "hold-explicitly",
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls. This control relation is authored; it is not the source's voice or an identity claim.",
+            "actors": [
+              "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2"
+            ],
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "extensions": {
+              "cosmo:mappingCatalogId": "carbon-intensity-filter",
+              "cosmo:description": "Reported Great Britain grid carbon intensity opens the carbon drone filter and exposes more upper partials.",
+              "cosmo:layer": "earth",
+              "cosmo:decisionImplementation": "@cosmoaudition/core.executeMapping"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "id": "urn:cosmoaudition:masa:relation:0fc1c70afb65e21c76058349:a",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:observation:0fc1c70afb65e21c76058349:9",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:canonical-representation:0fc1c70afb65e21c76058349:7",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:0fc1c70afb65e21c76058349:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:0fc1c70afb65e21c76058349:8",
+            "extensions": {
+              "cosmo:relationRole": "canonical-representation-to-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:0fc1c70afb65e21c76058349:f",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:derived-observation:0fc1c70afb65e21c76058349:b",
+            "predicate": "masa:derived-from",
+            "object": "urn:cosmoaudition:masa:observation:0fc1c70afb65e21c76058349:9",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:derive-receipt:0fc1c70afb65e21c76058349:c",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:derive-receipt:0fc1c70afb65e21c76058349:c",
+            "extensions": {
+              "cosmo:relationRole": "raw-to-mapping-normalized-observation"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:0fc1c70afb65e21c76058349:h",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:control-frame:0fc1c70afb65e21c76058349:g",
+            "predicate": "masa:mapped-from",
+            "object": "urn:cosmoaudition:masa:derived-observation:0fc1c70afb65e21c76058349:b",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:mapping-receipt:0fc1c70afb65e21c76058349:e",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:mapping-receipt:0fc1c70afb65e21c76058349:e",
+            "extensions": {
+              "cosmo:mappingRef": "urn:cosmoaudition:masa:mapping:0fc1c70afb65e21c76058349:d"
+            }
+          },
+          {
+            "id": "urn:cosmoaudition:masa:relation:0fc1c70afb65e21c76058349:i",
+            "type": "masa:Relation",
+            "subject": "urn:cosmoaudition:masa:canonical-representation:0fc1c70afb65e21c76058349:7",
+            "predicate": "masa:captured-from",
+            "object": "urn:cosmoaudition:masa:source:0fc1c70afb65e21c76058349:6",
+            "assertedBy": "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2",
+            "createdAt": "2026-09-26T12:00:00.000Z",
+            "basis": [
+              {
+                "ref": "urn:cosmoaudition:masa:observe-receipt:0fc1c70afb65e21c76058349:8",
+                "role": "operation"
+              }
+            ],
+            "operationRef": "urn:cosmoaudition:masa:observe-receipt:0fc1c70afb65e21c76058349:8",
+            "extensions": {}
+          }
+        ],
+        "policies": [
+          {
+            "id": "urn:cosmoaudition:masa:policy:0fc1c70afb65e21c76058349:3",
+            "type": "masa:Policy",
+            "policyKind": "composite",
+            "issuer": "urn:cosmoaudition:masa:operator:0fc1c70afb65e21c76058349:1",
+            "status": "active",
+            "validFrom": "2026-09-26T12:00:00.000Z",
+            "disclosure": "private",
+            "rules": [
+              {
+                "id": "urn:cosmoaudition:masa:policy-rule:0fc1c70afb65e21c76058349:4",
+                "effect": "permission",
+                "actions": [
+                  "read",
+                  "validate",
+                  "derive",
+                  "map",
+                  "export"
+                ],
+                "targets": [
+                  "urn:cosmoaudition:masa:record:0fc1c70afb65e21c76058349:0"
+                ],
+                "subjects": [
+                  "urn:cosmoaudition:masa:operator:0fc1c70afb65e21c76058349:1",
+                  "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2"
+                ],
+                "authorityBasis": {
+                  "state": "known",
+                  "value": "Local operator request for a private COSMOAUDITION snapshot record."
+                },
+                "constraints": {
+                  "recordCountPerSnapshot": 1,
+                  "maximumSignals": 256,
+                  "maximumSources": 64,
+                  "disclosure": "private",
+                  "publicProjectionRequiresReview": true
+                },
+                "duties": [
+                  "Preserve source attribution, fixture status, unknown values, staleness, mapping decisions, and lineage.",
+                  "Do not interpret a completed mapping receipt as evidence that sound was heard."
+                ]
+              }
+            ],
+            "review": {
+              "contact": {
+                "state": "unknown",
+                "reason": "No external review contact is configured for this local record.",
+                "reasonCode": "not_configured"
+              },
+              "route": {
+                "state": "known",
+                "value": "Review the private MASA record before any publication or external bundle export."
+              }
+            },
+            "extensions": {}
+          }
+        ],
+        "contexts": [],
+        "agentRuns": [],
+        "capabilities": [],
+        "integrity": {
+          "state": "known",
+          "value": {
+            "algorithm": "sha-256",
+            "digest": "0fc1c70afb65e21c76058349fc85ae782d75c8822530196ecd733a3972b79e58",
+            "byteLength": 402,
+            "scope": "canonical input snapshot before MASA projection"
+          }
+        },
+        "history": {
+          "mode": "embedded",
+          "events": [
+            {
+              "id": "urn:cosmoaudition:masa:observe-receipt:0fc1c70afb65e21c76058349:8",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:0fc1c70afb65e21c76058349:0",
+              "sequence": 0,
+              "operationType": "matter.observe-source-snapshot",
+              "effectClass": "read",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:source:0fc1c70afb65e21c76058349:6"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:canonical-representation:0fc1c70afb65e21c76058349:7",
+                "urn:cosmoaudition:masa:observation:0fc1c70afb65e21c76058349:9"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:0fc1c70afb65e21c76058349:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "sourceId": "carbon_intensity_gb",
+                "acquisitionMode": "fixture",
+                "fixture": true,
+                "canonicalSha256": "143ab24cc1e27d90e760dcafd52d03b7bb6ed45ad4912a4cb0a37b5ce687c5de"
+              },
+              "policyEvaluation": {
+                "action": "read",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:0fc1c70afb65e21c76058349:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:0fc1c70afb65e21c76058349:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:0fc1c70afb65e21c76058349:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:0fc1c70afb65e21c76058349:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "The source and observations are attributed to a local fixture; no live provider retrieval is claimed."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:derive-receipt:0fc1c70afb65e21c76058349:c",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:0fc1c70afb65e21c76058349:0",
+              "sequence": 1,
+              "operationType": "matter.derive-observation",
+              "effectClass": "derive",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:observation:0fc1c70afb65e21c76058349:9",
+                "urn:cosmoaudition:masa:canonical-representation:0fc1c70afb65e21c76058349:7"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:derived-observation:0fc1c70afb65e21c76058349:b"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:0fc1c70afb65e21c76058349:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "implementation": "@cosmoaudition/core.executeMapping",
+                "mappingCatalogId": "carbon-intensity-filter",
+                "sourceField": "carbon_intensity_actual",
+                "outputField": "carbon_intensity_actual.normalized.carbon-intensity-filter",
+                "decision": "applied",
+                "reason": "mapped"
+              },
+              "policyEvaluation": {
+                "action": "derive",
+                "targets": [
+                  "urn:cosmoaudition:masa:record:0fc1c70afb65e21c76058349:0"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:0fc1c70afb65e21c76058349:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:0fc1c70afb65e21c76058349:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:0fc1c70afb65e21c76058349:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            },
+            {
+              "id": "urn:cosmoaudition:masa:mapping-receipt:0fc1c70afb65e21c76058349:e",
+              "type": "masa:OperationReceipt",
+              "recordId": "urn:cosmoaudition:masa:record:0fc1c70afb65e21c76058349:0",
+              "sequence": 2,
+              "operationType": "matter.map",
+              "effectClass": "map",
+              "finalStatus": "completed",
+              "startedAt": "2026-09-26T12:00:00.000Z",
+              "endedAt": "2026-09-26T12:00:00.000Z",
+              "actors": [
+                "urn:cosmoaudition:masa:adapter:0fc1c70afb65e21c76058349:2"
+              ],
+              "inputs": [
+                "urn:cosmoaudition:masa:derived-observation:0fc1c70afb65e21c76058349:b"
+              ],
+              "outputs": [
+                "urn:cosmoaudition:masa:control-frame:0fc1c70afb65e21c76058349:g"
+              ],
+              "tool": {
+                "state": "known",
+                "value": {
+                  "id": "urn:cosmoaudition:masa:tool:0fc1c70afb65e21c76058349:5",
+                  "name": "COSMOAUDITION MASA snapshot adapter",
+                  "version": {
+                    "state": "known",
+                    "value": "0.2.1"
+                  },
+                  "kind": "software",
+                  "provider": {
+                    "state": "known",
+                    "value": "Sonic Matter Framework"
+                  },
+                  "adapter": {
+                    "state": "known",
+                    "value": "@cosmoaudition/masa"
+                  }
+                }
+              },
+              "parameters": {
+                "mappingRef": "urn:cosmoaudition:masa:mapping:0fc1c70afb65e21c76058349:d",
+                "target": "earth.carbonDrone.filterCutoff",
+                "missingData": "hold-explicitly",
+                "decision": "applied",
+                "reason": "mapped",
+                "normalizedValue": 0.5,
+                "outputValue": 1430,
+                "scheduledOnly": true,
+                "completionSemantics": "scheduled-not-heard"
+              },
+              "policyEvaluation": {
+                "action": "map",
+                "targets": [
+                  "urn:cosmoaudition:masa:mapping:0fc1c70afb65e21c76058349:d"
+                ],
+                "policyRefs": [
+                  "urn:cosmoaudition:masa:policy:0fc1c70afb65e21c76058349:3"
+                ],
+                "result": "permitted",
+                "evaluatedAt": "2026-09-26T12:00:00.000Z",
+                "evaluator": "urn:cosmoaudition:masa:operator:0fc1c70afb65e21c76058349:1",
+                "authorityRefs": [
+                  "urn:cosmoaudition:masa:policy-rule:0fc1c70afb65e21c76058349:4"
+                ],
+                "reasons": [
+                  "The active private COSMOAUDITION policy permits this bounded local operation."
+                ]
+              },
+              "reversibility": "interface_reversible",
+              "determinism": {
+                "state": "deterministic"
+              },
+              "warnings": [
+                "Completion records a produced control frame scheduled for the interface; it does not claim that sound was rendered, heard, or verified."
+              ],
+              "errors": [],
+              "claimRefs": [],
+              "extensions": {}
+            }
+          ]
+        },
+        "extensions": {
+          "cosmo:observation-series": [],
+          "cosmo:snapshot": {
+            "generatedAt": "2026-09-26T12:00:00.000Z",
+            "mode": "fixture",
+            "signalCount": 1,
+            "sourceCount": 1,
+            "recordCardinality": "one-record-per-snapshot"
+          },
+          "cosmo:adapter": {
+            "package": "@cosmoaudition/masa",
+            "version": "0.2.1",
+            "completionSemantics": "scheduled-not-heard"
+          }
+        }
+      },
+      "observationRef": "urn:cosmoaudition:masa:observation:0fc1c70afb65e21c76058349:9",
+      "generation": {
+        "contract": "cosmo/generation-frame/v1",
+        "frameId": "cosmo:frame:2026-09-26T12:00:00.000Z",
+        "generatedAt": "2026-09-26T12:00:00.000Z",
+        "acquisitionMode": "fixture",
+        "originMode": "fixture",
+        "relation": {
+          "of": "signal"
+        },
+        "sourceRegister": "non-acoustic",
+        "signals": [
+          {
+            "id": "carbon_intensity_actual",
+            "label": "Carbon",
+            "layer": "earth",
+            "unit": "gCO2/kWh",
+            "value": 250,
+            "normalized": 0.5,
+            "timestamp": "2026-07-01T00:00:00.000Z",
+            "sourceId": "carbon_intensity_gb",
+            "confidence": "high",
+            "staleAfterSeconds": 1800,
+            "acquisitionMode": "fixture",
+            "freshness": {
+              "evaluatedAt": "2026-09-26T12:00:00.000Z",
+              "sourceTimestamp": "2026-07-01T00:00:00.000Z",
+              "status": "unknown",
+              "reason": "fixture",
+              "mappingAllowed": true
+            },
+            "sphere": "human",
+            "epistemicStatus": "reported",
+            "temporalCharacter": "aggregate",
+            "signalKind": "observation",
+            "normalization": {
+              "method": "linear",
+              "inputRange": [
+                0,
+                500
+              ],
+              "outputRange": [
+                0,
+                1
+              ],
+              "clipping": "clamp",
+              "basis": "Authored operational envelope for bounded modulation; not a physical minimum, maximum, threshold, or forecast."
+            }
+          }
+        ],
+        "receipts": [
+          {
+            "mappingId": "germ-carbon-duration",
+            "signalId": "carbon_intensity_actual",
+            "layer": "earth",
+            "target": "duration",
+            "inputValue": 250,
+            "previousOutput": null,
+            "confidence": "high",
+            "smoothingMs": 0,
+            "epistemicNote": "This maps the provider's regional carbon-intensity estimate, not planetary carbon intensity; generation-mix mappings remain separate controls.",
+            "status": "applied",
+            "reason": "mapped",
+            "rawNormalizedInput": 0.5,
+            "normalizedInput": 0.5,
+            "mappingAmount": 1,
+            "outputValue": 15.049999999999999,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-carbon-duration",
+            "sourceClock": "2026-07-01T00:00:00.000Z",
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": "reported",
+            "inputRange": [
+              0,
+              500
+            ],
+            "outputRange": [
+              0.1,
+              30
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": [
+              {
+                "sourceId": "carbon_intensity_gb",
+                "label": "Carbon Intensity GB",
+                "provider": "https://api.carbonintensity.org.uk/intensity",
+                "licenseNote": "Public API attribution required.",
+                "limitation": "Great Britain grid data only.",
+                "originalAcquisitionMode": "fixture"
+              }
+            ]
+          },
+          {
+            "mappingId": "germ-quake-steps",
+            "signalId": "earthquake_count_1h",
+            "layer": "earth",
+            "target": "steps",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Earthquake events are not spectacle; zero events is valid data and network failure is not.",
+            "status": "skipped",
+            "reason": "missing-signal",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-quake-steps",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              30
+            ],
+            "outputRange": [
+              1,
+              250
+            ],
+            "curve": "quantized",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          },
+          {
+            "mappingId": "germ-coal-guidance",
+            "signalId": "generation_mix_coal",
+            "layer": "earth",
+            "target": "cfg_scale",
+            "inputValue": null,
+            "previousOutput": null,
+            "confidence": null,
+            "smoothingMs": 0,
+            "epistemicNote": "Fuel share is a regional generation mix value and should remain labelled by geography.",
+            "status": "skipped",
+            "reason": "missing-signal",
+            "normalizedInput": null,
+            "outputValue": null,
+            "receiptId": "cosmo:frame:2026-09-26T12:00:00.000Z:germ-coal-guidance",
+            "sourceClock": null,
+            "captureClock": "2026-09-26T12:00:00.000Z",
+            "evidenceClass": null,
+            "inputRange": [
+              0,
+              100
+            ],
+            "outputRange": [
+              0,
+              25
+            ],
+            "curve": "linear",
+            "operation": "generation.parameter.propose",
+            "effect": "intention-only",
+            "attribution": []
+          }
+        ],
+        "execution": "not_requested",
+        "perceptualAccess": "not_established"
+      }
+    }
+  ]
+}

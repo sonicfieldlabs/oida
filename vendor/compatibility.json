@@ -1,0 +1,41 @@
+{
+  "contract": "listeningstackweb/local-packages/v1",
+  "packages": [
+    {
+      "distribution": "akousma",
+      "version": "0.8.3",
+      "wheel": "vendor/akousma-0.8.3-py3-none-any.whl",
+      "sha256": "cd1349b6cb15ead974416e626d19555ef79f3482df24441dd53156fa479f07f0",
+      "source_repository": "earworm",
+      "base_commit": "a653276bc3314e65f9fe0eb7bfa2f2c1532aabd8",
+      "build_state": "Unpublished phase 1 local candidate; source changes are not represented by base_commit alone.",
+      "source_changes_sha256": "2a8103d792b7615626f02c73ddb76377e06294d85fac1a7a45fac1013063fd17",
+      "source_changes_basis": "SHA256 of compact sorted JSON mapping package-input source paths to file SHA256; tracked and untracked nonignored inputs, no dependency trees",
+      "published": false
+    },
+    {
+      "distribution": "akousmata",
+      "version": "0.8.2",
+      "wheel": "vendor/akousmata-0.8.2-py3-none-any.whl",
+      "sha256": "fc5a39968904903a408dbeccc2caf47123e789c670d348dc5e0f943d151dc22e",
+      "source_repository": "akousmata",
+      "base_commit": "f4afeec6dd6e79d25935132a22e908746278b439",
+      "build_state": "Unpublished phase 1 local candidate; source changes are not represented by base_commit alone.",
+      "source_changes_sha256": "7142dafb487ca208fddfbd518a2d8b6dafa10e5ceeb33c6ae9d3ab7b78a6faaa",
+      "source_changes_basis": "SHA256 of compact sorted JSON mapping package-input source paths to file SHA256; tracked and untracked nonignored inputs, no dependency trees",
+      "published": false
+    },
+    {
+      "distribution": "akouo-contract",
+      "version": "0.10.0",
+      "wheel": "vendor/akouo_contract-0.10.0-py3-none-any.whl",
+      "sha256": "36c45fa83473744b5e3e55a914238e2aa55b9de4fae74f3a546b20994c2f2993",
+      "source_repository": "akouo",
+      "base_commit": "e242541b4bebb03cc1ce00dd845a19ce4e94b2c4",
+      "build_state": "Unpublished phase 1 local candidate; source changes are not represented by base_commit alone.",
+      "source_changes_sha256": "dcb38631f7a6c8b207582613a81ea8e3c92a5f54a8c8e204c4b89bffffcd5967",
+      "source_changes_basis": "SHA256 of compact sorted JSON mapping package-input source paths to file SHA256; tracked and untracked nonignored inputs, no dependency trees",
+      "published": false
+    }
+  ]
+}

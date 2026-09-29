@@ -127,6 +127,9 @@ def receive_observation(
     source_observation = next(
         o for o in req.source_record["observations"] if o["id"] == req.observation_ref
     )
+    from oida.observation_freshness import evaluate_observation
+
+    received_freshness = evaluate_observation(req.source_record, source_observation, now=timestamp)
     route_request = dict(
         contract="akouo/agent-route/v0.1",
         request_id=decision_id,
@@ -202,6 +205,7 @@ def receive_observation(
     record["listening"]["oida.source"] = dict(
         contract="oida/observation-admission/v1",
         payload=dict(
+            effective_freshness=received_freshness,
             producer_id=req.producer_id,
             consent=req.consent,
             consent_ref=req.consent_ref,
@@ -240,6 +244,7 @@ def receive_observation(
         status="received",
         record=record,
         claim_evaluation=claim_evaluation,
+        effective_freshness=received_freshness,
         akousma_id=record["akousma_id"] if req.remember else None,
         execution="not_requested",
     )

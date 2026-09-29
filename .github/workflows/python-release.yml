@@ -14,7 +14,13 @@ permissions:
   contents: read
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+    with:
+      release_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref_name }}
+
   build:
+    needs: checks
     name: Build and verify distributions
     runs-on: ubuntu-latest
     steps:
@@ -24,27 +30,6 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref_name }}
           fetch-depth: 0
           path: oida
-
-      - name: Checkout AKOÚŌ contract
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/akouo
-          ref: 110fe5b848f67840a724f347039b7b071b64e272
-          path: akouo
-
-      - name: Checkout Earworm
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/earworm
-          ref: a8b827b98222e8d437a766052c78860b311b3067
-          path: earworm
-
-      - name: Checkout Akousmata
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/akousmata
-          ref: 23015d71ba28eb4092163cdfe2a7ccab632949be
-          path: akousmata
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -66,12 +51,16 @@ jobs:
           project_version="$(uv version --short)"
           test "$release_version" = "$project_version"
 
-      - name: Build all canonical distributions
+      - name: Verify reviewed canonical wheels
+        working-directory: oida
+        run: shasum -a 256 -c vendor/SHA256SUMS
+
+      - name: Assemble reviewed canonical wheels and build Oída
         run: |
           mkdir -p release/akouo release/akousma release/akousmata release/oida
-          uv build --out-dir "$GITHUB_WORKSPACE/release/akouo" akouo
-          uv build --out-dir "$GITHUB_WORKSPACE/release/akousma" earworm/packages/py-akousma
-          uv build --out-dir "$GITHUB_WORKSPACE/release/akousmata" akousmata
+          cp oida/vendor/akouo_contract-*.whl release/akouo/
+          cp oida/vendor/akousma-*.whl release/akousma/
+          cp oida/vendor/akousmata-*.whl release/akousmata/
           uv build --out-dir "$GITHUB_WORKSPACE/release/oida" oida
 
       - name: Check distribution metadata
