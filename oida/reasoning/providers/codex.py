@@ -13,6 +13,7 @@ from typing import Any
 
 from oida import __version__ as OIDA_VERSION
 from oida.reasoning.contracts import (
+    strict_output_schema,
     ModelDescriptor,
     ProviderDescriptor,
     ProviderRequest,
@@ -251,7 +252,7 @@ def _execute_codex_turn(
                 break
         if not final_text:
             raise ProviderTransportError("Codex returned no final agent message")
-        return {"content": final_text, "duration_ms": duration_ms}
+        return {"content": final_text, "duration_ms": duration_ms, "model_id": started.get("model")}
 
 
 def _list_codex_models(
@@ -392,7 +393,7 @@ class CodexProvider:
             effort = "medium"
         return {
             "input": [{"type": "text", "text": request.user_prompt}],
-            "outputSchema": request.response_schema,
+            "outputSchema": strict_output_schema(request.response_schema),
             "effort": effort,
             "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
             "approvalPolicy": "never",
@@ -419,7 +420,7 @@ class CodexProvider:
             if not isinstance(content, str):
                 raise ProviderTransportError("Codex returned no content")
             duration = result.get("duration_ms")
-            return normalized_result(
+            normalized = normalized_result(
                 request,
                 content=content,
                 latency_ms=(
@@ -429,5 +430,7 @@ class CodexProvider:
                 ),
                 metadata={"isolation": "ephemeral_no_tools_read_only_no_network"},
             )
+            actual_model = result.get("model_id")
+            return normalized.model_copy(update={"model_id": actual_model}) if isinstance(actual_model, str) and actual_model else normalized
         except (ProviderTransportError, ValueError) as exc:
             return error_result(request, exc, latency_ms=(time.monotonic() - started) * 1000)

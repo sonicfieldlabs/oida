@@ -2,16 +2,24 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import re
 import sys
 import threading
 import time
+from akousma.resource_admission import admitted
+from oida.operation_control import checkpoint
+
+from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
 
 from oida.config import HF_INSTRUCT_ID, HF_THINKING_ID, OidaConfig
 from oida.engine_base import EngineResult, EngineUnavailable, MossEngine
 from oida.recipes import GenerationSettings
+from oida import stage_timing
+from oida.pass_provenance import WeightHashCache, pass_receipt, weight_inventory
+from oida.input_binding import input_array_receipt, binding_for_receipt, verify_input_binding, unknown_binding
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,8 +37,15 @@ class MpsMossEngine(MossEngine):
     def __init__(self, config: OidaConfig) -> None:
         self.config = config
         self._models: dict[str, object] = {}
+        self._weight_provenance: dict[str, dict] = {}
+        self._loaded_revisions: dict[str, str | None] = {}
         self._processors: dict[str, object] = {}
         self._model_overrides: dict[str, str] = {}
+        self._load_receipts: dict[str, dict] = {}
+        data_dir = getattr(config, "data_dir", None)
+        self._weight_cache = WeightHashCache(
+            Path(data_dir) / "cache" / "weight-inventory.json" if data_dir else None
+        )
         self._lock = threading.Lock()
         if config.moss_audio_repo:
             src = config.moss_audio_repo
@@ -50,7 +65,8 @@ class MpsMossEngine(MossEngine):
         return self.model_id_for_kind(settings.model_kind)
 
     def model_id_for_kind(self, model_kind: str) -> str:
-        override = self._model_overrides.get(model_kind)
+        from oida.engine_base import selected_model
+        override = selected_model() or self._model_overrides.get(model_kind)
         if override:
             return override
         return (
@@ -64,17 +80,33 @@ class MpsMossEngine(MossEngine):
             raise ValueError(f"unknown model kind: {model_kind}")
         self._model_overrides[model_kind] = model_id
 
-    def _load_pair(self, model_id: str) -> tuple[object, object]:
-        if model_id in self._models:
-            return self._models[model_id], self._processors[model_id]
+    def ensure_ready(self) -> None:
+        """Raise EngineUnavailable if this engine could not serve a pass.
+
+        Cheap: it imports the MOSS modules and touches no weights, so a caller
+        can ask "would you work?" without paying for a ten-gigabyte load.
+        """
+        self._moss_modules()
+
+    def _moss_modules(self):
         try:
-            from src.audio_io import load_audio  # noqa: F401
+            from src.audio_io import load_audio
             from src.modeling_moss_audio import MossAudioModel
             from src.processing_moss_audio import MossAudioProcessor
         except Exception as exc:
+            repo = self.config.moss_audio_repo
+            where = f"looked in {repo}" if repo else "no MOSS-Audio repo is configured"
             raise EngineUnavailable(
-                "official MOSS-Audio repo/dependencies are unavailable; set OIDA_MOSS_AUDIO_REPO (legacy HMM_/AEAR_ accepted) and install MOSS extras"
+                "official MOSS-Audio repo/dependencies are unavailable "
+                f"({where}; {type(exc).__name__}: {exc}). Set OIDA_MOSS_AUDIO_REPO "
+                "(legacy HMM_/AEAR_ accepted) and install the moss extras."
             ) from exc
+        return load_audio, MossAudioModel, MossAudioProcessor
+
+    def _load_pair(self, model_id: str) -> tuple[object, object]:
+        if model_id in self._models:
+            return self._models[model_id], self._processors[model_id]
+        load_audio, MossAudioModel, MossAudioProcessor = self._moss_modules()
 
         _adapt_moss_generation(MossAudioModel)
 
@@ -82,6 +114,24 @@ class MpsMossEngine(MossEngine):
             self._clear_loaded_models(except_model=None)
 
         model_source, revision = self._resolve_model_source(model_id)
+        if revision is not None:
+            # Resolve one pinned snapshot before either model or processor loading;
+            # the existing explicit Hub policy above controls network permission.
+            from huggingface_hub import snapshot_download
+            model_source = snapshot_download(repo_id=model_source, revision=revision,
+                local_files_only=self.config.hf_hub_offline)
+        loading = time.perf_counter()
+        verification: dict = {}
+        weights = weight_inventory(
+            Path(model_source), cache=self._weight_cache, verification=verification
+        )
+        inventory_ms = round((time.perf_counter() - loading) * 1000)
+        # Transformers 5 loads checkpoint tensors on a thread pool by default.
+        # On macOS/Python 3.13 this can deadlock inside safetensors' PyO3
+        # initialization while holding the GIL, leaving the owner unable even
+        # to answer health requests. Keep this MPS owner on the synchronous
+        # checkpoint path unless the operator explicitly overrides it.
+        os.environ.setdefault("HF_DEACTIVATE_ASYNC_LOAD", "1")
         model = MossAudioModel.from_pretrained(
             model_source,
             dtype="auto",
@@ -93,6 +143,22 @@ class MpsMossEngine(MossEngine):
         model.eval()
         _adapt_moss_whisper_layers(model)
         processor = _load_moss_processor(MossAudioProcessor, model_source, revision=revision)
+        # Only locally resolved weight bytes are claimed. Remote cache resolution
+        # is deliberately unknown here; an immutable revision is a separate fact.
+        if weights.get("status") == "known":
+            # Attribute the resident model to the same on-disk inventory that
+            # surrounded loading; never relabel a resident model after a file edit.
+            # With the cache this re-reads each file's identity on disk, not its bytes:
+            # a write during loading changes the identity and forces a fresh hash.
+            if weight_inventory(Path(model_source), cache=self._weight_cache) != weights:
+                raise EngineUnavailable("Weights changed during model loading")
+        self._weight_provenance[model_id] = weights
+        self._load_receipts[model_id] = {
+            "load_ms": round((time.perf_counter() - loading) * 1000),
+            "inventory_ms": inventory_ms,
+            "weights_verification": verification or None,
+        }
+        self._loaded_revisions[model_id] = revision or getattr(getattr(model, "config", None), "_commit_hash", None)
         self._models[model_id] = model
         self._processors[model_id] = processor
         return model, processor
@@ -129,6 +195,81 @@ class MpsMossEngine(MossEngine):
         )
         return source, revision.lower()
 
+    def _kind_of_loaded(self, model_id: str, requested_kind: str) -> tuple[str, str]:
+        """The kind of the model actually loaded, and how that was established.
+
+        Found by qualifying MOSS-Audio-4B-Thinking for the first time (G7). A
+        request that selects the model by id rather than by kind leaves
+        ``settings.model_kind`` at its default of "instruct", and the receipt then
+        recorded the right weights beside the wrong kind — a record asserting that
+        a listening used the instruct model when it used the thinking one.
+
+        The weights are the ground truth here, so the kind is derived from the
+        model actually loaded and the requested kind is kept beside it when the
+        two disagree. Nothing is silently corrected: a disagreement is recorded,
+        because it usually means a caller asked for something it did not get.
+        """
+        thinking = str(getattr(self.config, "thinking_model", "") or "")
+        instruct = str(getattr(self.config, "instruct_model", "") or "")
+        if thinking and str(model_id) == thinking:
+            actual = "thinking"
+        elif instruct and str(model_id) == instruct:
+            actual = "instruct"
+        else:
+            # An override or an unknown path: the request is the only thing that
+            # says what this was meant to be, and it says so as a request.
+            return requested_kind, "requested; the loaded model is not a configured pair member"
+        if actual == requested_kind:
+            return actual, "loaded_model"
+        return actual, f"loaded_model; the request asked for {requested_kind!r}"
+
+    def _input_receipt(self, model_id, model_kind, raw_audio, rate):
+        kind, kind_basis = self._kind_of_loaded(model_id, model_kind)
+        return pass_receipt(model=model_id, provider="local-moss", model_kind=kind,
+            model_kind_basis=kind_basis,
+            revision=self._loaded_revisions.get(model_id),
+            revision_basis="loaded_model" if self._loaded_revisions.get(model_id) else "unknown",
+            weights=self._weight_provenance.get(model_id),
+            effective_input=input_array_receipt(raw_audio, rate))
+
+    def prepare_input_binding(self, audio_path: str, model_kind: str = "instruct") -> dict:
+        # Preparation never loads weights or changes residency. The same loader
+        # and receipt constructor are used by generate under this model lock.
+        with self._locked_until_deadline():
+            model_id = self.model_id_for_kind(model_kind)
+            if model_id not in self._models or model_id not in self._processors:
+                return unknown_binding("Selected local model is not loaded")
+            try:
+                from src.audio_io import load_audio
+            except ImportError:
+                return unknown_binding("Loaded adapter audio preprocessing is unavailable")
+            rate = int(self._processors[model_id].config.mel_sr)
+            raw_audio = load_audio(str(Path(audio_path)), sample_rate=rate)
+            return binding_for_receipt(self._input_receipt(model_id, model_kind, raw_audio, rate))
+
+    @contextmanager
+    def _locked_until_deadline(self):
+        """Hold the model lock, waiting no longer than the caller's deadline.
+
+        Found at runtime on 24 September: a listening whose deadline was six seconds away
+        waited 31 s here, behind another listening, because preparation took this lock
+        without a bound before generate's own bounded wait was ever reached.
+        """
+        from oida.operation_control import DeadlineReached, current_deadline
+
+        deadline = current_deadline()
+        if deadline is None:
+            self._lock.acquire()
+        elif deadline - time.time() <= 0 or not self._lock.acquire(timeout=deadline - time.time()):
+            raise DeadlineReached(
+                "operation deadline reached while waiting for the audio model; nothing was generated"
+            )
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+    @admitted("oida", checkpoint=lambda *a, **k: checkpoint())
     def prewarm(self, model_kind: str = "instruct") -> None:
         model_id = self.model_id_for_kind(model_kind)
         with self._lock:
@@ -161,6 +302,9 @@ class MpsMossEngine(MossEngine):
             return
         self._models = {key: value for key, value in self._models.items() if key == except_model}
         self._processors = {key: value for key, value in self._processors.items() if key == except_model}
+        self._weight_provenance = {key: value for key, value in self._weight_provenance.items() if key == except_model}
+        self._loaded_revisions = {key: value for key, value in self._loaded_revisions.items() if key == except_model}
+        self._load_receipts = {key: value for key, value in self._load_receipts.items() if key == except_model}
         try:
             import gc
             import torch
@@ -173,6 +317,7 @@ class MpsMossEngine(MossEngine):
         except Exception:
             pass
 
+    @admitted("oida", checkpoint=lambda *a, **k: checkpoint())
     def generate(
         self,
         audio_path: str,
@@ -193,15 +338,34 @@ class MpsMossEngine(MossEngine):
         except Exception as exc:
             raise EngineUnavailable("MOSS-Audio runtime dependencies are unavailable") from exc
 
+        from oida.operation_control import DeadlineReached, current_deadline
+
         model_id = self._model_id(settings)
+        deadline = current_deadline()
         # Serialize model load/evict + generate. FastAPI dispatches the sync endpoint
         # handlers across a worker thread pool, so without this lock two concurrent
         # requests could evict a model out from under an in-flight inference (resident
         # mode "single") or run parallel generate() calls on the one MPS device.
-        with self._lock:
+        # Waiting for it is timed and, under a caller's deadline, bounded.
+        waiting = time.perf_counter()
+        if deadline is None:
+            self._lock.acquire()
+        elif deadline - time.time() <= 0 or not self._lock.acquire(timeout=deadline - time.time()):
+            raise DeadlineReached(
+                "operation deadline reached while waiting for the audio model; nothing was generated"
+            )
+        wait_ms = round((time.perf_counter() - waiting) * 1000)
+        try:
+            cold = model_id not in self._models
+            loading = time.perf_counter()
             model, processor = self._load_pair(model_id)
+            load_ms = round((time.perf_counter() - loading) * 1000)
             start = time.perf_counter()
             raw_audio = load_audio(str(Path(audio_path)), sample_rate=processor.config.mel_sr)
+            rate = int(processor.config.mel_sr)
+            provenance = self._input_receipt(model_id, settings.model_kind, raw_audio, rate)
+            binding = verify_input_binding(provenance, requested_kind=settings.model_kind)
+            provenance["input_binding_id"] = binding["binding_id"]
             inputs = processor(text=prompt, audios=[raw_audio], return_tensors="pt")
             inputs = inputs.to(model.device)
             if inputs.get("audio_data") is not None:
@@ -225,13 +389,64 @@ class MpsMossEngine(MossEngine):
                         "top_k": settings.top_k,
                     }
                 )
+            if deadline is not None:
+                remaining = deadline - time.time()
+                if remaining < 1:
+                    raise DeadlineReached(
+                        "operation deadline reached before generation; nothing was generated"
+                    )
+                # transformers stops generating once this much wall time has passed.
+                generation_kwargs["max_time"] = remaining
+            memory_at_start = host_memory()
+            generating = time.perf_counter()
             with torch.no_grad():
                 out = model.generate(
                     **inputs,
                     **generation_kwargs,
                 )
-            text = _safe_decode(processor, out[0, inputs["input_ids"].shape[1] :])
+            new_ids = out[0, inputs["input_ids"].shape[1] :]
+            generated = int(new_ids.shape[0])
+            eos = processor.tokenizer.eos_token_id
+            if generated and int(new_ids[-1]) == eos:
+                stop = "eos"
+            elif generated >= settings.max_new_tokens:
+                stop = "max_new_tokens"
+            elif deadline is not None and time.time() >= deadline - 0.25:
+                stop = "deadline"
+            else:
+                stop = "other"
+            loaded = self._load_receipts.get(model_id) or {}
+            provenance["generation"] = {
+                "engine_wait_ms": wait_ms,
+                # A cold pass loaded its model first; the load is not generation time.
+                "cold_load": cold,
+                "load_ms": load_ms if cold else 0,
+                **({"inventory_ms": loaded.get("inventory_ms")} if cold else {}),
+                "preprocess_ms": round((generating - start) * 1000),
+                "generate_ms": round((time.perf_counter() - generating) * 1000),
+                "new_tokens": generated,
+                "max_new_tokens": settings.max_new_tokens,
+                "stop_reason": stop,
+                "deadline_bound": deadline is not None,
+                **(
+                    {"host_memory": {"start": memory_at_start, "end": host_memory()}}
+                    if memory_at_start
+                    else {}
+                ),
+            }
+            if cold and loaded.get("weights_verification"):
+                provenance["weights_verification"] = loaded["weights_verification"]
+            if cold:
+                stage_timing.record("model_load", load_ms)
+            stage_timing.record("generate", provenance["generation"]["generate_ms"])
+            if stop == "deadline":
+                raise DeadlineReached(
+                    "operation deadline reached during generation; the partial output was discarded"
+                )
+            text = _safe_decode(processor, new_ids)
             wall_ms = round((time.perf_counter() - start) * 1000)
+        finally:
+            self._lock.release()
         reasoning_trace, answer = split_reasoning(text)
         return EngineResult(
             text=answer,
@@ -240,7 +455,42 @@ class MpsMossEngine(MossEngine):
             settings=settings,
             reasoning_trace=reasoning_trace,
             wall_ms=wall_ms,
+            pass_provenance=[provenance],
         )
+
+
+def host_memory() -> dict | None:
+    """The machine's memory state around a pass, for reading a slow one afterwards.
+
+    A pass on 24 September ran at 0.6 tokens/s and nothing retained could say why. That
+    evening this Mac had 38.7 GB of 39.9 GB of swap in use, and a second, long-running
+    MOSS process held 25 GB; the Testing owner's own model was mostly compressed. Swap,
+    available memory and the kernel's pressure level (1 normal, 2 warning, 4 critical)
+    are cheap to read and name no content.
+    """
+    try:
+        import psutil
+
+        virtual, swap = psutil.virtual_memory(), psutil.swap_memory()
+        value = {
+            "available_mb": round(virtual.available / 2**20),
+            "swap_used_mb": round(swap.used / 2**20),
+        }
+    except Exception:
+        return None
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+
+            level = subprocess.run(
+                ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+                capture_output=True, text=True, timeout=1,
+            ).stdout.strip()
+            if level.isdigit():
+                value["pressure_level"] = int(level)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return value
 
 
 def _safe_decode(processor, token_ids) -> str:

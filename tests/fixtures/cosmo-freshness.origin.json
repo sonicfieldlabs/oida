@@ -1,0 +1,13 @@
+{
+  "source": "cosmoaudition/scripts/build-freshness-fixtures.ts",
+  "producer_source_sha256": {
+    "scripts/build-freshness-fixtures.ts": "fa7df87afe4309017cc7aa58626fc34a9016b36fbb46a250649018841c038cfa",
+    "packages/core/src/control.ts": "113c3af9a29e76be5d4f4d8a4d1f856140289e3a5b0066283618e6ffd3ac7d92",
+    "packages/core/src/freshness.ts": "5c8a2520d3cb1e9b7269f2ca3730037f39f9fe86cfbd68b4bf848926b69ad62e",
+    "packages/core/src/generation-frame.ts": "a9e9899a689faad88332bcc9160fb68828a87edaa83ee0b040ee8a32bf4afbf9",
+    "packages/core/src/modulation-frame.ts": "bbb7346fc1182435731ed44810e9605ec4cdf3a93e09420cd79fbfd80289fc64",
+    "packages/masa/src/snapshotRecord.ts": "9d7123b094c1a98a76fb496225fcba43263ff46576ad8dec0d0e935f8d76f9bb"
+  },
+  "sha256": "bb573d2de0f8882d2ccf048af849b78260e3ec9613cb7ee3dd88eb1aac749db7",
+  "scope": "Deterministic owner builders; no live acquisition or perceptual evidence"
+}

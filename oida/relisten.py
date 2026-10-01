@@ -7,6 +7,7 @@ import math
 import re
 import threading
 from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -17,6 +18,7 @@ from oida.covenant import CovenantStore
 from oida.dsp import audio_info
 from oida.engine_base import EngineUnavailable, MossEngine
 from oida.listening_identity import ListeningIdentitySnapshot
+from oida.pass_provenance import SourceChangedError, audio_fingerprint, file_identity
 from oida.recipes import TARGETED_RELISTEN_REASONING
 from oida.reporting import forbidden_topics_for_text
 
@@ -84,6 +86,33 @@ class TargetedRelistener:
         audio_path = _event_audio_path(event)
         if audio_path is None:
             raise RelistenUnavailable("the original local audio is unavailable or was released")
+        segment = event.get("segment") if isinstance(event.get("segment"), dict) else {}
+        data_ref = segment.get("data_ref") if isinstance(segment.get("data_ref"), dict) else {}
+        recorded_hash = data_ref.get("sha256")
+        if recorded_hash is not None and (
+            not isinstance(recorded_hash, str)
+            or re.fullmatch(r"[a-fA-F0-9]{64}", recorded_hash) is None
+        ):
+            raise RelistenUnavailable("the original audio hash is malformed")
+        try:
+            source_identity = file_identity(audio_path.stat())
+            source_fingerprint = audio_fingerprint(audio_path)
+            if recorded_hash is not None and source_fingerprint["sha256"] != recorded_hash.lower():
+                raise RelistenUnavailable("the local audio no longer matches the original encounter")
+        except (OSError, SourceChangedError) as exc:
+            raise RelistenUnavailable("the local audio cannot be bound to this re-listening") from exc
+
+        def verify_source():
+            try:
+                if (
+                    file_identity(audio_path.stat()) != source_identity
+                    or audio_fingerprint(audio_path) != source_fingerprint
+                ):
+                    raise RelistenUnavailable("the local audio changed during targeted re-listening")
+            except (OSError, SourceChangedError) as exc:
+                raise RelistenUnavailable("the local audio changed during targeted re-listening") from exc
+
+        verify_source()
         caps = [
             cap
             for cap in (_historical_max_window(event), _active_max_window(active_engine))
@@ -174,7 +203,9 @@ class TargetedRelistener:
                             f"the {self.engine.profile} engine does not support selecting checkpoint {model_id!r}"
                         )
                 try:
+                    verify_source()
                     result = self.engine.generate(str(audio_path), prompt, TARGETED_RELISTEN_REASONING)
+                    verify_source()
                 except EngineUnavailable as exc:
                     raise RelistenUnavailable(str(exc)) from exc
                 finally:
@@ -203,6 +234,14 @@ class TargetedRelistener:
             "base_event_id": event.get("id"),
             "segment_ref": segment_ref,
             "segment_hash": data_ref.get("sha256"),
+            "source_binding": {
+                "status": "verified" if recorded_hash is not None else "unverified_original",
+                "recorded_sha256": recorded_hash,
+                "observed_sha256": source_fingerprint["sha256"],
+                "bytes": source_fingerprint["bytes"],
+                "basis": "local encoded file checked before and after inference; not a guarantee of historical identity when the original hash is absent",
+            },
+            "pass_provenance": deepcopy(result.pass_provenance),
             "conversation_id": conversation_id,
             "turn_id": turn_id,
             "question": normalized_question,

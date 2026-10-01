@@ -78,7 +78,25 @@ class JsonTransport(Protocol):
 
 
 class ProviderTransportError(RuntimeError):
-    """An expected subprocess or HTTP transport failure."""
+    """An expected subprocess or HTTP transport failure.
+
+    ``submitted`` records whether the failure occurred after the request was
+    handed to the network. A post-submission failure may still be billed by
+    the provider, so it must never be silently retried or counted as free.
+    The classification is best effort: a mid-stream connection drop can look
+    like a pre-submission error.
+    """
+
+    def __init__(
+        self,
+        message: object,
+        *,
+        status: int | None = None,
+        submitted: bool | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.submitted = submitted is not False
 
 
 class UrllibJsonTransport:
@@ -129,12 +147,18 @@ class UrllibJsonTransport:
         except urllib.error.HTTPError as exc:
             raw = exc.read(MAX_ERROR_CHARS).decode("utf-8", errors="replace")
             raise ProviderTransportError(
-                f"HTTP {exc.code}: {sanitize_error(raw)}"
+                f"HTTP {exc.code}: {sanitize_error(raw)}",
+                status=int(exc.code),
+                submitted=True,
             ) from exc
         except urllib.error.URLError as exc:
-            raise ProviderTransportError(f"HTTP connection failed: {exc.reason}") from exc
+            raise ProviderTransportError(
+                f"HTTP connection failed: {exc.reason}", submitted=True
+            ) from exc
         except (TimeoutError, UnicodeError, json.JSONDecodeError) as exc:
-            raise ProviderTransportError(f"Invalid or timed-out provider response: {exc}") from exc
+            raise ProviderTransportError(
+                f"Invalid or timed-out provider response: {exc}", submitted=True
+            ) from exc
 
 
 def _aggregate_openai_sse(value: str) -> dict[str, Any]:

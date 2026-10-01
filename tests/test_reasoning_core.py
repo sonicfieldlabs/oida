@@ -26,6 +26,7 @@ from oida.reasoning.secrets import (
     EnvironmentSecretStore,
     MacOSKeychainSecretStore,
     SecretPersistenceUnavailable,
+    SecretStoreError,
 )
 from oida.reasoning.prompts import trusted_route_instructions
 
@@ -143,15 +144,55 @@ def test_environment_and_keychain_secret_boundaries_do_not_put_values_in_argv() 
     environment = EnvironmentSecretStore({"OIDA_REASONING_OPENROUTER_API_KEY": "env-secret"})
     assert environment.get("openrouter") == "env-secret"
 
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-    with patch("oida.reasoning.secrets.subprocess.run", return_value=completed) as run:
+    # The secret must never reach argv, where `ps` would show it. It used to be
+    # sent as stdin to a bare trailing `-w`, which on a machine with no terminal
+    # stores an empty password and exits 0: the write reported success and every
+    # read came back empty. `security -i` takes the command on stdin instead,
+    # which keeps the value out of argv and actually stores it.
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        wrote = any(a == "-i" for a in argv)
+        return subprocess.CompletedProcess(
+            args=argv,
+            returncode=0,
+            stdout="keychain-secret\n" if not wrote else "",
+            stderr="",
+        )
+
+    with patch("oida.reasoning.secrets.subprocess.run", side_effect=fake_run):
         keychain = MacOSKeychainSecretStore()
         keychain.set("openrouter", "keychain-secret")
-    argv = run.call_args.args[0]
-    assert "keychain-secret" not in argv
-    assert run.call_args.kwargs["input"] == "keychain-secret\n"
-    assert argv[-1] == "-w"
+    write_argv, write_kwargs = calls[0]
+    assert "keychain-secret" not in write_argv
+    assert not any("keychain-secret" in str(part) for part in write_argv)
+    assert write_argv[-1] == "-i"
+    assert "keychain-secret" in write_kwargs["input"]
+    assert "add-generic-password" in write_kwargs["input"]
+    # The write is verified by reading it back, so an unreadable write fails.
+    assert len(calls) == 2 and "find-generic-password" in calls[1][0]
 
+
+def test_a_keychain_write_that_cannot_be_read_back_is_an_error() -> None:
+    """The bug this guards: an empty write that reported success."""
+    empty = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    with patch("oida.reasoning.secrets.subprocess.run", return_value=empty):
+        keychain = MacOSKeychainSecretStore()
+        with pytest.raises(SecretStoreError, match="did not return it"):
+            keychain.set("openrouter", "keychain-secret")
+
+
+def test_keychain_quoting_survives_awkward_values() -> None:
+    from oida.reasoning.secrets import _quote
+
+    assert _quote('plain') == '"plain"'
+    assert _quote('with "quotes"') == '"with \\"quotes\\""'
+    assert _quote('back\\slash') == '"back\\\\slash"'
+
+
+def _keychain_argv_guard() -> None:
+    keychain = MacOSKeychainSecretStore()
     with pytest.raises(ValueError, match="must start with a letter or number"):
         keychain.set("-malicious-option", "keychain-secret")
     with pytest.raises(SecretPersistenceUnavailable, match="unavailable"):
@@ -569,3 +610,47 @@ def test_local_structured_provider_is_offline_and_validator_clean() -> None:
     assert "2.50 seconds" in response.answer
     assert "private phrase" not in json.dumps(result.parsed)
     assert provider.probe().locality.value == "local"
+
+
+def test_an_event_label_quoting_the_orientation_is_refused_the_title() -> None:
+    """F8: a model handed LISTENING.md can echo it back as an event label, and
+    the first label used to become the account title. The label stays in the
+    record; it is only refused the title, and the account says so."""
+    from oida.listening import _aggregate, _echoes_identity, _event_title
+
+    identity = (
+        "# Listening\n\nThis is the Centaur Listening Central's own listening "
+        "identity. It orients attention and voice inside a workspace."
+    )
+    report = {
+        "events": [
+            {"label": "Centaur Listening Central's Listening Identity"},
+            {"label": "Bird"},
+        ],
+        "caption": {"brief": "Insects and two bird calls in still air."},
+    }
+
+    # Both echoes seen in the wild. The first is a paraphrase no substring test
+    # catches; the second is a verbatim phrase of three words that slipped under
+    # a length bar set for the first, which is why both rules are needed.
+    assert _echoes_identity("Centaur Listening Central's Listening Identity", identity)
+    assert _echoes_identity("It orients attention and voice", identity)
+    # Real labels are not refused, however long, and two words is never enough.
+    assert not _echoes_identity("Bird", identity)
+    assert not _echoes_identity("Glass, shatter", identity)
+    assert not _echoes_identity("Distant surf and gulls over dry grass", identity)
+    assert not _echoes_identity("Two distinct bird calls", identity)
+    assert not _echoes_identity("Low frequency rumble", identity)
+
+    # The next real label takes the title.
+    assert _event_title(report, "fallback", identity) == "Bird"
+    # With no identity in force nothing is refused, so behaviour is unchanged.
+    assert _event_title(report, "fallback", "").startswith("Centaur")
+
+    claims = {k: [] for k in ("measured", "inferred", "interpreted", "undetermined")}
+    aggregate = _aggregate(report, {"claim_summary": claims}, "basic", identity)
+    assert aggregate.title == "Bird"
+    assert any("repeated the listening orientation" in w for w in aggregate.warnings), (
+        "the account must say that a label was refused the title"
+    )
+    assert any("kept in the record" in w for w in aggregate.warnings)

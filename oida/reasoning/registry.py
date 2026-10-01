@@ -43,6 +43,7 @@ class _RegisteredProvider:
 class ProviderRegistry:
     def __init__(self) -> None:
         self._providers: dict[str, _RegisteredProvider] = {}
+        self.trial_budget = None
 
     def register(
         self,
@@ -189,15 +190,25 @@ class ProviderRegistry:
         return self.probe(provider_id).locality
 
     def complete(self, request: ProviderRequest) -> ProviderResult:
+        from oida.operation_control import checkpoint, remaining_timeout
+        checkpoint()
+        request = request.model_copy(update={"timeout_seconds": remaining_timeout(request.timeout_seconds)})
         entry = self._providers.get(request.provider_id)
         if entry is None:
             return error_result(request, f"Unknown reasoning provider: {request.provider_id}")
+        if self.trial_budget is not None and self.trial_budget.config.enabled:
+            endpoint = getattr(entry.adapter, "base_url", None)
+            local = request.provider_id == "local_structured" or (endpoint and endpoint_locality(endpoint) == "local")
+            if not local:
+                return error_result(request, "Cloud report reasoning is disabled during the bounded audio trial; use local report comparison")
         if not entry.enabled:
             return error_result(request, f"Reasoning provider {request.provider_id!r} is disabled")
         if request.model_id is None and entry.configured and entry.configured.default_model:
             request = request.model_copy(update={"model_id": entry.configured.default_model})
         try:
-            return entry.adapter.complete(request)
+            result = entry.adapter.complete(request)
+            checkpoint()
+            return result
         except Exception as exc:
             return error_result(request, f"Provider adapter failed: {type(exc).__name__}")
 
@@ -261,6 +272,31 @@ def build_provider_registry(
                 return None
 
         return get
+
+    # Optional local worker reuses the endpoint adapter; persisted providers are untouched.
+    import os
+    from pathlib import Path
+    import json
+    local_config = os.environ.get("OIDA_LOCAL_REASONING_CONFIG")
+    if local_config:
+        try:
+            local = json.loads(Path(local_config).read_text())
+            if not isinstance(local, dict):
+                raise ValueError("Local planning configuration must be an object")
+            from oida.reasoning.providers.base import validate_http_url
+            base_url = local.get("base_url", "http://127.0.0.1:5194/v1")
+            if not isinstance(base_url, str):
+                raise ValueError("Local planning endpoint must be a URL")
+            validate_http_url(base_url)
+            if endpoint_locality(base_url) != "local":
+                raise ValueError("Local planning requires a loopback endpoint")
+            registry.register(OpenAICompatibleProvider(
+                provider_id="local_ecology", base_url=base_url,
+                enabled=True, api_key_getter=lambda: Path(local["token_file"]).read_text().strip(),
+                display_name="Local planning · " + local["recommended_model"],
+            ), enabled=True)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # Missing optional provisioning cannot disable existing providers.
 
     ollama_cfg = configured("ollama")
     registry.register(

@@ -49,6 +49,11 @@ def gateway_manifest(*, version: str | None = None) -> dict[str, Any]:
     return {
         "name": "oida",
         "display_name": "oída",
+        "evidence_limits": {
+            "native_beyond_band_understanding": "not_established",
+            "inter_agent_negotiation": "record_exchange_only",
+            "promotion_requires": "configuration-specific apparatus, effective model input and evaluated task evidence",
+        },
         "version": version,
         "contract": GATEWAY_CONTRACT,
         "role": ["listening_agent", "agentic_listening_harness", "local_gateway"],
@@ -401,6 +406,10 @@ def harness_host_perception(
         privacy_mode=privacy_mode,
         raw_audio_policy=raw_audio_policy,
         listening_identity=identity_block,
+        # Compared against event labels so the orientation cannot become the
+        # account's title. It is not stored: the event carries identity_block,
+        # which is a digest and an application state, never the document.
+        identity_text=identity_snapshot.text,
     )
     if identity_block.get("application") == "revision_mismatch":
         event.setdefault("aggregate", {}).setdefault("warnings", []).append(

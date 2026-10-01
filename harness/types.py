@@ -3,6 +3,7 @@ from __future__ import annotations
 CLAIM_CATEGORIES = ["heard", "measured", "inferred", "interpreted", "speculative", "undetermined"]
 
 LISTENING_MODES = [
+    "agent-native-listening",
     "signal-inspection-listening",
     "acoulogical-object-listening",
     "embodied-affective-listening",

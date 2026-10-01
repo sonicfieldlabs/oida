@@ -23,17 +23,17 @@ from scripts.release_smoke import normalize_server_url
 class CompletedFeatureTests(unittest.TestCase):
     def test_release_metadata_is_consistent(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        self.assertEqual(__version__, "0.10.0")
+        self.assertEqual(__version__, "0.11.1")
         self.assertIn(
-            'version = "0.10.0"',
+            'version = "0.11.1"',
             (root / "pyproject.toml").read_text(encoding="utf-8"),
         )
         self.assertIn(
-            "version: 0.10.0",
+            "version: 0.11.1",
             (root / "CITATION.cff").read_text(encoding="utf-8"),
         )
         self.assertIn(
-            "sonicfield-oida 0.10.0",
+            "sonicfield-oida 0.11.1",
             (root / "README.md").read_text(encoding="utf-8"),
         )
 

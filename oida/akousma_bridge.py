@@ -647,6 +647,7 @@ def build_akousma_from_listen(
     disagreements: list[dict[str, Any]] | None = None,
     actions: list[dict[str, Any]] | None = None,
     auditum: dict[str, Any] | None = None,
+    lineage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a valid akousma record from an oída listen result.
 
@@ -655,6 +656,15 @@ def build_akousma_from_listen(
     entries are wrapped in the current envelope with akouo.* entries pinned to the
     ``akouo/v0.9`` contract. ``location`` (where it was heard — consent-scoped) and
     ``capture`` (past/future direction + window seconds) are spec v1.2 blocks.
+
+    ``lineage`` lets the caller declare what this listening descends from — see
+    :func:`apply_declared_lineage`. Finding P1-02: a generated sound reviewed as a
+    new subject was retained as an ordinary capture with an empty
+    ``parent_akousma_ids``, so the join between a sound and the listening it was
+    made from lived only in the caller's own run receipt, where no exporter could
+    reach it. The akousma schema has carried ``parent_akousma_ids`` and typed
+    ``relations`` since 1.x; nothing needed extending. What was missing was anyone
+    telling the owner.
     """
     origin = _normalize_origin(origin)
     enveloped = _envelope_listening(listening or {})
@@ -686,7 +696,86 @@ def build_akousma_from_listen(
     )
     if device:
         record["provenance"]["device"] = device
+    if lineage:
+        apply_declared_lineage(record, lineage)
     return record
+
+
+#: Relation types the akousma schema defines. A declared lineage may only use
+#: these; an unrecognised type is refused rather than coerced to "other", which
+#: would make every unknown kinship look like the same deliberate choice.
+DECLARED_RELATION_TYPES = (
+    "variant_of",
+    "response_to",
+    "same_source_as",
+    "recurrence_of",
+    "series_with",
+    "compares_with",
+    "replaces",
+    "other",
+)
+
+
+def apply_declared_lineage(record: dict[str, Any], declared: dict[str, Any]) -> None:
+    """Record what the caller says this listening descends from.
+
+    Finding P1-02. Oída already links ``same_source_as`` when it recognises a
+    content hash it has seen before. That is kinship oída can *observe*. This is
+    kinship only the caller knows: that this listening is a review of a sound
+    generated from that earlier account. The Central holds that fact in its run
+    receipt, and until now had no way to hand it to the owner that writes the
+    record.
+
+    Deliberately strict, because a lineage claim is an evidential one:
+
+    * ``parent_akousma_ids`` must be a list of non-empty strings, and is merged
+      rather than replaced, so an observed kinship is never overwritten by a
+      declared one.
+    * A relation's ``type`` must be one the schema defines. An unknown type is
+      refused, not mapped to ``other``.
+    * Nothing here invents a relation from proximity. The caller states it, and
+      ``note`` should say on what basis, so the claim can be contested.
+    """
+    if not isinstance(declared, dict):
+        raise ValueError("declared lineage must be an object")
+
+    lineage = record.setdefault("lineage", {})
+    parents = lineage.setdefault("parent_akousma_ids", [])
+
+    for parent in declared.get("parent_akousma_ids") or []:
+        if not isinstance(parent, str) or not parent.strip():
+            raise ValueError(f"declared parent akousma id is not a usable string: {parent!r}")
+        if parent == record.get("akousma_id"):
+            raise ValueError("a record cannot be its own parent")
+        if parent not in parents:
+            parents.append(parent)
+
+    relations = lineage.setdefault("relations", [])
+    for relation in declared.get("relations") or []:
+        if not isinstance(relation, dict):
+            raise ValueError("a declared relation must be an object")
+        kind = relation.get("type")
+        target = relation.get("target_akousma_id")
+        if kind not in DECLARED_RELATION_TYPES:
+            raise ValueError(
+                f"declared relation type {kind!r} is not one the akousma schema "
+                f"defines ({', '.join(DECLARED_RELATION_TYPES)}). An unrecognised "
+                "kinship is refused rather than recorded as 'other'."
+            )
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError("a declared relation needs a target_akousma_id")
+        if any(
+            r.get("type") == kind and r.get("target_akousma_id") == target
+            for r in relations
+        ):
+            continue
+        entry = akousma.relation(kind, target, note=relation.get("note") or "")
+        relations.append(entry)
+
+    if declared.get("operation"):
+        # The operation that produced *this* record, e.g. "generation_review".
+        # Left alone when absent: the default "listen" is usually correct.
+        lineage["operation"] = str(declared["operation"])
 
 
 def build_human_response_akousma(

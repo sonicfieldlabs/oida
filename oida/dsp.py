@@ -72,7 +72,7 @@ def load_audio(path: str | Path, target_sr: int | None = None, mono: bool = Fals
     if isinstance(max_seconds, (int, float)) and max_seconds > 0:
         frames = max(1, int(math.ceil(float(max_seconds) * _samplerate_hint(audio_path))))
     try:
-        samples, sample_rate = sf.read(str(audio_path), frames=frames, always_2d=True, dtype="float32")
+        samples, sample_rate = sf.read(str(audio_path), frames=frames if frames is not None else -1, always_2d=True, dtype="float32")
     except Exception:
         samples, sample_rate = _load_wave(audio_path, max_frames=frames)
 
@@ -325,13 +325,16 @@ def analyze_spectral_survey(audio: AudioData, analyzed_length: int) -> dict[str,
     }
 
 
-def compact_spectrogram(audio: AudioData, analyzed_length: int) -> dict[str, object] | None:
+def compact_spectrogram(audio: AudioData, analyzed_length: int, *, f_min: float = 20.0,
+                        f_max: float = 20000.0, bins: int = SPECTROGRAM_FREQUENCY_BINS) -> dict[str, object] | None:
     """Return a compact, normalized log-frequency spectrogram for UI display.
 
     It is derived from the same bounded audio used for DSP inspection, so the
     dashboard can render it even after an ephemeral capture file is released.
     Values are time-major in [0, 1], low frequencies first.
     """
+    if not 0 < f_min < f_max or not math.isfinite(f_max) or type(bins) is not int or not 1 <= bins <= 512:
+        raise ValueError('Invalid compact spectral band or bin budget')
     if analyzed_length < 512 or audio.sample_rate <= 0:
         return None
     channel = audio.samples[:analyzed_length, 0]
@@ -346,16 +349,16 @@ def compact_spectrogram(audio: AudioData, analyzed_length: int) -> dict[str, obj
     )
     window = np.hanning(window_size).astype(np.float32)
     frequencies = np.fft.rfftfreq(window_size, 1.0 / audio.sample_rate)
-    minimum_hz = max(20.0, float(audio.sample_rate) / window_size)
-    maximum_hz = min(20_000.0, float(audio.sample_rate) / 2)
+    minimum_hz = max(f_min, float(audio.sample_rate) / window_size)
+    maximum_hz = min(f_max, float(audio.sample_rate) / 2)
     if maximum_hz <= minimum_hz:
         return None
-    edges = np.geomspace(minimum_hz, maximum_hz, SPECTROGRAM_FREQUENCY_BINS + 1)
+    edges = np.geomspace(minimum_hz, maximum_hz, bins + 1)
     rows: list[list[float]] = []
     for start in starts:
         magnitudes = np.abs(np.fft.rfft(channel[start : start + window_size] * window))
         bands: list[float] = []
-        for index in range(SPECTROGRAM_FREQUENCY_BINS):
+        for index in range(bins):
             mask = (frequencies >= edges[index]) & (frequencies < edges[index + 1])
             bands.append(float(np.sqrt(np.mean(np.square(magnitudes[mask])))) if np.any(mask) else 0.0)
         rows.append(bands)

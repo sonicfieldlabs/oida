@@ -101,23 +101,34 @@ class MacOSKeychainSecretStore(SecretStore):
     def set(self, provider_id: str, value: str, name: str = "api_key") -> None:
         if not value:
             raise ValueError("secret value cannot be empty")
-        # `security` documents a final `-w` as the prompt form. Supplying the
-        # answer on stdin keeps the secret out of argv and process listings.
-        result = self._run(
+        # A trailing bare `-w` makes `security` prompt on a terminal. With no
+        # terminal it does not read the answer from stdin: it stores an empty
+        # password and exits 0, so the write looked successful and every read
+        # came back empty. `security -i` takes the whole command on stdin
+        # instead, which keeps the secret out of argv, out of `ps` and out of
+        # this process's command line, and actually stores it.
+        account = _account(provider_id, name)
+        command = " ".join(
             [
-                self.executable,
                 "add-generic-password",
                 "-U",
                 "-a",
-                _account(provider_id, name),
+                _quote(account),
                 "-s",
-                self.service,
+                _quote(self.service),
                 "-w",
-            ],
-            input_text=value + "\n",
+                _quote(value),
+            ]
         )
+        result = self._run([self.executable, "-i"], input_text=command + "\n")
         if result.returncode != 0:
             raise SecretStoreError("macOS Keychain rejected the credential update")
+        # A store that cannot return what it just accepted is not a store. This
+        # is the check whose absence let an empty write report success.
+        if self.get(provider_id, name) != value:
+            raise SecretStoreError(
+                "macOS Keychain accepted the credential but did not return it"
+            )
 
     def delete(self, provider_id: str, name: str = "api_key") -> bool:
         result = self._run(
@@ -200,6 +211,11 @@ def default_secret_store() -> SecretStore:
         return LayeredSecretStore(environment, KeyringSecretStore())
     except SecretPersistenceUnavailable:
         return environment
+
+
+def _quote(value: str) -> str:
+    """Quote one argument for `security -i`, which reads a command line."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _account(provider_id: str, name: str) -> str:

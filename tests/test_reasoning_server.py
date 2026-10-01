@@ -347,7 +347,12 @@ def test_engine_unavailable_is_reported_as_service_unavailable() -> None:
     with _Client() as client:
         audio = Path(os.environ["OIDA_AUDIO_DIR"]) / "unavailable.wav"
         audio.parent.mkdir(parents=True, exist_ok=True)
-        audio.write_bytes(b"RIFF")
+        import wave
+        with wave.open(str(audio), "wb") as stream:
+            stream.setnchannels(1)
+            stream.setsampwidth(2)
+            stream.setframerate(16000)
+            stream.writeframes(b"\x00\x00" * 1600)
         with patch(
             "oida.engine_stub.StubMossEngine.generate",
             side_effect=EngineUnavailable("configured runtime is unavailable"),

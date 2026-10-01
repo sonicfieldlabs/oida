@@ -19,7 +19,7 @@ lifecycle and integrations:
   oida agent [--library]                Open the agent or sonic library.
   oida gateway --stdio --ensure-daemon  MCP entrypoint for local agents.
   oida status | doctor | stop
-  oida integrate hermes|codex|claude|openclaw|opencode|all
+  oida integrate hermes|codex|claude|openclaw|opencode|pi|all
 
 foreground daemon:
   oida --profile mac-mps --host 127.0.0.1 --port 8765
@@ -158,7 +158,8 @@ def _lifecycle_main(args: list[str]) -> None:
         return
     if command == "integrate":
         parser = argparse.ArgumentParser(prog="oida integrate", description="Install a local Oída host adapter.")
-        parser.add_argument("target", choices=["hermes", "codex", "claude", "openclaw", "opencode", "all"])
+        from oida.integrations import TARGETS
+        parser.add_argument("target", choices=[*TARGETS, "all"])
         parser.add_argument("--json", action="store_true")
         ns = parser.parse_args(rest)
         from oida.integrations import install

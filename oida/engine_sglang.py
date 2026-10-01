@@ -6,6 +6,7 @@ from typing import Any
 
 from oida.config import OidaConfig
 from oida.engine_base import EngineResult, EngineUnavailable, MossEngine
+from oida.pass_provenance import pass_receipt
 from oida.recipes import GenerationSettings
 from oida.reasoning.providers.base import (
     JsonTransport,
@@ -27,7 +28,8 @@ class SGLangMossEngine(MossEngine):
         self._model_overrides: dict[str, str] = {}
 
     def model_id_for_kind(self, model_kind: str) -> str:
-        return self._model_overrides.get(model_kind, "moss-audio")
+        from oida.engine_base import selected_model
+        return selected_model() or self._model_overrides.get(model_kind, "moss-audio")
 
     def set_model(self, model_kind: str, model_id: str) -> None:
         if model_kind not in {"instruct", "thinking", "transcription", "music", "targeted_relisten"}:
@@ -53,6 +55,8 @@ class SGLangMossEngine(MossEngine):
         settings: GenerationSettings,
         thinking_budget: int | None = None,
     ) -> EngineResult:
+        from oida.input_binding import reject_unobservable_binding
+        reject_unobservable_binding()
         path = Path(audio_path).expanduser().resolve()
         if not path.is_file():
             raise ValueError(f"audio path does not exist or is not a file: {audio_path}")
@@ -114,6 +118,8 @@ class SGLangMossEngine(MossEngine):
             settings=settings,
             reasoning_trace=str(reasoning).strip() if reasoning else None,
             wall_ms=round((time.perf_counter() - start) * 1000),
+            pass_provenance=[pass_receipt(model=str(result.get("model") or self.model_id_for_kind(settings.model_kind)),
+                provider="sglang", model_kind=settings.model_kind)],
         )
 
 
