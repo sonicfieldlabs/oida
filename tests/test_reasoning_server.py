@@ -55,7 +55,9 @@ class _Client:
     def __enter__(self):
         self.environment.__enter__()
         self.client = TestClient(
-            create_app(profile="stub"), base_url="http://127.0.0.1"
+            create_app(profile="stub"),
+            base_url="http://127.0.0.1",
+            client=("127.0.0.1", 50000),
         )
         # The mounted FastMCP session manager is process-global and explicitly
         # single-run; endpoint tests do not need to start that lifespan.
@@ -243,7 +245,9 @@ def test_memory_note_creates_a_separate_linked_human_record() -> None:
         assert akousma.record_class(machine) == "agent"
         assert akousma.record_class(human) == "human"
         assert human["listening"]["oida.human"]["payload"]["heard_claimed"] is False
-        local_profile = client.get("/library/api/human-profile").json()
+        profile_response = client.get("/library/api/human-profile")
+        assert profile_response.status_code == 200, profile_response.text
+        local_profile = profile_response.json()
         human_meta = human["extensions"]["akousmata.app"]["human_record"]
         assert human_meta["owner_listener_id"] == local_profile["listener_id"]
         library_detail = client.get(f"/library/api/records/{body['human_akousma_id']}")
