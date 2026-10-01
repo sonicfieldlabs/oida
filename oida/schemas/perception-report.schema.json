@@ -148,6 +148,12 @@
             "string",
             "null"
           ]
+        },
+        "pass_provenance": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
         }
       }
     },

@@ -234,6 +234,22 @@ def default_provider_settings() -> dict[str, ProviderSettings]:
                 "supports_json_schema": False,
             },
         ),
+        "stepfun": ProviderSettings(
+            kind=ProviderKind.OPENAI_COMPATIBLE,
+            enabled=False,
+            locality=ProviderLocality.EXTERNAL,
+            base_url="https://api.stepfun.com/v1",
+            default_model="stepfun-ai/Step-Audio-2-mini",
+            options={"audio_capable": True, "audio_transport": "catalog"},
+        ),
+        "groq": ProviderSettings(
+            kind=ProviderKind.OPENAI_COMPATIBLE,
+            enabled=False,
+            locality=ProviderLocality.EXTERNAL,
+            base_url="https://api.groq.com/openai/v1",
+            default_model="whisper-large-v3-turbo",
+            options={"audio_capable": True, "audio_transport": "openai_transcription"},
+        ),
     }
     for provider_id in ("codex", "claude", "hermes", "openclaw", "opencode"):
         providers[provider_id] = ProviderSettings(
@@ -385,6 +401,7 @@ EvidenceKind = Literal[
     "transcript",
     "memory",
     "relisten",
+    "reference",
 ]
 
 
@@ -440,7 +457,10 @@ class ReasoningHypothesis(StrictModel):
 class RequestedAction(StrictModel):
     type: Literal["targeted_relisten"]
     question: str = Field(min_length=1, max_length=4000)
-    time_range: dict[str, float] | None = None
+    time_range: dict[str, float] | None = Field(default=None, json_schema_extra={
+        "anyOf": [{"type": "object", "properties": {"start_s": {"type": "number"}, "end_s": {"type": "number"}},
+                   "required": ["start_s", "end_s"], "additionalProperties": False}, {"type": "null"}]
+    })
 
     @field_validator("time_range")
     @classmethod
@@ -490,6 +510,28 @@ def reasoning_response_schema() -> dict[str, Any]:
 
 _SECRET_FIELD_PARTS = ("api_key", "apikey", "token", "secret", "password", "authorization", "credential_value")
 _PROVIDER_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+
+
+def strict_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Transport-only strict schema; canonical validation still accepts defaults.
+
+    Codex and strict OpenAI-compatible transports require every object property
+    in required, including Pydantic fields with defaults. Nullable fields keep
+    their null branch. Never mutate the shared canonical request schema.
+    """
+    from copy import deepcopy
+    def visit(value):
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        result = {key: visit(item) for key, item in value.items()}
+        if result.get("type") == "object" and "properties" in result:
+            result["required"] = list(result["properties"])
+            result["additionalProperties"] = False
+        result.pop("default", None)
+        return result
+    return visit(deepcopy(schema))
 
 
 def _assert_no_secret_fields(value: Any, *, path: str = "options") -> None:

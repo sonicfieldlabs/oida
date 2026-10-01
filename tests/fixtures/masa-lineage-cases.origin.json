@@ -1,0 +1,9 @@
+{
+  "canonical_source": "MASA/examples/0.2.0/lineage-cases.json",
+  "generator": "MASA/scripts/generate-lineage-cases.ts",
+  "tooling_version": "0.2.1",
+  "protocol_version": "0.2.0",
+  "sha256": "f15afc9005887c91576a0d0e980243b1d874201bbbb2b513ab8290b3ebefd685",
+  "license": "MIT",
+  "license_file": "masa-LICENSE"
+}

@@ -1,5 +1,88 @@
 # Changelog
 
+## Unreleased — observation freshness at reception
+
+- Package 0.11.2 with receiving-time freshness, repaired owner packages and updated registry dependencies.
+- Add `effective_freshness` to observation reception and its persisted source-admission metadata, evaluated against the receiving clock and declared expiry.
+- Preserve source snapshots, hashes, producer freshness and receiving claim boundaries. Stale/future/archive observations remain attributable accounts; reception requests no execution and does not make them current.
+
+## 0.11.1 — Station aperture integration and phases 0–3 audit
+
+- Preserve the selected gateway route while adding native DSP from the same frozen excerpt.
+- Add source-bound read-only previews, band-specific measurements and explicit retained-view deadlines.
+- Publish ordinary listening and native evidence in one governed record; expose actual Mac ring bounds.
+- Require distinct Akousma/Akousmata 0.8.1 artifacts for the atomic publication API.
+
+
+## 0.11.0 — local expansion Phase 2
+
+- Add owner-resolved apertures, bounded multiwindow DSP, native evidence reports
+  and atomic Akousmata 0.8 audio/derivative publication with retention gates.
+- Add revision-bound runtime radio registration with pinned public fetching,
+  revocation and playlist refusal; expose the configured system-output lifecycle.
+- Add optional, isolated NSGT/Kymatio workers through installer qualification;
+  project retained measurements into the existing situated-reasoning policy path.
+- Preserve legacy model routes and separate digital measurements from physical
+  capture, model competence and human access. See `docs/native-listening.md`.
+
+## Unreleased — full-model source hardware qualification
+
+- Add an offline MPS profiling tool with decoder preflight, bounded synthetic
+  inputs and sampled driver/tensor memory alongside wall timing.
+- Record full-weight Instruct/Thinking and actual owner-API measurements. Retain
+  single residency and one source worker; document the FFmpeg 8 library requirement
+  for the pinned TorchCodec runtime and observed cold-load control latency.
+
+## Unreleased — bounded source scheduling
+
+- Add a bounded FIFO source-job API with independent expiry, queued cancellation,
+  dispatch-time covenant checks and durable restart outcomes. Reuse capture
+  supervision and the existing gateway without changing model residency.
+- Record observed queue/capture/listening timing and explicitly scoped process
+  peak RSS. Full-model/GPU hardware qualification remains separate.
+
+## Unreleased — source acquisition and observations
+
+- Add owner-configured bounded radio, AVFoundation and ALSA capture through
+  FFmpeg, with native-format checks, pre-capture covenant gates, cancellation,
+  restart recovery and linked acquisition receipts. Reuse the existing gateway.
+- Receive Cosmoaudition MASA snapshots through the existing MASA validator and
+  AKOÚŌ/Earworm observation constructors, preserving complete source attribution
+  without an audio asset or new measurement claim.
+
+## Unreleased — bounded source admission
+
+- Accept source identity, source time, declared apparatus and consent on existing
+  listen routes; check adapter/type, effective retention and measured window size
+  before inference. Preserve the source receipt in canonical listening records.
+- Keep capture bandwidth unknown unless separately evidenced; source declarations
+  alone do not establish device support or physical capture performance.
+
+## Unreleased — prepared input binding
+
+- Add bounded, no-inference preflight for already-loaded local adapters and expose
+  actual input descriptors in spectral decisions without granting claim authority.
+- Record preprocessed-array identities in pass receipts. Provide a request-local
+  execution guard that rejects model/input drift and incompatible fallback before
+  generation. Preserve unknown states for opaque or unloaded adapters.
+
+## Unreleased — source links and operator evidence
+
+- Bind report passes to source and submitted-file hashes, sample-aligned windows
+  and unique pass IDs; reject audio changes instead of retaining stale attribution.
+- Resolve bounded operator-selected capture/representation evidence and expose
+  expiry/mismatch results. Close reference-aliasing permission bypasses by keeping
+  actual model-input support unresolved until loaded-adapter binding exists.
+
+## Unreleased — runtime attribution foundations
+
+- Compose the existing spectral gate before explicit spectral listening attempts;
+  reject unsupported or unresolved apparatus support independently of model prose.
+- Preserve every pass's model/provider attribution across aggregation and fallback;
+  capture local processor input and safetensors inventory without inferring hidden
+  provider details. See docs/runtime-attribution.md for evidence and open limits.
+
+
 ## 0.10.0 - 2026-08-11
 
 - Advanced the gateway to `oida/gateway/v0.6` and aligned the complete core

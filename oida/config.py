@@ -21,9 +21,13 @@ class OidaConfig:
     port: int
     data_dir: Path
     audio_dir: Path
+    trial_dir: Path
     moss_audio_repo: Path | None
     instruct_model: str
     thinking_model: str
+    # Optional. When set, an unavailable primary substitutes this model and the
+    # receipt says so; when unset, an unavailable primary refuses.
+    backup_model: str | None
     sglang_base_url: str
     sglang_thinking_processor: str | None
     require_model: bool
@@ -75,7 +79,11 @@ def default_data_dir() -> Path:
 
 def data_dir() -> Path:
     configured = _env("OIDA_DATA_DIR", "HMM_DATA_DIR", "AEAR_DATA_DIR")
-    return Path(configured).expanduser().resolve() if configured else default_data_dir().resolve()
+    return (
+        Path(configured).expanduser().resolve()
+        if configured
+        else default_data_dir().resolve()
+    )
 
 
 def default_audio_dir() -> Path:
@@ -85,7 +93,21 @@ def default_audio_dir() -> Path:
 def audio_dir() -> Path:
     """Where captures, uploads, and generated fixtures land. User-visible by design."""
     configured = _env("OIDA_AUDIO_DIR", "HMM_AUDIO_DIR", "AEAR_AUDIO_DIR")
-    return Path(configured).expanduser().resolve() if configured else default_audio_dir().resolve()
+    return (
+        Path(configured).expanduser().resolve()
+        if configured
+        else default_audio_dir().resolve()
+    )
+
+
+def trial_dir(active_data_dir: Path) -> Path:
+    """Global paid-trial authority; launchers must share this across workspaces."""
+    configured = _env("OIDA_TRIAL_DIR")
+    return (
+        Path(configured).expanduser().resolve()
+        if configured
+        else (active_data_dir / "budget").resolve()
+    )
 
 
 def uploads_dir() -> Path:
@@ -93,7 +115,9 @@ def uploads_dir() -> Path:
 
 
 def default_sonicfield_root() -> Path | None:
-    configured = _env("OIDA_SONICFIELD_ROOT", "HMM_SONICFIELD_ROOT", "AEAR_SONICFIELD_ROOT")
+    configured = _env(
+        "OIDA_SONICFIELD_ROOT", "HMM_SONICFIELD_ROOT", "AEAR_SONICFIELD_ROOT"
+    )
     if configured:
         return Path(configured).expanduser().resolve()
     sibling = REPO_ROOT.parent / "sonicfield"
@@ -114,7 +138,9 @@ def _truthy_env(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _model_value(configured: str | None, local_default: Path, hub_id: str, *, allow_hub: bool) -> str:
+def _model_value(
+    configured: str | None, local_default: Path, hub_id: str, *, allow_hub: bool
+) -> str:
     if configured:
         return configured
     if local_default.exists():
@@ -132,10 +158,12 @@ def _positive_float(value: str | None, *, name: str) -> float:
     return parsed
 
 
-def load_config(profile: str | None = None, host: str | None = None, port: int | None = None) -> OidaConfig:
-    moss_repo = _optional_path(_env("OIDA_MOSS_AUDIO_REPO", "HMM_MOSS_AUDIO_REPO", "AEAR_MOSS_AUDIO_REPO")) or (
-        DEFAULT_MOSS_REPO if DEFAULT_MOSS_REPO.exists() else None
-    )
+def load_config(
+    profile: str | None = None, host: str | None = None, port: int | None = None
+) -> OidaConfig:
+    moss_repo = _optional_path(
+        _env("OIDA_MOSS_AUDIO_REPO", "HMM_MOSS_AUDIO_REPO", "AEAR_MOSS_AUDIO_REPO")
+    ) or (DEFAULT_MOSS_REPO if DEFAULT_MOSS_REPO.exists() else None)
     hf_hub_offline = _truthy_env("HF_HUB_OFFLINE")
     allow_hf_hub = (
         _truthy_env("OIDA_ALLOW_HF_HUB")
@@ -145,35 +173,80 @@ def load_config(profile: str | None = None, host: str | None = None, port: int |
     if hf_hub_offline:
         allow_hf_hub = False
     instruct = _model_value(
-        _env("OIDA_MOSS_INSTRUCT_MODEL", "HMM_MOSS_INSTRUCT_MODEL", "AEAR_MOSS_INSTRUCT_MODEL"),
-        DEFAULT_INSTRUCT, HF_INSTRUCT_ID, allow_hub=allow_hf_hub,
+        _env(
+            "OIDA_MOSS_INSTRUCT_MODEL",
+            "HMM_MOSS_INSTRUCT_MODEL",
+            "AEAR_MOSS_INSTRUCT_MODEL",
+        ),
+        DEFAULT_INSTRUCT,
+        HF_INSTRUCT_ID,
+        allow_hub=allow_hf_hub,
     )
     thinking = _model_value(
-        _env("OIDA_MOSS_THINKING_MODEL", "HMM_MOSS_THINKING_MODEL", "AEAR_MOSS_THINKING_MODEL"),
-        DEFAULT_THINKING, HF_THINKING_ID, allow_hub=allow_hf_hub,
+        _env(
+            "OIDA_MOSS_THINKING_MODEL",
+            "HMM_MOSS_THINKING_MODEL",
+            "AEAR_MOSS_THINKING_MODEL",
+        ),
+        DEFAULT_THINKING,
+        HF_THINKING_ID,
+        allow_hub=allow_hf_hub,
     )
-    resolved_profile = profile or _env("OIDA_ENGINE_PROFILE", "HMM_ENGINE_PROFILE", "AEAR_ENGINE_PROFILE", default="mac-mps")
+    resolved_profile = profile or _env(
+        "OIDA_ENGINE_PROFILE",
+        "HMM_ENGINE_PROFILE",
+        "AEAR_ENGINE_PROFILE",
+        default="mac-mps",
+    )
     default_chunk = "45" if resolved_profile == "mac-mps" else "600"
     chunk_seconds = _positive_float(
-        _env("OIDA_MOSS_CHUNK_SECONDS", "HMM_MOSS_CHUNK_SECONDS", "AEAR_MOSS_CHUNK_SECONDS", default=default_chunk),
+        _env(
+            "OIDA_MOSS_CHUNK_SECONDS",
+            "HMM_MOSS_CHUNK_SECONDS",
+            "AEAR_MOSS_CHUNK_SECONDS",
+            default=default_chunk,
+        ),
         name="OIDA_MOSS_CHUNK_SECONDS",
     )
+    active_data_dir = data_dir()
     return OidaConfig(
         profile=resolved_profile,
         host=host or _env("OIDA_HOST", "HMM_HOST", "AEAR_HOST", default="127.0.0.1"),
         port=port or int(_env("OIDA_PORT", "HMM_PORT", "AEAR_PORT", default="8765")),
-        data_dir=data_dir(),
+        data_dir=active_data_dir,
         audio_dir=audio_dir(),
+        trial_dir=trial_dir(active_data_dir),
         moss_audio_repo=moss_repo,
         instruct_model=instruct,
         thinking_model=thinking,
-        sglang_base_url=_env("OIDA_SGLANG_BASE_URL", "HMM_SGLANG_BASE_URL", "AEAR_SGLANG_BASE_URL", default="http://127.0.0.1:30000"),
+        backup_model=(_env("OIDA_MOSS_BACKUP_MODEL") or None),
+        sglang_base_url=_env(
+            "OIDA_SGLANG_BASE_URL",
+            "HMM_SGLANG_BASE_URL",
+            "AEAR_SGLANG_BASE_URL",
+            default="http://127.0.0.1:30000",
+        ),
         sglang_thinking_processor=_env("OIDA_SGLANG_THINKING_PROCESSOR"),
-        require_model=_env("OIDA_REQUIRE_MODEL", "HMM_REQUIRE_MODEL", "AEAR_REQUIRE_MODEL", default="0").strip().lower() in {"1", "true", "yes", "on"},
-        resident_mode=_env("OIDA_MOSS_RESIDENT", "HMM_MOSS_RESIDENT", "AEAR_MOSS_RESIDENT", default="single"),
+        require_model=_env(
+            "OIDA_REQUIRE_MODEL", "HMM_REQUIRE_MODEL", "AEAR_REQUIRE_MODEL", default="0"
+        )
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"},
+        resident_mode=_env(
+            "OIDA_MOSS_RESIDENT",
+            "HMM_MOSS_RESIDENT",
+            "AEAR_MOSS_RESIDENT",
+            default="single",
+        ),
         # first-set name wins, like every other setting; an AND-chain would let
         # a leftover legacy HMM_/AEAR_MOSS_PREWARM=0 override OIDA_MOSS_PREWARM=1
-        prewarm=_env("OIDA_MOSS_PREWARM", "HMM_MOSS_PREWARM", "AEAR_MOSS_PREWARM", default="1").strip().lower() in {"1", "true", "yes", "on"},
+        prewarm=_env(
+            "OIDA_MOSS_PREWARM", "HMM_MOSS_PREWARM", "AEAR_MOSS_PREWARM", default="1"
+        )
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"},
         moss_chunk_seconds=chunk_seconds,
         allow_hf_hub=allow_hf_hub,
         hf_hub_offline=hf_hub_offline,

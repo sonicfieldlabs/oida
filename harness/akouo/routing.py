@@ -192,3 +192,13 @@ def _has_transcript_or_caption(report: dict[str, Any]) -> bool:
         return True
     caption = report.get("caption") if isinstance(report.get("caption"), dict) else {}
     return bool(caption.get("brief") or caption.get("dense"))
+
+
+# Structured planners do not consume or produce a perception report.
+PLANNING_COMMANDS = frozenset({"/orchestrate"})
+
+def plan_command(request: dict[str, Any], command: str = "/orchestrate") -> dict[str, Any]:
+    if command not in PLANNING_COMMANDS:
+        raise ValueError("Unsupported structured planning command")
+    from akouo_contract.direction import plan_orchestration
+    return plan_orchestration(request)

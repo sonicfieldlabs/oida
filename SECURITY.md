@@ -31,21 +31,40 @@ MOSS-Audio Hugging Face model lookup is disabled by default. Download weights
 into `weights/` or set `OIDA_ALLOW_HF_HUB=1` (legacy `HMM_`/`AEAR_`) explicitly.
 `HF_HUB_OFFLINE=1` always disables hub lookup.
 
-## Temporary Upstream PyTorch Exceptions
+## Temporary upstream PyTorch exceptions
 
-The optional embedded MOSS-Audio runtime uses the locally validated Torch and
-Torchaudio 2.10.0 pair. Upstream MOSS-Audio currently pins 2.9.1, while moving
-Oída to 2.13 requires a new TorchCodec, Transformers, MPS, and model-inference
-validation cycle.
+The optional local runtime retains Torch and Torchaudio 2.10.0. Updating this
+pair requires separate model, dependency and accelerator qualification; this
+review does not claim new GPU/MPS or model-inference evidence.
 
-Two findings remain accepted temporarily for this optional local runtime:
+The machine-readable policy is [advisory-exceptions.json](advisory-exceptions.json).
+The repository CODEOWNER, **@emeisazam**, owns follow-up. Reviewed **26 September
+2026**; exceptions expire **10 October 2026**, or earlier if the affected API,
+model trust boundary or runtime version changes. Review again before enabling
+an optional runtime. CI refuses an expired policy or a widened advisory set
+before invoking pip-audit; it suppresses exactly these two advisory identities.
 
-| Advisory | Affected API | Oída exposure | Review deadline |
-| --- | --- | --- | --- |
-| `PYSEC-2026-139` / `CVE-2026-4538` | `torch.export.load` of `.pt2` artifacts | Oída does not call this API or accept `.pt2` model artifacts. No patched PyTorch release is currently published. | 2026-09-02 |
-| `GHSA-rrmf-rvhw-rf47` / `CVE-2025-3000` | `torch.jit.script` | Oída does not call this API. PyTorch 2.13 contains the fix, but is not yet validated with the embedded MOSS-Audio dependency set. | 2026-09-02 |
+| Advisory | Current upstream evidence | Scoped repository review |
+| --- | --- | --- |
+| `PYSEC-2026-139` / `CVE-2026-4538` | [.pt2 deserialization advisory](https://github.com/advisories/GHSA-33x2-ppm4-v46v); no patched version is listed by the current audit feed. | No direct `torch.export.load` call or .pt2 model intake found in owner source. |
+| `CVE-2025-3000` / `GHSA-rrmf-rvhw-rf47` | [TorchScript advisory](https://github.com/advisories/GHSA-rrmf-rvhw-rf47); fixed in 2.13.0. | No direct `torch.jit.script` call found in owner source. |
 
-The exception ends immediately if Oída begins calling either API, if its model
-trust boundary changes, or when a compatible runtime is validated. The
-all-extras CI audit ignores only these identifiers and fails on any new
-finding.
+This is a bounded source review, not a transitive execution trace or permission
+to load untrusted model artifacts. The reviewed optional runtime remains conditional on its existing operational
+qualification requirements.
+
+The September review also found two AnyIO advisories in the locked 4.13.0:
+[TLS hostname handling](https://github.com/advisories/GHSA-82r6-8w77-94w6) and
+[process-pool stderr handling](https://github.com/advisories/GHSA-5p39-cfhj-2xmp).
+Both have fixes in 4.14.2. The dependency floor now excludes older versions;
+these findings are not suppressed. New audit findings continue to fail CI.
+
+### Local review, 2026-09-13
+
+Repository call-site inspection found no new use of the excepted APIs. The
+all-extras dependency audit passes with exactly the same two exceptions; no
+additional advisory was suppressed. HTTPX2/HTTPCore2 were updated to 2.12.0,
+and the affected optional dependency bounds were refreshed. These software
+checks do not validate GPU/MPS inference with the new resolved dependencies.
+Keep optional model execution conditional on that validation and review the
+exceptions again before enabling it, or by the deadline above.

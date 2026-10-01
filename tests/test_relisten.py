@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import tempfile
 import unittest
 import wave
@@ -64,7 +65,7 @@ class TargetedRelistenerTests(unittest.TestCase):
             "id": "evt_anchor",
             "segment": {
                 "id": "seg_anchor",
-                "data_ref": {"kind": "path", "uri": str(path), "sha256": "abc123"},
+                "data_ref": {"kind": "path", "uri": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None},
             },
             "privacy_mode": "session",
             "raw_audio_policy": "external_ref",
@@ -91,11 +92,75 @@ class TargetedRelistenerTests(unittest.TestCase):
         self.assertEqual(event, before)
         self.assertEqual(sidecar["contract"], RELISTEN_CONTRACT)
         self.assertEqual(sidecar["base_event_id"], "evt_anchor")
-        self.assertEqual(sidecar["segment_hash"], "abc123")
+        self.assertEqual(sidecar["segment_hash"], before["segment"]["data_ref"]["sha256"])
+        self.assertEqual(sidecar["source_binding"]["status"], "verified")
         self.assertNotIn("reasoning_trace", sidecar)
         self.assertEqual(sidecar["listening_identity"]["sha256"], "1" * 64)
         self.assertEqual(sidecar["listening_identity"]["application"], "available_not_applied")
         self.assertEqual(len(engine.calls), 1)
+
+    def test_changed_or_malformed_original_hash_refuses_before_inference(self):
+        for recorded in ("0" * 64, "not-a-hash"):
+            with self.subTest(recorded=recorded), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "clip.wav"
+                path.write_bytes(b"fixture")
+                event = self._event(path)
+                event["segment"]["data_ref"]["sha256"] = recorded
+                engine = _Engine()
+                with self.assertRaises(RelistenUnavailable):
+                    TargetedRelistener(engine).run(event=event, question="Is there a pulse?",
+                        conversation_id="c", turn_id="t")
+                self.assertEqual(engine.calls, [])
+
+    def test_unknown_original_hash_is_not_promoted_to_verified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "clip.wav"
+            path.write_bytes(b"fixture")
+            event = self._event(path)
+            del event["segment"]["data_ref"]["sha256"]
+            sidecar = TargetedRelistener(_Engine()).run(event=event, question="Is there a pulse?",
+                conversation_id="c", turn_id="t")
+            self.assertIsNone(sidecar["segment_hash"])
+            self.assertEqual(sidecar["source_binding"]["status"], "unverified_original")
+            self.assertEqual(sidecar["source_binding"]["observed_sha256"], hashlib.sha256(b"fixture").hexdigest())
+
+    def test_source_mutation_during_inference_discards_observation(self):
+        for restore in (False, True):
+            with self.subTest(restore=restore), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "clip.wav"
+                path.write_bytes(b"fixture")
+                event = self._event(path)
+                class Mutating(_Engine):
+                    def generate(self, *args, **kwargs):
+                        path.write_bytes(b"changed")
+                        if restore:
+                            path.write_bytes(b"fixture")
+                        return super().generate(*args, **kwargs)
+                with self.assertRaises(RelistenUnavailable):
+                    TargetedRelistener(Mutating()).run(event=event, question="Is there a pulse?",
+                        conversation_id="c", turn_id="t")
+
+    def test_pass_receipts_are_retained_independently_and_bound_into_sidecar_hash(self):
+        import json
+        from dataclasses import replace
+
+        receipt = {"contract": "oida/pass-provenance/v1", "model": "fixture",
+                   "effective_input": {"status": "unknown"}}
+        class WithReceipt(_Engine):
+            def generate(self, *args, **kwargs):
+                return replace(super().generate(*args, **kwargs), pass_provenance=[receipt])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "clip.wav"
+            path.write_bytes(b"fixture")
+            sidecar = TargetedRelistener(WithReceipt()).run(event=self._event(path),
+                question="Is there a pulse?", conversation_id="c", turn_id="t")
+        digest = sidecar.pop("sha256")
+        self.assertEqual(digest, hashlib.sha256(json.dumps(sidecar, sort_keys=True,
+            separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+        self.assertEqual(sidecar["pass_provenance"], [receipt])
+        sidecar["pass_provenance"][0]["effective_input"]["status"] = "changed"
+        self.assertEqual(receipt["effective_input"]["status"], "unknown")
+        self.assertNotIn("reasoning_trace", sidecar)
 
     def test_missing_audio_and_covenant_withholding_are_explicit(self) -> None:
         engine = _Engine()

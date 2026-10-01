@@ -12,9 +12,19 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from oida.integrations import TARGETS, _install_opencode, _stage_marketplace, assets_root
+from oida.integrations import (
+    TARGETS,
+    _install_opencode,
+    _stage_marketplace,
+    assets_root,
+)
 from oida.lifecycle import ensure_gateway, server_url, stop_gateway
-from oida.mcp_server import MCP, manifest_resource, oida_harness, oida_listening_identity
+from oida.mcp_server import (
+    MCP,
+    manifest_resource,
+    oida_harness,
+    oida_listening_identity,
+)
 from oida.server import create_app
 
 
@@ -22,10 +32,28 @@ class IntegrationAssetTests(unittest.TestCase):
     def test_host_skills_are_in_sync(self) -> None:
         root = assets_root()
         paths = [
-            root / "codex" / "plugins" / "oida" / "skills" / "oida-listening" / "SKILL.md",
-            root / "claude" / "plugins" / "oida" / "skills" / "oida-listening" / "SKILL.md",
+            root
+            / "codex"
+            / "plugins"
+            / "oida"
+            / "skills"
+            / "oida-listening"
+            / "SKILL.md",
+            root
+            / "claude"
+            / "plugins"
+            / "oida"
+            / "skills"
+            / "oida-listening"
+            / "SKILL.md",
             root / "hermes" / "skills" / "oida-listening" / "SKILL.md",
-            root / "openclaw" / "plugins" / "oida" / "skills" / "oida-listening" / "SKILL.md",
+            root
+            / "openclaw"
+            / "plugins"
+            / "oida"
+            / "skills"
+            / "oida-listening"
+            / "SKILL.md",
             root / "opencode" / "skills" / "oida-listening" / "SKILL.md",
         ]
         contents = [path.read_text(encoding="utf-8") for path in paths]
@@ -36,22 +64,40 @@ class IntegrationAssetTests(unittest.TestCase):
         self.assertIn("oida_prepare_turn", contents[0])
 
     def test_all_local_host_integrations_are_exposed(self) -> None:
-        self.assertEqual(TARGETS, ("hermes", "codex", "claude", "openclaw", "opencode"))
+        self.assertEqual(
+            TARGETS, ("hermes", "codex", "claude", "openclaw", "opencode", "pi")
+        )
 
     def test_codex_and_claude_mcp_commands_ensure_daemon(self) -> None:
         root = assets_root()
-        codex = json.loads((root / "codex" / "plugins" / "oida" / ".mcp.json").read_text(encoding="utf-8"))
-        claude = json.loads((root / "claude" / "plugins" / "oida" / ".mcp.json").read_text(encoding="utf-8"))
-        self.assertEqual(codex["mcpServers"]["oida"]["args"], ["gateway", "--stdio", "--ensure-daemon"])
-        self.assertEqual(claude["oida"]["args"], ["gateway", "--stdio", "--ensure-daemon"])
+        codex = json.loads(
+            (root / "codex" / "plugins" / "oida" / ".mcp.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        claude = json.loads(
+            (root / "claude" / "plugins" / "oida" / ".mcp.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            codex["mcpServers"]["oida"]["args"],
+            ["gateway", "--stdio", "--ensure-daemon"],
+        )
+        self.assertEqual(
+            claude["oida"]["args"], ["gateway", "--stdio", "--ensure-daemon"]
+        )
         self.assertEqual(codex["mcpServers"]["oida"]["env"]["OIDA_MOSS_PREWARM"], "0")
         self.assertEqual(claude["oida"]["env"]["OIDA_MOSS_PREWARM"], "0")
 
     def test_staged_marketplace_pins_the_active_python_runtime(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            os.environ,
-            {"OIDA_DATA_DIR": tmp},
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {"OIDA_DATA_DIR": tmp},
+                clear=False,
+            ),
         ):
             marketplace = _stage_marketplace("codex")
             config = json.loads(
@@ -66,23 +112,52 @@ class IntegrationAssetTests(unittest.TestCase):
         self.assertEqual(server["env"]["OIDA_MOSS_PREWARM"], "0")
 
     def test_openclaw_marketplace_is_staged_with_pinned_runtime(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"OIDA_DATA_DIR": tmp}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(os.environ, {"OIDA_DATA_DIR": tmp}, clear=False),
+        ):
             marketplace = _stage_marketplace("openclaw")
-            config = json.loads((marketplace / "plugins" / "oida" / ".mcp.json").read_text(encoding="utf-8"))
+            config = json.loads(
+                (marketplace / "plugins" / "oida" / ".mcp.json").read_text(
+                    encoding="utf-8"
+                )
+            )
         server = config["oida"]
         self.assertEqual(Path(server["command"]), Path(os.sys.executable))
         self.assertEqual(server["args"][-3:], ["gateway", "--stdio", "--ensure-daemon"])
 
-    def test_opencode_installer_preserves_config_and_adds_local_mcp_and_skill(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            os.environ,
-            {"OPENCODE_CONFIG_DIR": tmp},
-            clear=False,
+    def test_opencode_installer_preserves_config_and_adds_local_mcp_and_skill(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {"OPENCODE_CONFIG_DIR": tmp},
+                clear=False,
+            ),
         ):
             config_path = Path(tmp) / "opencode.json"
-            config_path.write_text(json.dumps({"theme": "system", "mcp": {"existing": {"type": "remote"}}}), encoding="utf-8")
-            with patch("oida.integrations.shutil.which", return_value="/usr/local/bin/opencode"), patch(
-                "oida.integrations._run", return_value={"ok": True, "status": 0, "output": "oida connected", "command": []}
+            config_path.write_text(
+                json.dumps(
+                    {"theme": "system", "mcp": {"existing": {"type": "remote"}}}
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch(
+                    "oida.integrations.shutil.which",
+                    return_value="/usr/local/bin/opencode",
+                ),
+                patch(
+                    "oida.integrations._run",
+                    return_value={
+                        "ok": True,
+                        "status": 0,
+                        "output": "oida connected",
+                        "command": [],
+                    },
+                ),
             ):
                 result = _install_opencode()
             installed = json.loads(config_path.read_text(encoding="utf-8"))
@@ -123,17 +198,23 @@ class IntegrationAssetTests(unittest.TestCase):
         self.assertIn("listen_with_oida", prompts)
 
     def test_oida_mounts_complete_akousmata_navigator(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            os.environ,
-            {
-                "OIDA_DATA_DIR": str(Path(tmp) / "oida"),
-                "OIDA_AUDIO_DIR": str(Path(tmp) / "audio"),
-                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
-                "AKOUSMATA_WATCHER": "0",
-            },
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {
+                    "OIDA_DATA_DIR": str(Path(tmp) / "oida"),
+                    "OIDA_AUDIO_DIR": str(Path(tmp) / "audio"),
+                    "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                    "AKOUSMATA_WATCHER": "0",
+                },
+                clear=False,
+            ),
         ):
-            with TestClient(create_app(profile="stub"), base_url="http://127.0.0.1") as client:
+            with TestClient(
+                create_app(profile="stub"), base_url="http://127.0.0.1",
+                client=("127.0.0.1", 53003),
+            ) as client:
                 page = client.get("/library/")
                 health = client.get("/library/api/health")
 
@@ -146,16 +227,23 @@ class IntegrationAssetTests(unittest.TestCase):
 
 
 class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
-    async def test_listening_identity_tool_reads_and_explicitly_sets_the_document(self) -> None:
-        with patch(
-            "oida.mcp_server.get_json",
-            return_value={"filename": "LISTENING.md", "active": False},
-        ) as get, patch(
-            "oida.mcp_server.put_json",
-            return_value={"filename": "LISTENING.md", "active": True},
-        ) as put:
+    async def test_listening_identity_tool_reads_and_explicitly_sets_the_document(
+        self,
+    ) -> None:
+        with (
+            patch(
+                "oida.mcp_server.get_json",
+                return_value={"filename": "LISTENING.md", "active": False},
+            ) as get,
+            patch(
+                "oida.mcp_server.put_json",
+                return_value={"filename": "LISTENING.md", "active": True},
+            ) as put,
+        ):
             read = await oida_listening_identity()
-            saved = await oida_listening_identity(action="set", text="Listen like a guest.")
+            saved = await oida_listening_identity(
+                action="set", text="Listen like a guest."
+            )
 
         self.assertFalse(read["active"])
         self.assertTrue(saved["active"])
@@ -166,7 +254,9 @@ class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             {"text": "Listen like a guest."},
         )
 
-    async def test_listening_identity_status_does_not_disclose_text_or_local_path(self) -> None:
+    async def test_listening_identity_status_does_not_disclose_text_or_local_path(
+        self,
+    ) -> None:
         with patch(
             "oida.mcp_server.get_json",
             return_value={
@@ -195,9 +285,12 @@ class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             worker_threads.append(threading.get_ident())
             return {"contract": "oida/gateway/v0.4"}
 
-        with patch("oida.mcp_server.post_json", side_effect=fake_post_json), patch(
-            "oida.mcp_server.get_json",
-            side_effect=fake_get_json,
+        with (
+            patch("oida.mcp_server.post_json", side_effect=fake_post_json),
+            patch(
+                "oida.mcp_server.get_json",
+                side_effect=fake_get_json,
+            ),
         ):
             result = await oida_harness(perception={})
             manifest = json.loads(await manifest_resource())
@@ -205,7 +298,9 @@ class MountedMCPConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"ok": True})
         self.assertEqual(manifest["contract"], "oida/gateway/v0.4")
         self.assertEqual(len(worker_threads), 2)
-        self.assertTrue(all(thread_id != event_loop_thread for thread_id in worker_threads))
+        self.assertTrue(
+            all(thread_id != event_loop_thread for thread_id in worker_threads)
+        )
 
 
 class LifecycleTests(unittest.TestCase):
@@ -213,18 +308,21 @@ class LifecycleTests(unittest.TestCase):
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(
-            os.environ,
-            {
-                "OIDA_DATA_DIR": str(Path(tmp) / "data"),
-                "OIDA_AUDIO_DIR": str(Path(tmp) / "audio"),
-                "OIDA_PORT": str(port),
-                "OIDA_HOST": "127.0.0.1",
-                "OIDA_MOSS_PREWARM": "0",
-                "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
-                "AKOUSMATA_WATCHER": "0",
-            },
-            clear=False,
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {
+                    "OIDA_DATA_DIR": str(Path(tmp) / "data"),
+                    "OIDA_AUDIO_DIR": str(Path(tmp) / "audio"),
+                    "OIDA_PORT": str(port),
+                    "OIDA_HOST": "127.0.0.1",
+                    "OIDA_MOSS_PREWARM": "0",
+                    "AKOUSMATA_PATH": str(Path(tmp) / "akousmata"),
+                    "AKOUSMATA_WATCHER": "0",
+                },
+                clear=False,
+            ),
         ):
             first = ensure_gateway(profile="stub", timeout=15)
             second = ensure_gateway(profile="stub", timeout=5)
@@ -241,3 +339,127 @@ class LifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstalledRuntimeBindingTests(unittest.TestCase):
+    def test_marketplaces_keep_selected_paths_without_copying_credentials(self):
+        from oida.integrations import runtime_environment
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {
+                    "OIDA_DATA_DIR": tmp,
+                    "AKOUSMATA_PATH": tmp + "/selected-store",
+                    "OIDA_MOSS_INSTRUCT_MODEL": tmp + "/model",
+                    "OIDA_PORT": "19901",
+                    "OIDA_API_KEY": "fixture-secret",
+                    "HF_TOKEN": "fixture-secret",
+                },
+                clear=True,
+            ),
+        ):
+            expected = runtime_environment()
+            for host in ("codex", "claude", "openclaw"):
+                marketplace = _stage_marketplace(host)
+                config = json.loads(
+                    (marketplace / "plugins/oida/.mcp.json").read_text()
+                )
+                server = (
+                    config["mcpServers"]["oida"] if host == "codex" else config["oida"]
+                )
+                self.assertEqual(server["env"], expected)
+                self.assertEqual(
+                    server["env"]["AKOUSMATA_PATH"], tmp + "/selected-store"
+                )
+                self.assertNotIn("fixture-secret", json.dumps(server))
+
+    def test_hermes_uses_recorded_runtime_before_unrelated_path_command(self):
+        import importlib.util
+        from types import SimpleNamespace
+
+        path = assets_root() / "hermes/__init__.py"
+        spec = importlib.util.spec_from_file_location("hermes_binding_fixture", path)
+        adapter = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(adapter)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime.json").write_text(
+                json.dumps(
+                    dict(
+                        command="/selected/python",
+                        args_prefix=["-m", "oida.cli"],
+                        environment={"AKOUSMATA_PATH": str(root / "store")},
+                    )
+                )
+            )
+            with (
+                patch.object(adapter, "_ROOT", root),
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(adapter.shutil, "which", return_value="/unrelated/oida"),
+                patch.object(
+                    adapter.subprocess,
+                    "run",
+                    return_value=SimpleNamespace(stdout="ok", stderr="", returncode=0),
+                ) as run,
+            ):
+                self.assertEqual(adapter._run("status", "--json"), "ok")
+                self.assertEqual(
+                    run.call_args.args[0][:3], ["/selected/python", "-m", "oida.cli"]
+                )
+                self.assertEqual(
+                    run.call_args.kwargs["env"]["AKOUSMATA_PATH"], str(root / "store")
+                )
+            (root / "runtime.json").write_text("broken")
+            with (
+                patch.object(adapter, "_ROOT", root),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                self.assertIn("invalid", adapter._run("status"))
+
+    def test_hermes_installer_binds_both_plugin_and_mcp_environment(self):
+        from oida.integrations import _install_hermes
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {
+                    "HERMES_HOME": tmp,
+                    "OIDA_DATA_DIR": tmp + "/runtime",
+                    "AKOUSMATA_PATH": tmp + "/store",
+                },
+                clear=True,
+            ),
+            patch("oida.integrations.shutil.which", return_value="/fixture/hermes"),
+            patch("oida.integrations._run", return_value={"ok": True}) as run,
+        ):
+            _install_hermes()
+            runtime = json.loads((Path(tmp) / "plugins/oida/runtime.json").read_text())
+            self.assertEqual(runtime["environment"]["AKOUSMATA_PATH"], tmp + "/store")
+            command = run.call_args.args[0]
+            self.assertIn("AKOUSMATA_PATH=" + tmp + "/store", command)
+            self.assertEqual(command.count("--env"), 1)
+            values = command[command.index("--env") + 1 : command.index("--args")]
+            self.assertEqual(
+                dict(value.split("=", 1) for value in values), runtime["environment"]
+            )
+
+
+def test_pi_stages_only_selected_loopback_origin(tmp_path, monkeypatch):
+    from oida.integrations import _install_pi
+
+    monkeypatch.setenv("OIDA_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OIDA_SERVER_URL", "http://127.0.0.1:19912")
+    monkeypatch.setenv("HF_TOKEN", "SECRET_CANARY")
+    result = _install_pi()
+    assert result["staged_only"] and result["installed"]
+    runtime = tmp_path / "integrations/pi/runtime.json"
+    assert json.loads(runtime.read_text()) == {"origin": "http://127.0.0.1:19912"}
+    assert "SECRET_CANARY" not in runtime.read_text()
+    monkeypatch.setenv("OIDA_SERVER_URL", "https://remote.example")
+    import pytest
+
+    with pytest.raises(ValueError):
+        _install_pi()

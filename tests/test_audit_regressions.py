@@ -184,7 +184,8 @@ def test_embedded_runtime_refuses_to_claim_an_unsupported_thinking_budget() -> N
         engine.generate("unused.wav", "Describe it.", _settings(), thinking_budget=64)
 
 
-def test_embedded_model_loader_requires_safetensors(tmp_path: Path) -> None:
+def test_embedded_model_loader_requires_safetensors(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("HF_DEACTIVATE_ASYNC_LOAD", raising=False)
     model_calls: list[dict[str, object]] = []
     processor_calls: list[dict[str, object]] = []
 
@@ -233,6 +234,8 @@ def test_embedded_model_loader_requires_safetensors(tmp_path: Path) -> None:
             patch.object(engine, "_device", return_value="cpu"),
         ):
             engine._load_pair(str(tmp_path))
+
+    assert os.environ["HF_DEACTIVATE_ASYNC_LOAD"] == "1"
 
     assert model_calls == [
         {

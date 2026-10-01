@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import math
 import re
 from dataclasses import dataclass, field
@@ -71,6 +72,8 @@ def earworm_context_for_event(event: dict[str, Any]) -> dict[str, Any]:
 class AkousmataStore:
     root: Path = field(default_factory=lambda: data_dir() / "akousmata")
     _trace_cache: dict[str, tuple[int, int, dict[str, Any]]] = field(default_factory=dict, init=False, repr=False, compare=False)
+    # file name -> (mtime_ns, size, similarity vector, preview); see _similarity_index.
+    _similarity: dict[str, tuple[int, int, dict[str, float], dict[str, Any]]] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     @property
     def traces_dir(self) -> Path:
@@ -210,15 +213,71 @@ class AkousmataStore:
         if not vector:
             return []
         matches = []
-        for trace in self.list(limit=None):
-            trace_vector = trace.get("similarityVector")
-            if not isinstance(trace_vector, dict):
-                trace_vector = _feature_vector_from_features(trace.get("features") if isinstance(trace.get("features"), dict) else {})
+        for trace_vector, preview in self._similarity_index():
             score = _cosine_similarity(vector, trace_vector)
             if score > 0:
-                matches.append({"trace": _trace_preview(trace), "score": round(score, 4), "basis": "dsp_feature_similarity"})
-        matches.sort(key=lambda item: item["score"], reverse=True)
+                matches.append({"trace": copy.deepcopy(preview), "score": round(score, 4), "basis": "dsp_feature_similarity"})
+        matches.sort(key=lambda item: (item["score"], str(item["trace"].get("createdAt") or "")), reverse=True)
         return matches[: max(0, limit)]
+
+    def _similarity_index(self) -> list[tuple[dict[str, float], dict[str, Any]]]:
+        """Each trace's similarity vector and preview, read once per file version.
+
+        On 24 September the Testing workspace held 82 traces totalling 438 MB, and every
+        listening parsed and deep-copied all of them twice (once to note similar sounds,
+        once again when remembering): about 12 s of a 96 s cycle. Only the vector and the
+        preview are kept, per file name, modification time and size, and persisted beside
+        the traces so a restart does not parse them again. A changed file is read afresh.
+        """
+        if not self.traces_dir.exists():
+            return []
+        index_path = self.root / "cache" / "similarity-v1.json"
+        if not self._similarity:
+            try:
+                stored = json.loads(index_path.read_text(encoding="utf-8"))
+                if isinstance(stored, dict) and stored.get("version") == 1:
+                    for name, row in (stored.get("traces") or {}).items():
+                        self._similarity[name] = (int(row["mtime_ns"]), int(row["size"]), dict(row["vector"]), dict(row["preview"]))
+            except (OSError, ValueError, KeyError, TypeError):
+                self._similarity.clear()
+        rows, changed, seen = [], False, set()
+        for path in self.traces_dir.glob("*.json"):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            seen.add(path.name)
+            cached = self._similarity.get(path.name)
+            if not cached or cached[0] != stat.st_mtime_ns or cached[1] != stat.st_size:
+                try:
+                    trace = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    self._similarity.pop(path.name, None)
+                    continue
+                if not isinstance(trace, dict):
+                    continue
+                trace_vector = trace.get("similarityVector")
+                if not isinstance(trace_vector, dict):
+                    trace_vector = _feature_vector_from_features(trace.get("features") if isinstance(trace.get("features"), dict) else {})
+                cached = (stat.st_mtime_ns, stat.st_size, trace_vector, _trace_preview(trace))
+                self._similarity[path.name] = cached
+                changed = True
+            rows.append((cached[2], cached[3]))
+        for name in set(self._similarity) - seen:
+            del self._similarity[name]
+            changed = True
+        if changed:
+            try:
+                index_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = index_path.with_suffix(".tmp")
+                temporary.write_text(json.dumps({"version": 1, "traces": {
+                    name: {"mtime_ns": row[0], "size": row[1], "vector": row[2], "preview": row[3]}
+                    for name, row in self._similarity.items()
+                }}), encoding="utf-8")
+                os.replace(temporary, index_path)
+            except OSError:
+                pass  # An unwritable index only means the next start reads the traces again.
+        return rows
 
     def similar_to_trace(self, trace_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
         trace = self.get(trace_id)
@@ -354,6 +413,12 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
                     if isinstance(event.get("listening_provenance"), dict)
                     else {}
                 ),
+                "source_admission": (source.get("details") or {}).get("source_admission"),
+                "pass_provenance": (
+                    event.get("pass_provenance")
+                    if isinstance(event.get("pass_provenance"), list)
+                    else []
+                ),
                 "listening_passes": (
                     event.get("listening_passes")
                     if isinstance(event.get("listening_passes"), list)
@@ -398,6 +463,12 @@ def _earworm_surface(trace: dict[str, Any], event: dict[str, Any]) -> dict[str, 
                     event.get("listening_provenance")
                     if isinstance(event.get("listening_provenance"), dict)
                     else {}
+                ),
+                "source_admission": (source.get("details") or {}).get("source_admission"),
+                "pass_provenance": (
+                    event.get("pass_provenance")
+                    if isinstance(event.get("pass_provenance"), list)
+                    else []
                 ),
                 "listening_passes": (
                     event.get("listening_passes")

@@ -122,6 +122,7 @@ class ListeningEvent:
     contract: str = "oida/listening-event/v0.3"
     listening_context: dict[str, Any] = field(default_factory=dict)
     listening_provenance: dict[str, Any] = field(default_factory=dict)
+    pass_provenance: list[dict[str, Any]] = field(default_factory=list)
     listening_passes: list[dict[str, Any]] = field(default_factory=list)
     route_decisions: list[dict[str, Any]] = field(default_factory=list)
     apparatus: dict[str, Any] = field(default_factory=dict)

@@ -1,0 +1,41 @@
+{
+  "contract": "listeningstackweb/local-packages/v1",
+  "packages": [
+    {
+      "distribution": "akouo-contract",
+      "version": "0.10.1",
+      "sha256": "ed3ffdfcb02cf794f7303351a6e473259b78eba351efedb4b98645b5622649c2",
+      "source_repository": "akouo",
+      "base_commit": "d3c0405279ae00e3b6e1ebc46136aefa0889ab7a",
+      "build_state": "Uncommitted sanitized candidate; inherited public base is not complete source identity.",
+      "source_changes_sha256": "fa8636206ed7ecb34824bab2ac7ee1923bff4d01789266427f9fde8ef47f0769",
+      "source_changes_basis": "SHA256 of compact sorted JSON mapping explicit source-distribution inputs to file SHA256; excludes generated PKG-INFO.",
+      "published": false,
+      "wheel": "vendor/akouo_contract-0.10.1-py3-none-any.whl"
+    },
+    {
+      "distribution": "akousma",
+      "version": "0.8.4",
+      "sha256": "ed3c2c41dbc20804deae9da7fb9d5797c3074deb0e03a899ce47adb650e34539",
+      "source_repository": "earworm",
+      "base_commit": "c130fa61423517a0cc2ca8071124537978fad825",
+      "build_state": "Uncommitted sanitized candidate; inherited public base is not complete source identity.",
+      "source_changes_sha256": "158d72d414f0c8c335d670c395c14dd47f6ba7b86258ac799c23a2c2eaaeab2e",
+      "source_changes_basis": "SHA256 of compact sorted JSON mapping explicit source-distribution inputs to file SHA256; excludes generated PKG-INFO.",
+      "published": false,
+      "wheel": "vendor/akousma-0.8.4-py3-none-any.whl"
+    },
+    {
+      "distribution": "akousmata",
+      "version": "0.8.3",
+      "sha256": "b5138da23d7fe5289e40cc02816576ed21519aa217ffbd69052d2a2e7572213e",
+      "source_repository": "akousmata",
+      "base_commit": "838029d80360e04a01149437f30610503fd66794",
+      "build_state": "Uncommitted sanitized candidate; inherited public base is not complete source identity.",
+      "source_changes_sha256": "0774e4a21d9dff7e08e5dc1ac18085a8aeaa092b8a0d11cb8ba90f31f8647a1f",
+      "source_changes_basis": "SHA256 of compact sorted JSON mapping explicit source-distribution inputs to file SHA256; excludes generated PKG-INFO.",
+      "published": false,
+      "wheel": "vendor/akousmata-0.8.3-py3-none-any.whl"
+    }
+  ]
+}
