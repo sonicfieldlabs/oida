@@ -127,6 +127,23 @@ def test_preview_binds_file_limits_without_analysis_or_writes(
     assert not (tmp_path / "store" / "index.sqlite").exists()
 
 
+def test_preview_hides_low_level_file_errors(tmp_path, monkeypatch):
+    from oida.station_aperture import PreviewRequest, preview
+
+    def fail(*args, **kwargs):
+        raise OSError("private source path and decoder details")
+
+    monkeypatch.setattr("oida.apertures.file_aperture", fail)
+    result = preview(
+        PreviewRequest(path=str(tmp_path / "audio.wav"), aperture={"mode": "centaur"})
+    )
+    assert result["admission"] == {
+        "status": "undetermined",
+        "reason": "Source preview unavailable; check the audio file and requested window",
+    }
+    assert "aperture" not in result
+
+
 def test_requested_bands_have_separate_measurements_and_resolution_limits(tmp_path):
     from oida.agent_native import NativeRequest, native_measure
 

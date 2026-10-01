@@ -140,8 +140,11 @@ def preview(req):
                 status="unsupported",
                 reason="Requested bands exceed this sampled representation",
             )
-    except (ValueError, OSError, RuntimeError) as exc:
-        result["admission"] = dict(status="undetermined", reason=str(exc))
+    except (ValueError, OSError, RuntimeError):
+        result["admission"] = dict(
+            status="undetermined",
+            reason="Source preview unavailable; check the audio file and requested window",
+        )
     return result
 
 

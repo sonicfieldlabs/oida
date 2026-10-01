@@ -946,8 +946,12 @@ class RoutedAudioEngine(MossEngine):
                 status="inference_tested",
                 usage=result.usage,
             )
-        except Exception as exc:
-            return dict(ok=False, status="failed", error=_sanitize_audio_error(exc))
+        except Exception:
+            return dict(
+                ok=False,
+                status="failed",
+                error="Audio probe failed; check provider configuration and availability",
+            )
 
     def _credential(self, provider_id: str, provider: Any) -> str | None:
         name = provider.credential_ref or "api_key"

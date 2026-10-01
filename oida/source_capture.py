@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -338,9 +339,14 @@ class AcquisitionReceipts:
         return self.journal.get("acquisition", identifier)
 
     def save(self, receipt: dict):
+        identifier = receipt["id"]
+        if not isinstance(identifier, str) or not re.fullmatch(
+            r"[a-zA-Z0-9_-]{1,80}", identifier
+        ):
+            raise ValueError("Invalid acquisition identifier")
         self.journal.save("acquisition", receipt["id"], receipt)
         # Disposable legacy mirror; never overrides committed journal state on restart.
-        target = self.root / (receipt["id"] + ".json")
+        target = self.root / (identifier + ".json")
         temp = target.with_suffix(".tmp")
         try:
             temp.write_text(json.dumps(receipt, allow_nan=False) + "\n")

@@ -180,7 +180,7 @@ dependencies = [
     { name = "referencing" },
 ]
 wheels = [
-    { filename = "akouo_contract-0.10.1-py3-none-any.whl", hash = "sha256:d6dd28376135d48f5064bcf747bfbcbcf6ee7a7bf5684b486ed64c0af9e80097" },
+    { filename = "akouo_contract-0.10.1-py3-none-any.whl", hash = "sha256:ed3ffdfcb02cf794f7303351a6e473259b78eba351efedb4b98645b5622649c2" },
 ]
 
 [package.metadata]
@@ -223,7 +223,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { filename = "akousmata-0.8.3-py3-none-any.whl", hash = "sha256:066ff78e1c9b9a6e690d330046ac5b1ecade877f5d4a045ac9498eeac9ec8cd7" },
+    { filename = "akousmata-0.8.3-py3-none-any.whl", hash = "sha256:b5138da23d7fe5289e40cc02816576ed21519aa217ffbd69052d2a2e7572213e" },
 ]
 
 [package.metadata]
