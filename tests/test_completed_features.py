@@ -21,7 +21,7 @@ from scripts.release_smoke import normalize_server_url
 
 
 class CompletedFeatureTests(unittest.TestCase):
-    def test_release_metadata_is_consistent(self) -> None:
+    def test_source_candidate_and_published_citation_are_distinct(self) -> None:
         root = Path(__file__).resolve().parents[1]
         self.assertIn(
             f'version = "{__version__}"',

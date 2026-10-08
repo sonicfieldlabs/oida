@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0 — 2026-10-08
+
+- Add bounded local owner event notifications, finite-playlist admission, and native audio-decoder diagnostics. Preserve model and real-source qualification as separate gates.
+- Source release only; no package registry publication or service activation.
+
 ## Unreleased — observation freshness at reception
 
 - Package 0.11.2 with receiving-time freshness, repaired owner packages and updated registry dependencies.

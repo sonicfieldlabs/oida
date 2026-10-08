@@ -1,6 +1,6 @@
 # Runtime dependencies
 
-Oída requires `akousma>=0.8.4` and `akousmata>=0.8.3`. Earworm supplies
+Oída requires `akousma>=0.8.3` and `akousmata>=0.8.2`. Earworm supplies
 retained-policy projection and checked content-addressed object resolution;
 Akousmata declares its research contract dependency at runtime.
 

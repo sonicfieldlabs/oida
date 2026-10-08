@@ -6,11 +6,46 @@ import http.client
 import ipaddress
 import json
 import socket
+import threading
 import time
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 USER_AGENT = "ListeningStackDiscovery/0.1 (local owner-requested audio exploration)"
+DNS_SLOTS = threading.BoundedSemaphore(4)
+
+
+def resolve_public(host, port, *, deadline, cancel):
+    """Bound DNS waiting without releasing a slot for a still-running resolver."""
+    if not DNS_SLOTS.acquire(blocking=False):
+        raise ValueError("Public DNS resolver capacity is busy")
+    result, done = [], threading.Event()
+
+    def resolve():
+        try:
+            result.append(socket.getaddrinfo(host, port, type=socket.SOCK_STREAM))
+        except OSError as exc:
+            result.append(exc)
+        finally:
+            DNS_SLOTS.release()
+            done.set()
+
+    try:
+        threading.Thread(target=resolve, name="oida-public-dns", daemon=True).start()
+    except Exception:
+        DNS_SLOTS.release()
+        raise
+    end = min(deadline, time.monotonic() + 5)
+    while not done.wait(0.05):
+        if cancel and cancel.is_set():
+            raise InterruptedError("Discovery stopped")
+        if time.monotonic() >= end:
+            raise TimeoutError("Public DNS resolution timed out")
+    if isinstance(result[0], Exception):
+        raise result[0]
+    if len(result[0]) > 64:
+        raise ValueError("Public DNS answer budget exceeded")
+    return result[0]
 
 
 class SourceHTTPError(ValueError):
@@ -60,16 +95,27 @@ class Retrieved:
 
 
 class PublicFetcher:
-    def get(self, url, *, limit=2 * 1024 * 1024, cancel=None, stream_seconds=None):
+    def get(
+        self,
+        url,
+        *,
+        limit=2 * 1024 * 1024,
+        cancel=None,
+        stream_seconds=None,
+        deadline=None,
+    ):
         started = time.monotonic()
+        deadline = min(deadline or started + 45, started + 45)
         for _ in range(4):
             if cancel and cancel.is_set():
                 raise InterruptedError("Discovery stopped")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Source retrieval timed out")
             url = public_url(url)
             parsed = urlsplit(url)
             host = parsed.hostname
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            answers = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+            answers = resolve_public(host, port, deadline=deadline, cancel=cancel)
             addresses = list(dict.fromkeys(answer[4][0] for answer in answers))
             if not addresses or any(
                 not ipaddress.ip_address(ip).is_global for ip in addresses
@@ -81,7 +127,7 @@ class PublicFetcher:
                 http.client.HTTPSConnection
                 if parsed.scheme == "https"
                 else http.client.HTTPConnection
-            )(host, port, timeout=12)
+            )(host, port, timeout=min(12, max(0.001, deadline - time.monotonic())))
             connection._create_connection = (
                 lambda address, timeout=12, source_address=None, _target=(addresses[0], port): (
                     socket.create_connection(_target, timeout, source_address)
@@ -104,7 +150,10 @@ class PublicFetcher:
                         raise ValueError(
                             "Source returned a redirect without a location"
                         )
-                    url = urljoin(url, location)
+                    target = urljoin(url, location)
+                    if parsed.scheme == "https" and urlsplit(target).scheme != "https":
+                        raise ValueError("Source redirect may not downgrade HTTPS")
+                    url = target
                     continue
                 if response.status != 200:
                     raise SourceHTTPError(response.status, url)
@@ -117,7 +166,7 @@ class PublicFetcher:
                 while True:
                     if cancel and cancel.is_set():
                         raise InterruptedError("Discovery stopped")
-                    if time.monotonic() - started > 45:
+                    if time.monotonic() >= deadline:
                         raise TimeoutError("Source retrieval timed out")
                     if (
                         stream_seconds
@@ -125,6 +174,15 @@ class PublicFetcher:
                         and time.monotonic() - started >= stream_seconds
                     ):
                         break
+                    sock = getattr(connection, "sock", None) or getattr(
+                        getattr(getattr(response, "fp", None), "raw", None),
+                        "_sock",
+                        None,
+                    )
+                    if sock is not None:
+                        sock.settimeout(
+                            min(12, max(0.001, deadline - time.monotonic()))
+                        )
                     chunk = response.read(
                         min(8192 if stream_seconds else 65536, limit - count + 1)
                     )

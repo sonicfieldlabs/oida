@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -23,6 +24,8 @@ class CursorMismatch(ValueError):
 class OwnerJournal:
     def __init__(self, path: Path):
         self.path = path
+        self._listeners = set()
+        self._listeners_lock = threading.Lock()
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -75,7 +78,42 @@ class OwnerJournal:
                 "INSERT INTO snapshots VALUES (?,?,?,?) ON CONFLICT(kind,subject) DO UPDATE SET sequence=excluded.sequence,payload=excluded.payload",
                 (kind, subject, sequence, encoded),
             )
-            return sequence
+        # Publish only after the durable transaction commits. Listeners receive no
+        # payload or subject; missed notifications are recovered from the watermark.
+        with self._listeners_lock:
+            for loop, event in tuple(self._listeners):
+                try:
+                    loop.call_soon_threadsafe(event.set)
+                except RuntimeError:
+                    self._listeners.discard((loop, event))
+        return sequence
+
+    @contextmanager
+    def watch_changes(self, loop, event):
+        listener = (loop, event)
+        with self._listeners_lock:
+            self._listeners.add(listener)
+        try:
+            yield
+        finally:
+            with self._listeners_lock:
+                self._listeners.discard(listener)
+
+    def change_watermark(self, *, after=0, producer_id=None):
+        """Read sequence bounds without reading or decoding retained evidence."""
+        with self.connection() as db:
+            db.execute("BEGIN")
+            high = self._cursor(db, producer_id, after)
+            low = db.execute("SELECT COALESCE(MIN(sequence),0) FROM events").fetchone()[
+                0
+            ]
+            if high > 2**53 - 1:
+                raise CursorMismatch("sequence exceeds the change-stream wire limit")
+            return dict(
+                producer_id=self.producer_id,
+                sequence=high,
+                gap=bool(after and low > after + 1),
+            )
 
     def get(self, kind, subject):
         with self.connection() as db:

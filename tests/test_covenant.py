@@ -272,7 +272,7 @@ class CovenantEndpointTests(unittest.TestCase):
             path = _write_tone(Path(tmp) / "tone.wav")
             result = client.post(
                 "/gateway/listen",
-                json={"path": str(path), "source_type": "live_input", "remember": True},
+                json={"path": str(path), "source_type": "live_input", "remember": True, "response_mode": "full"},
             ).json()
             self.assertIsNone(result["trace"])
             withheld = result["listening_event"]["covenant"]["withheld"]

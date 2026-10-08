@@ -55,9 +55,7 @@ class _Client:
     def __enter__(self):
         self.environment.__enter__()
         self.client = TestClient(
-            create_app(profile="stub"),
-            base_url="http://127.0.0.1",
-            client=("127.0.0.1", 50000),
+            create_app(profile="stub"), base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
         )
         # The mounted FastMCP session manager is process-global and explicitly
         # single-run; endpoint tests do not need to start that lifespan.
@@ -418,7 +416,7 @@ def test_persisted_perception_roles_are_applied_during_daemon_restart() -> None:
                 ),
             ):
                 client = TestClient(
-                    create_app(profile="stub"), base_url="http://127.0.0.1"
+                    create_app(profile="stub"), base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
                 )
                 try:
                     status = client.get("/health")

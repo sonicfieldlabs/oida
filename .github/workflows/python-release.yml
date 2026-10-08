@@ -93,7 +93,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.project }} to PyPI
     needs: build
-    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.PYPI_PUBLISH_ENABLED == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -133,7 +133,7 @@ jobs:
     needs:
       - build
       - publish
-    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' && vars.PYPI_OIDA_PUBLISH_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.PYPI_PUBLISH_ENABLED == 'true' && vars.PYPI_OIDA_PUBLISH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: pypi-sonicfield-oida

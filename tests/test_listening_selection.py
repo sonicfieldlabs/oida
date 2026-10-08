@@ -168,7 +168,7 @@ def test_summary_response_does_not_include_history_and_saves_auditum(
     path = tmp_path / "tone.wav"
     sf.write(path, np.zeros(16000, dtype="float32"), 16000)
     full = client.post(
-        "/gateway/listen", json=dict(path=str(path), route_preset="signal")
+        "/gateway/listen", json=dict(path=str(path), route_preset="signal", response_mode="full")
     )
     assert full.status_code == 200 and len(full.content) > 2 * 1024 * 1024
     response = client.post(

@@ -1,11 +1,11 @@
 """Portable Station requests resolved by the owner against immutable audio bytes."""
 
-from contextlib import contextmanager
-from copy import deepcopy
 import hashlib
-from pathlib import Path
 import tempfile
 import time
+from contextlib import contextmanager
+from copy import deepcopy
+from pathlib import Path
 from typing import Literal
 
 from fastapi import HTTPException
@@ -70,6 +70,8 @@ def capabilities():
             "nsgt": available["nsgt"],
             "scattering": available["kymatio"],
         },
+        qualification_scope="Sampled native DSP only; model, capture and human access require separate owner evidence",
+        window_contract="oida/aperture-window/v1",
     )
 
 
@@ -105,13 +107,25 @@ def preview(req):
     if req.path is None:
         return result
     try:
+        with Path(req.path).open("rb") as stream:
+            raw = stream.read(96 * 1024**2 + 1)
         aperture = file_aperture(
-            req.path, mode=req.aperture.mode, bands_hz=req.aperture.bands_hz
+            req.path,
+            mode=req.aperture.mode,
+            bands_hz=req.aperture.bands_hz,
+            source_bytes=raw,
         )
         duration = aperture["samples"] / aperture["sample_rate"]
         if req.start_seconds >= duration:
             raise ValueError("Requested window starts after the source ends")
         seconds = min(req.seconds, duration - req.start_seconds)
+        aperture = file_aperture(
+            req.path,
+            mode=req.aperture.mode,
+            bands_hz=req.aperture.bands_hz,
+            window_s=[req.start_seconds, req.start_seconds + seconds],
+            source_bytes=raw,
+        )
         supported = aperture["decision"]["outcome"] == "permitted"
         limits[1].update(
             status="supported" if supported else "unsupported",
@@ -172,7 +186,7 @@ def admit(request, *, remember, retain_audio, source_type="file"):
 @contextmanager
 def prepare(req, *, root, preflight):
     """One byte snapshot feeds both native DSP and the originally selected route."""
-    from oida.agent_native import NativeRequest, native_measure, admission
+    from oida.agent_native import NativeRequest, admission, native_measure
     from oida.operation_control import checkpoint, current_operation_id
 
     aperture = req.aperture

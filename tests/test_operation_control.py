@@ -35,12 +35,16 @@ def test_owner_cancels_inference_before_any_retained_record(client, tmp_path):
             assert client.post("/operations/cancel-me/cancel").json()[
                 "cancel_requested"
             ]
-            assert client.get("/operations/cancel-me").json()["status"] == "cancelled"
+            acknowledgement = client.get("/operations/cancel-me").json()
+            assert acknowledgement["status"] == "cancelled"
+            assert acknowledgement["worker_settled"] is False
+            assert acknowledgement["publication_prevented"] is True
         finally:
             release.set()
         assert future.result().status_code == 409
     journal = client.get("/owner/journal").json()
     assert all(e["kind"] == "operation" for e in journal["events"])
+    assert client.get("/operations/cancel-me").json()["worker_settled"] is True
     assert "event_id" not in client.get("/operations/cancel-me").json()
     assert (
         client.post(

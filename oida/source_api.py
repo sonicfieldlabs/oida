@@ -7,35 +7,35 @@ import os
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Callable, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from oida.source_scheduler import SourceScheduler, QueueFull
-from oida.source_metrics import process_peak_rss
-from oida.operation_control import Control, controlled, checkpoint, OperationCancelled
+from oida.capture_registry import CaptureRegistry, Registration
 from oida.contracts import now_iso
 from oida.observation_source import (
     ObservationRequest,
     ObservationUnavailable,
     receive_observation,
 )
+from oida.operation_control import Control, OperationCancelled, checkpoint, controlled
+from oida.reasoning.audio_selection import AudioModel
+from oida.research_samples import ResearchSampleRefused, ResearchSamples
 from oida.source_capture import (
     AcquisitionReceipts,
     CaptureInterrupted,
     capture_audio,
     load_capture_sources,
 )
-from oida.capture_registry import CaptureRegistry, Registration
-from oida.research_samples import ResearchSampleRefused, ResearchSamples
-from oida.station_aperture import Aperture, admit as admit_aperture
-
-
-from oida.reasoning.audio_selection import AudioModel
+from oida.source_metrics import process_peak_rss
+from oida.source_scheduler import QueueFull, SourceScheduler
+from oida.station_aperture import Aperture
+from oida.station_aperture import admit as admit_aperture
 
 LOGGER = logging.getLogger(__name__)
 RESEARCH_SWEEP_SECONDS = 30.0
@@ -108,9 +108,12 @@ def source_router(
 
     @router.get("/sources/capture/registered")
     def registered_sources():
+        from oida.stream_formats import capabilities
+
         return {
             "sources": registry.entries(),
             "hls": "unavailable",
+            "format_capabilities": capabilities(),
             "retention": "temp_only",
         }
 
@@ -250,7 +253,9 @@ def source_router(
                     409,
                     "operation deadline leaves no time for the capture window; nothing was started",
                 )
-            deadline = caller_deadline if deadline is None else min(deadline, caller_deadline)
+            deadline = (
+                caller_deadline if deadline is None else min(deadline, caller_deadline)
+            )
         # Gates precede subprocess/device/network acquisition, not just inference.
         try:
             if req.aperture and (
@@ -572,8 +577,11 @@ def source_router(
             raise HTTPException(404, "No such research sample, or it expired") from exc
         except ResearchSampleRefused as exc:
             raise HTTPException(409, str(exc)) from exc
-        return {"contract": "oida/research-sample-location/v1", "path": str(path.resolve()),
-                "sample": {k: v for k, v in value.items() if k != "file"}}
+        return {
+            "contract": "oida/research-sample-location/v1",
+            "path": str(path.resolve()),
+            "sample": {k: v for k, v in value.items() if k != "file"},
+        }
 
     @router.get("/sources/research-samples/{identifier}/audio")
     def research_sample_audio(identifier: str):
@@ -659,8 +667,9 @@ def source_router(
 
     @router.post("/sources/cosmoaudition/poll")
     def cosmoaudition_poll(body: dict):
-        from oida.cosmo_subscription import request_from_feed
         import httpx
+
+        from oida.cosmo_subscription import request_from_feed
 
         try:
             preflight("external_stream", None, None, body.get("remember", False))

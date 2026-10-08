@@ -7,6 +7,9 @@ from oida.owner_journal import CursorMismatch
 
 def owner_journal_router(journal):
     router = APIRouter()
+    from oida.owner_changes import change_router
+
+    router.include_router(change_router(journal))
 
     @router.get("/owner/journal")
     def events(
@@ -59,6 +62,7 @@ def owner_journal_router(journal):
             raise HTTPException(404, "record is not referenced by this owner journal")
         value = read_record(identifier)
         from oida.claim_lifecycle import evaluate
+
         return dict(
             record=value,
             claim_evaluation=evaluate(value),

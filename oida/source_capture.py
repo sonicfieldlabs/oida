@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -19,8 +19,8 @@ from urllib.parse import urlsplit
 import soundfile as sf
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from oida.owner_journal import OwnerJournal
 from oida.contracts import now_iso
+from oida.owner_journal import OwnerJournal
 
 MAX_AUDIO_BYTES = 128 * 1024 * 1024
 RESEARCH_TTL_DEFAULT = 30 * 24 * 3600
@@ -52,7 +52,8 @@ class CaptureSource(BaseModel):
     registration_revision: str | None = None
     rights_ref: str | None = None
     source_ref: str | None = None
-    guarded_format: Literal["mp3", "aac", "wav", "flac", "ogg"] | None = None
+    guarded_format: Literal["mp3", "aac", "wav", "flac", "ogg", "mpegts"] | None = None
+    playlist_policy: Literal["refuse", "finite"] = "refuse"
     network_policy: Literal["public_radio"] | None = None
     retention: Literal["temp_only", "research_sample"] | None = None
     research: ResearchPolicy | None = None
@@ -183,32 +184,30 @@ def capture_audio(
         raise CaptureInterrupted("Capture cancelled")
     if source.runtime_registered or source.network_policy == "public_radio":
         from tempfile import TemporaryDirectory
-        from oida.public_fetch import PublicFetcher
 
-        result = PublicFetcher().get(
-            source.input,
-            limit=32 * 1024**2,
-            cancel=cancelled,
-            stream_seconds=min(seconds + 2, 40),
-        )
-        data = result.data
-        formats = {
-            "audio/mpeg": "mp3",
-            "audio/aac": "aac",
-            "audio/aacp": "aac",
-            "audio/wav": "wav",
-            "audio/x-wav": "wav",
-            "audio/flac": "flac",
-            "audio/ogg": "ogg",
-            "application/ogg": "ogg",
-        }
-        format_name = formats.get(result.content_type.lower())
-        if not format_name or data.lstrip().startswith(
-            (b"#EXTM3U", b"[playlist]", b"<")
-        ):
-            raise ValueError(
-                "Only guarded direct audio streams are available; playlists/HLS refused"
+        from oida.stream_formats import retrieve_audio
+
+        if source.playlist_policy == "finite":
+            retrieved = retrieve_audio(source.input, seconds=seconds, cancel=cancelled)
+            data, format_name = retrieved.data, retrieved.format
+        else:
+            from oida.public_fetch import PublicFetcher
+            from oida.stream_formats import FORMATS
+
+            result = PublicFetcher().get(
+                source.input,
+                limit=32 * 1024**2,
+                cancel=cancelled,
+                stream_seconds=min(seconds + 2, 40),
             )
+            data = result.data
+            format_name = FORMATS.get(result.content_type.lower())
+            if not format_name or data.lstrip().startswith(
+                (b"#EXTM3U", b"[playlist]", b"<")
+            ):
+                raise ValueError(
+                    "Only guarded direct audio streams are available; playlists/HLS refused"
+                )
         with TemporaryDirectory(prefix="oida-radio-", dir=path.parent) as temp:
             local = Path(temp) / "input.audio"
             local.write_bytes(data)
@@ -321,8 +320,7 @@ class AcquisitionReceipts:
                 expired = (
                     item.get("status") == "queued"
                     and item.get("expires_at")
-                    and datetime.fromisoformat(item["expires_at"])
-                    <= datetime.now(timezone.utc)
+                    and datetime.fromisoformat(item["expires_at"]) <= datetime.now(UTC)
                 )
                 self.save(
                     {
