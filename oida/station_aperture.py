@@ -86,7 +86,7 @@ class PreviewRequest(BaseModel):
 
 def preview(req):
     """Read file declarations only. No capture, transforms, model load or writes."""
-    from oida.apertures import file_aperture
+    from oida.apertures import file_aperture, read_source_bytes
 
     limits = [
         dict(
@@ -107,8 +107,7 @@ def preview(req):
     if req.path is None:
         return result
     try:
-        with Path(req.path).open("rb") as stream:
-            raw = stream.read(96 * 1024**2 + 1)
+        raw = read_source_bytes(req.path)
         aperture = file_aperture(
             req.path,
             mode=req.aperture.mode,

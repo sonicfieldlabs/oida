@@ -297,3 +297,24 @@ def test_explicit_cloud_selection_catalog_and_pre_capture_refusal(client, tmp_pa
         assert 'pending M2' in response.text
     body['model_id'] = 'thinking'
     assert 'not both' in client.post('/gateway/listen', json=body).text
+
+
+def test_preview_refuses_nonregular_source_before_opening(tmp_path, monkeypatch):
+    import os
+    from oida.apertures import read_source_bytes
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    monkeypatch.setattr(os, "open", lambda *a, **kw: pytest.fail("must refuse before opening"))
+    with pytest.raises(ValueError, match="regular file"):
+        read_source_bytes(directory)
+
+
+def test_source_read_rechecks_the_open_descriptor(tmp_path, monkeypatch):
+    import os
+    from types import SimpleNamespace
+    from oida.apertures import read_source_bytes
+    source = tmp_path / "audio.wav"
+    source.write_bytes(b"fixture")
+    monkeypatch.setattr(os, "fstat", lambda fd: SimpleNamespace(st_mode=0, st_size=7))
+    with pytest.raises(ValueError, match="regular file"):
+        read_source_bytes(source)

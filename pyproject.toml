@@ -51,6 +51,7 @@ akousmata = { path = "vendor/akousmata-0.8.3-py3-none-any.whl" }
 
 [project.optional-dependencies]
 moss = [
+    "fsspec>=2026.6.0",
   "accelerate>=1.15.0",
   "torch==2.10.0",
   "torchaudio==2.10.0",
@@ -63,6 +64,7 @@ dev = [
   "twine>=7,<8",
 ]
 songid = [
+    "multidict>=6.9.1",
   "shazamio>=0.4",
   "audioop-lts>=0.2.2; python_version >= '3.13'"
 ]

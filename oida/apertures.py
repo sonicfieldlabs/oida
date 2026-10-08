@@ -4,11 +4,30 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
+import stat
 from io import BytesIO
 from pathlib import Path
 
 import soundfile as sf
 from akouo_contract.apertures import aperture_decision
+
+
+def read_source_bytes(path):
+    """Read one operator-selected regular file, bounded before and after opening."""
+    path = Path(path)
+    budget = 96 * 1024**2
+    if not path.is_file() or path.stat().st_size > budget:
+        raise ValueError("Aperture source must be a regular file within 96 MiB")
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    with os.fdopen(os.open(path, flags), "rb") as source:
+        opened = os.fstat(source.fileno())
+        if not stat.S_ISREG(opened.st_mode) or opened.st_size > budget:
+            raise ValueError("Aperture source must be a regular file within 96 MiB")
+        payload = source.read(budget + 1)
+    if len(payload) > budget:
+        raise ValueError("Aperture source exceeds byte budget")
+    return payload
 
 
 def file_aperture(
@@ -25,8 +44,7 @@ def file_aperture(
     if not path.is_file() or path.stat().st_size > 96 * 1024**2:
         raise ValueError("Aperture source must be a regular file within 96 MiB")
     if source_bytes is None:
-        with path.open("rb") as source:
-            source_bytes = source.read(96 * 1024**2 + 1)
+        source_bytes = read_source_bytes(path)
     if len(source_bytes) > 96 * 1024**2:
         raise ValueError("Aperture source exceeds byte budget")
     info = sf.info(BytesIO(source_bytes))

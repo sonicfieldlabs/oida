@@ -3,6 +3,7 @@
 ## 0.12.0 — 2026-10-08
 
 - Add bounded local owner event notifications, finite-playlist admission, and native audio-decoder diagnostics. Preserve model and real-source qualification as separate gates.
+- Require patched fsspec in the optional model environment and patched multidict in song identification; retain the two narrowly reviewed Torch exceptions.
 - Source release only; no package registry publication or service activation.
 
 ## Unreleased — observation freshness at reception
