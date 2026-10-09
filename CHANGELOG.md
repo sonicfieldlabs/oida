@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.1 — 2026-10-09
+
+- Give reusable CI a distinct concurrency group so tag-triggered release checks
+  can run without deadlocking their calling workflow.
+- Preserve the reviewed runtime dependencies and explicit publication gates.
+
 ## 0.12.0 — 2026-10-08
 
 - Add bounded local owner event notifications, finite-playlist admission, and native audio-decoder diagnostics. Preserve model and real-source qualification as separate gates.
