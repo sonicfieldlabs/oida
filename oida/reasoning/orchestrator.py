@@ -50,6 +50,13 @@ class TurnOptions:
     include_transcript: bool | None = None
     include_memory_content: bool | None = None
     allow_targeted_relisten: bool | None = None
+    research: dict[str, Any] = field(default_factory=dict)
+
+
+def _inquiry_bound(provider_id):
+    from oida.reasoning.bounded import BOUNDED_CONTEXT
+
+    return (BOUNDED_CONTEXT.get(provider_id) or {}).get("inquiry_chars")
 
 
 @dataclass
@@ -136,6 +143,50 @@ class ReasoningOrchestrator:
         response, execution = self._execute(context)
         return self._commit_context(context, response, execution=execution)
 
+    def evaluate_retained(
+        self, *, event, question, provider_id=None, require_model=True
+    ):
+        """Execute existing reasoning policy/validation without committing a turn.
+
+        The caller owns cancellation and canonical report retention. This local
+        route never opens raw audio or silently promotes deterministic fallback.
+        """
+        context = self._context(
+            event=event,
+            question=question,
+            options=TurnOptions(
+                provider_id=provider_id,
+                include_memory=False,
+                include_transcript=True,
+                include_memory_content=False,
+                allow_targeted_relisten=False,
+            ),
+        )
+        if context.locality != ProviderLocality.LOCAL:
+            raise ValueError(
+                "Second-report execution requires a configured local provider"
+            )
+        if require_model and (
+            context.provider_id == "local_structured" or context.forced_fallback_reason
+        ):
+            raise ValueError(
+                "No configured local text model is available for this second-report pass"
+            )
+        response, execution = self._execute(context)
+        if require_model and (
+            execution.get("provider_id") == "local_structured"
+            or execution.get("fallback")
+        ):
+            raise ValueError(
+                "Second-report model failed; deterministic fallback is not a model pass"
+            )
+        return dict(
+            response=response.model_dump(mode="json"),
+            execution=execution,
+            evidence_packet=context.packet.model_dump(mode="json"),
+            pass_id=context.turn_id,
+        )
+
     def prepare(
         self,
         *,
@@ -182,9 +233,11 @@ class ReasoningOrchestrator:
                     profile=context.profile,
                     route_instructions=context.route_instructions,
                     listening_identity=context.listening_identity,
+                    evidence_chars=_inquiry_bound(context.provider_id),
                     conversation_history=self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
+                        context.options.research.get("scope"),
                     ),
                 )
                 next_token = self._issue_token(context, stage=1)
@@ -249,7 +302,11 @@ class ReasoningOrchestrator:
             selected_provider = "local_structured"
             model_id = None
             forced_fallback = "Incognito mode forced local-only reasoning and disabled persistence."
-        elif requested_provider != "local_structured" and (configured is None or not configured.enabled):
+        elif (
+            requested_provider != "local_structured"
+            and (configured is None or not configured.enabled)
+            and not self._admitted_local_planner(requested_provider, settings)
+        ):
             selected_provider = "local_structured"
             model_id = None
             forced_fallback = f"The selected provider {requested_provider!r} is not explicitly enabled."
@@ -269,8 +326,9 @@ class ReasoningOrchestrator:
             memory_context=memory_context,
             include_transcript=include_transcript,
             include_memory_content=include_memory_content,
+            references=[] if incognito else options.research.get("sources", []),
         )
-        history = [] if incognito else self._history_for_packet(options.conversation_id, packet)
+        history = [] if incognito else self._history_for_packet(options.conversation_id, packet, options.research.get("scope"))
         route_instructions = trusted_route_instructions(event)
         listening_identity_snapshot = self._listening_identity_snapshot()
         listening_identity = listening_identity_snapshot.text.strip()
@@ -280,6 +338,7 @@ class ReasoningOrchestrator:
             route_instructions=route_instructions,
             listening_identity=listening_identity,
             conversation_history=history,
+            evidence_chars=_inquiry_bound(selected_provider),
         )
         conversation_prepared = self.conversations.prepare(
             event=event,
@@ -361,9 +420,11 @@ class ReasoningOrchestrator:
                     profile=context.profile,
                     route_instructions=context.route_instructions,
                     listening_identity=context.listening_identity,
+                    evidence_chars=_inquiry_bound(context.provider_id),
                     conversation_history=self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
+                        context.options.research.get("scope"),
                     ),
                 )
                 response, final_result, final_repaired, errors, final_attempts = self._complete_with_repair(
@@ -581,6 +642,10 @@ class ReasoningOrchestrator:
                 ),
             },
         }
+        if context.options.research:
+            turn["research"] = context.options.research
+        from oida.operation_control import checkpoint
+        checkpoint(seal=True)
         prepared = context.conversation_prepared
         result = self.conversations.append_turn(
             event=context.event,
@@ -627,6 +692,7 @@ class ReasoningOrchestrator:
         *,
         allow_transcript: bool,
         allow_memory_content: bool,
+        context_scope: dict | None = None,
     ) -> list[dict[str, str]]:
         if not conversation_id:
             return []
@@ -637,6 +703,9 @@ class ReasoningOrchestrator:
         history: list[dict[str, str]] = []
         for turn in list(conversation.get("turns") or [])[-6:]:
             if not isinstance(turn, dict):
+                continue
+            previous_scope = (turn.get("research") or {}).get("scope", {})
+            if any(previous_scope.get(key) and not (context_scope or {}).get(key) for key in ("web", "wiki", "memories")):
                 continue
             audit = turn.get("audit") if isinstance(turn.get("audit"), dict) else None
             if audit is None and (not allow_transcript or not allow_memory_content):
@@ -656,10 +725,22 @@ class ReasoningOrchestrator:
                 history.append({"role": "assistant", "content": answer})
         return history
 
+    def _admitted_local_planner(self, provider_id: str, settings: ReasoningSettings) -> bool:
+        """The admitted local planner is registered at startup from its deployment, not persisted
+        as a provider setting. It counts as enabled when that registration exists; its gateway
+        still refuses any task family the deployment's evaluation did not admit."""
+        if provider_id != "local_ecology":
+            return False
+        try:
+            return self.registry_factory(settings).get(provider_id) is not None
+        except Exception:
+            return False
+
     def _history_for_packet(
         self,
         conversation_id: str | None,
         packet: EvidencePacket,
+        context_scope: dict | None = None,
     ) -> list[dict[str, str]]:
         if covenant_blocks_untyped_prose(packet.covenant):
             return []
@@ -667,6 +748,7 @@ class ReasoningOrchestrator:
             conversation_id,
             allow_transcript=packet.permissions.transcript_included,
             allow_memory_content=packet.permissions.memory_content_included,
+            context_scope=context_scope,
         )
 
     def _issue_token(self, context: _TurnContext, *, stage: int) -> str:
@@ -722,7 +804,8 @@ def _provider_locality(
     model_id: str | None,
     settings: ReasoningSettings,
 ) -> ProviderLocality:
-    if provider_id in {"local_structured", "oida_moss"}:
+    # local_ecology is registered only for a loopback endpoint (registry.py refuses any other).
+    if provider_id in {"local_structured", "oida_moss", "local_ecology"}:
         return ProviderLocality.LOCAL
     configured = settings.providers.get(provider_id)
     if provider_id == "ollama":
@@ -807,6 +890,7 @@ def _memory_context_item(item: dict[str, Any]) -> dict[str, Any]:
 def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
     if not value:
         return None
+    from oida.reasoning.relisten_projection import provenance_projection
     public = {
         key: value.get(key)
         for key in (
@@ -814,6 +898,8 @@ def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
             "id",
             "base_event_id",
             "segment_ref",
+            "conversation_id",
+            "turn_id",
             "question",
             "parent_question",
             "time_range",
@@ -831,6 +917,8 @@ def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
         ("id", 255),
         ("base_event_id", 255),
         ("segment_ref", 255),
+        ("conversation_id", 255),
+        ("turn_id", 255),
         ("question", 4000),
         ("parent_question", 16_000),
         ("engine", 255),
@@ -861,6 +949,7 @@ def _public_relisten(value: dict[str, Any] | None) -> dict[str, Any] | None:
                 "role",
             )
         }
+    public["provenance"] = provenance_projection(value)
     if not value.get("observation_shared_to_reasoner"):
         public["observation"] = None
         public["observation_withheld"] = True

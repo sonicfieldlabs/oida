@@ -21,21 +21,21 @@ from scripts.release_smoke import normalize_server_url
 
 
 class CompletedFeatureTests(unittest.TestCase):
-    def test_release_metadata_is_consistent(self) -> None:
+    def test_source_candidate_and_published_citation_are_distinct(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        self.assertEqual(__version__, "0.10.0")
         self.assertIn(
-            'version = "0.10.0"',
+            f'version = "{__version__}"',
             (root / "pyproject.toml").read_text(encoding="utf-8"),
         )
         self.assertIn(
-            "version: 0.10.0",
+            f"version: {__version__}",
             (root / "CITATION.cff").read_text(encoding="utf-8"),
         )
         self.assertIn(
-            "sonicfield-oida 0.10.0",
+            f"sonicfield-oida {__version__}",
             (root / "README.md").read_text(encoding="utf-8"),
         )
+        self.assertNotIn("date-released:", (root / "CITATION.cff").read_text())
 
     def test_release_smoke_rejects_non_http_daemon_urls(self) -> None:
         self.assertEqual(normalize_server_url("http://127.0.0.1:8765/"), "http://127.0.0.1:8765")

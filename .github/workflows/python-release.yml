@@ -13,38 +13,29 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+    with:
+      release_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref_name }}
+
   build:
+    needs: checks
     name: Build and verify distributions
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Oída
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref_name }}
           fetch-depth: 0
           path: oida
-
-      - name: Checkout AKOÚŌ contract
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/akouo
-          ref: v0.9.2
-          path: akouo
-
-      - name: Checkout Earworm
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/earworm
-          ref: v0.7.0
-          path: earworm
-
-      - name: Checkout Akousmata
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/akousmata
-          ref: v0.7.0
-          path: akousmata
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -66,12 +57,16 @@ jobs:
           project_version="$(uv version --short)"
           test "$release_version" = "$project_version"
 
-      - name: Build all canonical distributions
+      - name: Verify reviewed canonical wheels
+        working-directory: oida
+        run: shasum -a 256 -c vendor/SHA256SUMS
+
+      - name: Assemble reviewed canonical wheels and build Oída
         run: |
           mkdir -p release/akouo release/akousma release/akousmata release/oida
-          uv build --out-dir "$GITHUB_WORKSPACE/release/akouo" akouo
-          uv build --out-dir "$GITHUB_WORKSPACE/release/akousma" earworm/packages/py-akousma
-          uv build --out-dir "$GITHUB_WORKSPACE/release/akousmata" akousmata
+          cp oida/vendor/akouo_contract-*.whl release/akouo/
+          cp oida/vendor/akousma-*.whl release/akousma/
+          cp oida/vendor/akousmata-*.whl release/akousmata/
           uv build --out-dir "$GITHUB_WORKSPACE/release/oida" oida
 
       - name: Check distribution metadata
@@ -98,7 +93,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.project }} to PyPI
     needs: build
-    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.PYPI_PUBLISH_ENABLED == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +108,7 @@ jobs:
             directory: akousmata
             environment: pypi-akousmata
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: ${{ matrix.environment }}
     permissions:
       contents: read
@@ -137,8 +133,9 @@ jobs:
     needs:
       - build
       - publish
-    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' && vars.PYPI_OIDA_PUBLISH_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.PYPI_PUBLISH_ENABLED == 'true' && vars.PYPI_OIDA_PUBLISH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: pypi-sonicfield-oida
     permissions:
       contents: read

@@ -28,6 +28,11 @@ uv run oida serve --profile stub
 ```
 
 Open `http://127.0.0.1:8765`, choose a WAV file, and begin with **Signal**.
+On macOS, the MPS gateway also searches an installed `ffmpeg@8` keg before the
+active FFmpeg formula. TorchCodec 0.10 needs compatible libraries; FFmpeg 9 alone
+is insufficient. Discovery changes only the gateway child environment and does
+not install or relink Homebrew packages.
+
 Install `ffmpeg` to use non-WAV files or browser recordings. The stub profile
 still performs deterministic DSP; it does not invent a semantic caption.
 
@@ -73,7 +78,7 @@ instead of promising one universal RAM minimum.
 | How does it connect? | [The Listening Stack](https://sonicfield.org/stack) and [GERM handoff](#stack-compatibility) |
 | How do I install the tested models? | [MOSS-Audio setup](docs/model-setup.md) |
 | Which models and licenses apply? | [Models and licensing](docs/models-and-licensing.md) |
-| What is unfinished? | [Known limitations](#known-limitations) and [roadmap](ROADMAP.md) |
+| What is unfinished? | [Known limitations](#known-limitations) |
 | How can I help? | [Contribution guide](CONTRIBUTING.md) |
 | How should I cite it? | [CITATION.cff](CITATION.cff) |
 
@@ -243,9 +248,9 @@ component for explicit cultivation handoffs.
 | Component | Version / contract | Role in OÍDA |
 | --- | --- | --- |
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.2` / `akouo/v0.9` | Listening vocabulary, embodied heard boundary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
-| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.7.0` / spec v1.6 | Addressable human, agent, hybrid, plural, decision-only, and legacy accounts; immutable machine core; provenance, lineage, and additive revision. |
-| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.7.0` | Embedded library at `/library/`, listener-type filtering, locally owned human accounts and revisions, accountable-memory audit, and the shared durable store. |
-| OÍDA gateway | `sonicfield-oida 0.10.0` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
+| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.8.0` / spec v1.8 | Addressable human, agent, hybrid, plural, decision-only, and legacy accounts; immutable machine core; provenance, lineage, and additive revision. |
+| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.8.0` | Embedded library at `/library/`, listener-type filtering, locally owned human accounts and revisions, accountable-memory audit, and the shared durable store. |
+| OÍDA gateway | `sonicfield-oida 0.12.0` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.3 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
@@ -303,6 +308,17 @@ uv run oida integrate openclaw
 uv run oida integrate opencode
 uv run oida doctor
 ```
+
+Installed adapters retain the selected local runtime paths (data, audio, shared
+store, model cache/checkpoints and gateway address), alongside the exact Python
+executable. Reinstall an adapter after changing those selections. Only named local
+configuration fields are copied; credentials and arbitrary environment variables
+are not serialized into plugin manifests. Hosts remain responsible for supplying
+any required authentication through their own configuration.
+
+Hermes uses its recorded runtime before searching PATH. An explicit `OIDA_COMMAND`
+remains an operator override; a malformed runtime file requires reinstalling the
+adapter instead of silently choosing a different installation.
 
 The `/remote` page is the dedicated remote ear: past/future capture with an
 on-device ring buffer, optional consent-scoped location, and the akousma
@@ -450,6 +466,13 @@ capped at 1 GiB and normalized through ffmpeg. `/raw-audio/status` and
 `/raw-audio/wipe` inspect and delete raw upload/live-buffer audio, including
 pre-data-dir recordings in the checkout's `uploads/` via `include_legacy`.
 
+Public radio audio is temporary: it is deleted after listening. The one exception is
+opt-in and scoped. A station configured with `research_sample` retention and an
+operator attestation may keep the exact input a listening heard, when that listening
+asks for it. The sample stays local in `<data dir>/research-samples/`, outside the
+library, is never exported, and is deleted with a receipt when its retention elapses
+(at most 30 days). See [source admission](docs/source-admission.md#research-samples-public-radio-opt-in).
+
 Memory is explicit: events are saved only through `/memory/remember`, the
 dashboard's Remember or Add my listening actions, or an explicit GERM handoff.
 Incognito events stay out of durable history. A human note is stored as a
@@ -488,9 +511,13 @@ variables as the fallback; they are never written into reasoning settings.
   costs, data handling, and model terms are controlled by their operators.
 - Oída does not publish a remote endpoint or configure TLS. Exposing the
   service beyond loopback is an operator decision and requires authentication.
+- Research samples are unit-tested and were runtime-checked once, on one station in a
+  testing workspace (MOSS-Audio 4B Instruct, 10 s windows). They are not signed.
+  `raw-audio/wipe` does not remove them; `DELETE /sources/research-samples/{id}` deletes
+  one early, with a receipt.
 
-The [roadmap](ROADMAP.md) states the public research priorities without
-promising production stability.
+Current limitations are listed above; contribution boundaries are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Repository Notes
 
@@ -509,7 +536,7 @@ promising production stability.
   configuration, and verification.
 - `docs/models-and-licensing.md` — model attribution, installation boundaries,
   and third-party terms.
-- `ROADMAP.md` — current public-alpha priorities and non-goals.
+- [Runtime dependencies](docs/dependencies.md) — package and optional runtime boundaries.
 - `integrations/` — the bundled Hermes, Codex, Claude, OpenClaw, OpenCode, and
   remote adapters.
 - CI (`.github/workflows/ci.yml`) runs pytest, compileall, a JS syntax check,
@@ -524,3 +551,57 @@ promising production stability.
   The PyPI upload job additionally requires the repository variable
   `PYPI_PUBLISH_ENABLED=true` and matching Trusted Publisher records for
   `akouo-contract`, `akousma`, `akousmata`, and `sonicfield-oida`.
+
+Unreleased runtime integration: [apparatus decisions and per-pass provenance](docs/runtime-attribution.md).
+
+Bounded source declarations: [source admission](docs/source-admission.md).
+
+Measured local MOSS runtime and conservative residency decision:
+[runtime guide](docs/moss-runtime.md).
+
+Durable owner receipt and record APIs: [owner journal](docs/owner-journal.md).
+
+Unreleased runtime additions: [transposition recipes](docs/transposition-runtime.md),
+[receiving-claim expiry](docs/claim-lifecycle.md), and explicit
+[capability evidence limits](docs/capability-limits.md).
+
+The unreleased [digital sector and structured-report APIs](docs/digital-sectors.md)
+add bounded band-energy measurements and readable accounts of retained evidence.
+[Runtime attribution](docs/runtime-attribution.md) documents operator-approved
+spectral attempts, prepared-input enforcement and per-pass source provenance.
+
+Independent retained ensembles and local A2 second-report execution are documented
+in [ensembles and second reports](docs/ensembles-second-reports.md) (unreleased).
+
+[Retained influence and local record exchange](docs/influence-exchange.md) documents
+validated decision traces, negotiated handoff and durable idempotent receipts.
+
+Unreleased [Akousmata-owned research integration](docs/research-integration.md)
+delegates canonical proposals and changed-record reconciliation to the existing
+shared service and scheduled watcher.
+
+D5 local integration: [listening-bundles](docs/listening-bundles.md). Unreleased; no automatic publication.
+
+Optional D6 application delivery uses [explicit local approval and ephemeral processing](docs/public-delivery.md). The Oída owner API remains local.
+
+D7 adds the [native Pi adapter](integrations/pi/README.md), staged for an explicit extension launch. Standalone wheels include all six host adapter assets; host credentials and conversations remain host-owned.
+
+### Station aperture integration (0.11.1)
+
+The ordinary `/gateway/listen`, `/gateway/listen-window` and capture requests accept
+`aperture` with contract `listeningstack/aperture-request/v1`. The selected route/model
+remains intact; native DSP and that route consume one immutable audio excerpt. Read-only
+`/sources/agent-native/preview` binds file limits without capture or inference. Capabilities
+advertise the portable contract separately from the standalone `native_options` route.
+
+Modes request frequency bands; they do not grant physical or human access. Per-band
+measurements retain bin spacing and report unresolved narrow bands explicitly. Requests
+for `views` also require an explicit `retention` block (`derivatives_permitted: true`,
+`expires_at` Unix seconds, `permission_ref`) plus permitted audio memory. System output,
+incognito and temporary-only registrations cannot retain views. Native evidence and the
+ordinary listening publish in one Akousmata record; selected audio/derivatives share one
+expiry and are not duplicated into the permanent Library directory.
+
+Use Akousma **0.8.1** and Akousmata **0.8.1** or later. The patch floors distinguish the
+atomic publication API from earlier local 0.8.0 artifacts. These are local package changes;
+rebuild and load the matching packages to update a daemon.

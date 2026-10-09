@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from oida import __version__
+from oida.pass_provenance import SourceBoundEngine
 from oida.chunker import Chunk, chunks_as_dicts, dedupe_events, offset_event, plan_chunks, write_chunk_audios
 from oida.dsp import inspect_path
 from oida.engine_base import EngineResult, MossEngine
@@ -121,6 +122,7 @@ def make_engine_info(result: EngineResult, chunks: list[dict[str, object]], thin
         chunks=[ChunkInfo(**chunk) for chunk in chunks],
         wall_ms=result.wall_ms,
         unavailable_reason=result.unavailable_reason,
+        pass_provenance=provenance_for_result(result),
     )
 
 
@@ -134,19 +136,29 @@ def source_info(path: str | Path, dsp: dict[str, object]) -> SourceInfo:
     )
 
 
+def _bound_helper(engine, path):
+    if isinstance(engine, SourceBoundEngine):
+        return engine
+    try:
+        inspected = inspect_path(path)
+    except (EOFError, OSError, RuntimeError) as exc:
+        raise ValueError("Source audio could not be decoded for provenance") from exc
+    return SourceBoundEngine(engine, path, str(inspected["sha256"]), float(inspected["durationSeconds"]))
+
+
 def transcribe(engine: MossEngine, path: str, timestamps: str = "sentence") -> tuple[object, EngineResult]:
     if timestamps not in TRANSCRIPTION_TASKS:
         valid = ", ".join(TRANSCRIPTION_TASKS)
         raise ValueError(f"unknown timestamp mode: {timestamps}. Valid modes: {valid}")
     task = TRANSCRIPTION_TASKS[timestamps]
     recipe = get_recipe(task)
-    result = engine.generate(path, recipe.prompt, recipe.settings)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings)
     return parse_transcript(result.text), result
 
 
 def events(engine: MossEngine, path: str, dsp_features: dict[str, object] | None = None) -> tuple[list[Event], EngineResult]:
     recipe = get_recipe("events")
-    result = engine.generate(path, recipe.prompt, recipe.settings)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings)
     parsed = parse_events(result.text)
     return corroborate_events(parsed, dsp_features or {}), result
 
@@ -158,21 +170,21 @@ def caption(engine: MossEngine, path: str, detail: str = "dense") -> tuple[Capti
     brief_recipe = get_recipe("caption_brief")
     dense_recipe = get_recipe("caption_dense")
     if detail == "brief":
-        brief = engine.generate(path, brief_recipe.prompt, brief_recipe.settings)
+        brief = _bound_helper(engine, path).generate(path, brief_recipe.prompt, brief_recipe.settings)
         return Caption(brief=brief.text or None, dense=None), brief
-    dense = engine.generate(path, dense_recipe.prompt, dense_recipe.settings)
+    dense = _bound_helper(engine, path).generate(path, dense_recipe.prompt, dense_recipe.settings)
     return Caption(brief=None, dense=dense.text or None), dense
 
 
 def speech(engine: MossEngine, path: str) -> tuple[object, EngineResult]:
     recipe = get_recipe("speech")
-    result = engine.generate(path, recipe.prompt, recipe.settings)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings)
     return parse_speech(result.text), result
 
 
 def music(engine: MossEngine, path: str, dsp_bpm: float | None = None) -> tuple[Music, EngineResult]:
     recipe = get_recipe("music")
-    result = engine.generate(path, recipe.prompt, recipe.settings)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings)
     text = result.text.strip()
     present = bool(text and "present: false" not in text.lower() and not result.unavailable_reason)
     return (
@@ -195,7 +207,7 @@ def direct_analysis(engine: MossEngine, path: str, mode: str = "environment", th
     if mode not in DIRECT_ANALYSIS_MODES:
         raise ValueError(f"unknown direct MOSS analysis mode: {mode}")
     recipe = get_recipe(mode)
-    result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
     analysis_text, sanity_note = _guard_prose(result.text)
     analysis = {
         "mode": mode,
@@ -215,14 +227,14 @@ def direct_analysis(engine: MossEngine, path: str, mode: str = "environment", th
 def qa(engine: MossEngine, path: str, question: str, thinking_budget: int | None = None, context: str | None = None) -> tuple[QaItem, EngineResult]:
     context_block = f"\nConversation context:\n{context.strip()}\n" if context and context.strip() else ""
     recipe = get_recipe("qa", question=question, context_block=context_block)
-    result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
     answer, sanity_note = _guard_prose(result.text)
     return QaItem(question=question, answer=answer or (sanity_note or ""), reasoning_trace=result.reasoning_trace, thinking_budget=thinking_budget), result
 
 
 def think(engine: MossEngine, path: str, instruction: str, thinking_budget: int | None = None) -> tuple[QaItem, EngineResult]:
     recipe = get_recipe("think", instruction=instruction)
-    result = engine.generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
+    result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
     return QaItem(question=instruction, answer=result.text, reasoning_trace=result.reasoning_trace, thinking_budget=thinking_budget), result
 
 
@@ -231,7 +243,11 @@ ALL_MOSS_PASSES = ("transcribe", "events", "caption", "speech", "music")
 
 def _dsp_only_engine_result(engine: MossEngine) -> EngineResult:
     settings = GenerationSettings(model_kind="instruct", temperature=0.0, top_p=1.0, top_k=50, max_new_tokens=0)
-    return EngineResult(text="", model="dsp-only", profile=engine.profile, settings=settings, wall_ms=0)
+    from oida.pass_provenance import pass_receipt
+    return EngineResult(text="", model="dsp-only", profile=engine.profile, settings=settings, wall_ms=0,
+        pass_provenance=[pass_receipt(model="dsp-only", provider="oida-dsp", model_kind="none",
+            weights={"status": "not_applicable", "reason": "No model weights used"},
+            effective_input={"status": "not_applicable", "reason": "DSP-only report; no model input"})])
 
 
 def _normalize_passes(passes: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -242,6 +258,18 @@ def _normalize_passes(passes: list[str] | tuple[str, ...] | None) -> list[str]:
         valid = ", ".join(ALL_MOSS_PASSES)
         raise ValueError(f"unknown MOSS pass(es): {', '.join(unknown)}. Valid passes: {valid}")
     return [name for name in ALL_MOSS_PASSES if name in set(passes)]
+
+
+def prepare_report_bindings(engine: MossEngine, path: str, passes, source: dict,
+                            max_duration_s: float) -> dict:
+    """Prepare bounded whole-source inputs without loading models or inference."""
+    from oida.input_binding import unknown_binding
+    recipes = {"transcribe": "transcribe_sentence", "caption": "caption_dense",
+               "events": "events", "speech": "speech", "music": "music"}
+    kinds = dict.fromkeys(get_recipe(recipes[name]).settings.model_kind for name in _normalize_passes(passes))
+    if float(source["durationSeconds"]) > max_duration_s:
+        return {kind: unknown_binding("Chunked input preparation is not supported by this preflight") for kind in kinds}
+    return {kind: engine.prepare_input_binding(path, kind) for kind in kinds}
 
 
 def report(
@@ -259,12 +287,16 @@ def report(
     if not audio_path.is_file():
         raise ValueError(f"audio path is not a file: {audio_path.resolve()}")
     selected = _normalize_passes(passes)
-    dsp = inspect_path(path)
+    from oida.stage_timing import stage
+
+    with stage("dsp"):
+        dsp = inspect_path(path)
     features = dsp.get("features", {})
     signal_interpretation = signal_reading_dict(dsp)
     chunks = plan_chunks(path, chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds)
     if len(chunks) > 1:
         return chunked_report(engine, path, dsp, chunks, profile=profile, passes=selected, signal_interpretation=signal_interpretation)
+    engine = SourceBoundEngine(engine, path, str(dsp["sha256"]), float(dsp["durationSeconds"]))
     chunk_dicts = chunks_as_dicts(chunks)
     engine_results: list[EngineResult] = []
     sanity_notes: list[str] = []
@@ -355,7 +387,19 @@ def chunked_report(
     music_obj: Music | None = None
 
     with tempfile.TemporaryDirectory(prefix="oida-chunks-") as temp_dir:
+        # Verify the original on both sides of crop creation. Chunk identities
+        # bind to the sample-aligned windows used by the existing cropper.
+        source_guard = SourceBoundEngine(engine, path, str(dsp["sha256"]), float(dsp["durationSeconds"]))
         chunk_paths = write_chunk_audios(path, chunks, temp_dir)
+        source_guard.verify_source()
+        rate = int(dsp["sampleRate"])
+        frames = round(float(dsp["durationSeconds"]) * rate)
+        engine = SourceBoundEngine(engine, path, str(dsp["sha256"]), float(dsp["durationSeconds"]),
+            inputs={str(chunk_path.resolve()): {
+                "chunk_index": chunk.i,
+                "window_s": {"start": max(0, round(chunk.t0 * rate)) / rate,
+                             "end": min(frames, round(chunk.t1 * rate)) / rate}}
+                for chunk, chunk_path in zip(chunks, chunk_paths, strict=True)})
         for chunk, chunk_path in zip(chunks, chunk_paths, strict=True):
             if "transcribe" in selected:
                 transcript_obj, transcript_result = transcribe(engine, str(chunk_path), timestamps="sentence")
@@ -446,6 +490,14 @@ def chunked_report(
     )
 
 
+def provenance_for_result(result: EngineResult) -> list[dict]:
+    if result.pass_provenance:
+        return result.pass_provenance
+    from oida.pass_provenance import pass_receipt
+    return [pass_receipt(model=result.model, provider=result.profile,
+                         model_kind=result.settings.model_kind)]
+
+
 def aggregate_engine_results(results: list[EngineResult]) -> EngineResult:
     if not results:
         raise ValueError("cannot aggregate empty engine result list")
@@ -465,6 +517,7 @@ def aggregate_engine_results(results: list[EngineResult]) -> EngineResult:
         reasoning_trace=None,
         wall_ms=wall_ms or None,
         unavailable_reason="; ".join(unavailable) if unavailable else None,
+        pass_provenance=[receipt for result in results for receipt in provenance_for_result(result)],
     )
 
 

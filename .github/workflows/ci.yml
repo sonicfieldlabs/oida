@@ -1,6 +1,13 @@
 name: CI
 
 on:
+  workflow_call:
+    inputs:
+      release_ref:
+        description: Optional immutable release ref selected by the publishing workflow
+        required: false
+        type: string
+        default: ""
   pull_request:
   push:
     branches:
@@ -8,6 +15,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -21,34 +32,23 @@ jobs:
       - name: Checkout Oída
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
+          ref: ${{ inputs.release_ref || github.ref }}
           path: oida
-
-      - name: Checkout Earworm
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/earworm
-          ref: v0.7.0
-          path: earworm
-
-      - name: Checkout AKOÚŌ contract
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/akouo
-          ref: v0.9.2
-          path: akouo
-
-      - name: Checkout Akousmata
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: sonicfieldlabs/akousmata
-          ref: v0.7.0
-          path: akousmata
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
 
+      - name: Verify reviewed canonical dependency wheels
+        run: shasum -a 256 -c vendor/SHA256SUMS
+
+      - name: Install audio fixture tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: command -v ffmpeg >/dev/null || brew install ffmpeg
+
       - name: Install Python dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --locked
 
       # pytest collects the unittest.TestCase suite too; one runner is enough.
       - name: Run Python tests
@@ -60,18 +60,12 @@ jobs:
       - name: Compile Python modules
         run: uv run python -m compileall -q oida harness bench_adapter scripts tests
 
-      # The validated MOSS runtime uses PyTorch 2.10. PYSEC-2026-139 has no
-      # patched release; CVE-2025-3000 is fixed in unvalidated 2.13. Oída calls
-      # neither API. Both exceptions have a review deadline in SECURITY.md.
-      - name: Audit dependency graph
+      - name: Audit dependency graph with dated exceptions
         run: |
-          uv export --all-extras --no-emit-project --no-emit-local |
-            uvx --from pip-audit==2.10.1 pip-audit \
-              --requirement /dev/stdin \
-              --disable-pip \
-              --progress-spinner=off \
-              --ignore-vuln PYSEC-2026-139 \
-              --ignore-vuln CVE-2025-3000
+          uv export --locked --all-extras --no-emit-project --no-emit-local > "$RUNNER_TEMP/dependencies.txt"
+          uv run python scripts/audit_dependencies.py \
+            --requirements "$RUNNER_TEMP/dependencies.txt" \
+            --output "$RUNNER_TEMP/dependency-audit.json"
 
       - name: Check dashboard JavaScript
         run: |
@@ -82,9 +76,7 @@ jobs:
         run: |
           uv build
           mkdir -p "$RUNNER_TEMP/oida-wheels"
-          uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../akouo
-          uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../earworm/packages/py-akousma
-          uv build --wheel --out-dir "$RUNNER_TEMP/oida-wheels" ../akousmata
+          cp vendor/*.whl "$RUNNER_TEMP/oida-wheels/"
 
       - name: Check Python distribution metadata
         run: uv run twine check dist/*

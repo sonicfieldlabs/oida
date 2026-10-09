@@ -203,6 +203,8 @@ def doctor() -> dict[str, Any]:
         "akousmata",
         "mcp",
     )
+    from oida.native_decoder import probe
+    checks["moss_runtime"]["native_decoder"] = probe()
     checks["ok"] = all(packages[name] for name in required_packages) and bool(checks["executables"]["ffmpeg"])
     return checks
 
@@ -220,22 +222,24 @@ def _gateway_environment(profile: str) -> dict[str, str]:
             libraries.append(str(torch_lib))
     brew = shutil.which("brew")
     if brew:
-        try:
-            completed = subprocess.run(
-                [brew, "--prefix", "ffmpeg"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            ffmpeg_lib = Path(completed.stdout.strip()) / "lib"
-            if completed.returncode == 0 and ffmpeg_lib.is_dir():
-                libraries.append(str(ffmpeg_lib))
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    for fallback in (Path("/opt/homebrew/opt/ffmpeg/lib"), Path("/opt/homebrew/lib")):
-        if fallback.is_dir():
-            libraries.append(str(fallback))
+        # TorchCodec 0.10 supports FFmpeg through 8; the active formula
+        # may be newer. Reuse the compatible keg without relinking it.
+        for formula in ("ffmpeg@8", "ffmpeg"):
+            try:
+                completed = subprocess.run(
+                    [brew, "--prefix", formula], capture_output=True,
+                    text=True, timeout=5, check=False,
+                )
+                ffmpeg_lib = Path(completed.stdout.strip()) / "lib"
+                if completed.returncode == 0 and ffmpeg_lib.is_dir():
+                    libraries.append(str(ffmpeg_lib))
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    for prefix in (Path("/opt/homebrew"), Path("/usr/local")):
+        for relative in ("opt/ffmpeg@8/lib", "opt/ffmpeg/lib", "lib"):
+            fallback = prefix / relative
+            if fallback.is_dir():
+                libraries.append(str(fallback))
     existing = environment.get("DYLD_LIBRARY_PATH", "")
     if existing:
         libraries.extend(part for part in existing.split(":") if part)

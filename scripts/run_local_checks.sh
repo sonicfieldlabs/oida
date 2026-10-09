@@ -31,7 +31,7 @@ case "$MODE" in
   --release|release)
     uv build
     uv run --extra dev twine check dist/*
-    apps/macos/script/build_and_run.sh --verify
+    (cd apps/macos && swift build -Xswiftc -strict-concurrency=complete)
     apps/macos/script/package_unsigned.sh
     scripts/release_smoke_with_stub.sh
     ;;

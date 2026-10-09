@@ -28,6 +28,7 @@
     "raw_audio_policy"
   ],
   "properties": {
+    "pass_provenance": {"type": "array", "items": {"type": "object"}},
     "id": {"type": "string", "minLength": 1},
     "created_at": {"type": "string", "minLength": 1},
     "contract": {"const": "oida/listening-event/v0.3"},
