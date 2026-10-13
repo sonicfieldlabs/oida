@@ -232,6 +232,7 @@ def test_embedded_model_loader_requires_safetensors(tmp_path: Path, monkeypatch)
                 side_effect=lambda processor_cls, _model_id, revision=None: processor_cls(enable_time_marker=True),
             ),
             patch.object(engine, "_device", return_value="cpu"),
+            patch("oida.native_decoder.probe", return_value={"status": "supported", "scope": "fixture native admission only"}),
         ):
             engine._load_pair(str(tmp_path))
 

@@ -1,15 +1,19 @@
 """Owner-managed radio registrations, separate from operator configuration."""
 
 from __future__ import annotations
-from contextlib import contextmanager
+
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
 import uuid
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
+
 from pydantic import BaseModel, ConfigDict, Field
+
 from oida.public_fetch import public_url
 from oida.source_capture import CaptureSource
 
@@ -22,6 +26,7 @@ class Registration(BaseModel):
     source_ref: str = Field(min_length=1, max_length=512)
     retention: str = Field(pattern="^temp_only$")
     consent: str = Field(pattern="^granted$")
+    playlist_policy: Literal["refuse", "finite"] = "refuse"
     max_seconds: float = Field(default=30.0, gt=0, le=60)
 
 
@@ -76,7 +81,10 @@ class CaptureRegistry:
     def register(self, request):
         url = public_url(request.url)
         parts = urlsplit(url)
-        if parts.path.lower().endswith((".m3u", ".m3u8", ".pls")):
+        if parts.path.lower().endswith(".pls") or (
+            parts.path.lower().endswith((".m3u", ".m3u8"))
+            and request.playlist_policy != "finite"
+        ):
             raise ValueError(
                 "Playlist/HLS registration unavailable; direct streams only"
             )
@@ -95,6 +103,8 @@ class CaptureRegistry:
                 raise ValueError("Registration collides with configured source")
             value = {**request.model_dump(), "url": url, "id": identifier}
             prior = items.get(identifier)
+            if prior is not None:
+                prior.setdefault("playlist_policy", "refuse")
             if (
                 prior is not None
                 and {k: v for k, v in prior.items() if k != "revision"} != value
@@ -128,6 +138,7 @@ class CaptureRegistry:
             consent="granted",
             consent_ref=item["consent_ref"],
             runtime_registered=True,
+            playlist_policy=item.get("playlist_policy", "refuse"),
             registration_revision=item["revision"],
             rights_ref=item["rights_ref"],
             source_ref=item["source_ref"],

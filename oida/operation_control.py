@@ -107,17 +107,21 @@ class Operations:
             page = journal.snapshots(after=cursor, producer_id=journal.producer_id, at=boundary)
             boundary = page["high_water_sequence"]
             for entry in page['snapshots']:
-                if entry['kind'] == 'operation' and entry['payload']['status'] in ('running', 'committing'):
+                if entry['kind'] == 'operation' and (entry['payload']['status'] in ('running', 'committing') or entry['payload'].get('execution_state') == 'cancellation_requested'):
                     pending.append(entry['subject_id'])
             if not page['has_more']:
                 break
             cursor = page['next_sequence']
         for identifier in pending:
-            self.save(identifier, 'interrupted')
+            self.save(identifier, 'interrupted', execution_state='interrupted', worker_settled=None, publication_prevented=None, automatic_replay=False)
 
     def save(self, identifier, status, **fields):
+        defaults = dict(cancellation_requested=False, publication_prevented=False,
+                        worker_settled=status in ('complete', 'refused', 'failed'),
+                        execution_state='settled' if status in ('complete', 'refused', 'failed') else status,
+                        cancellation_mechanism='cooperative publication fence; no hard worker termination guarantee')
         value = dict(contract='oida/operation-receipt/v1', id=identifier,
-                     status=status, updated_at=now_iso(), **fields)
+                     status=status, updated_at=now_iso(), **(defaults | fields))
         self.journal.save('operation', identifier, value)
         return value
 
@@ -128,7 +132,7 @@ class Operations:
                 return (self.journal.get('operation', identifier) or {}).get('status') == 'cancelled'
             if not control.cancel():
                 return False
-            self.save(identifier, 'cancelled')
+            self.save(identifier, 'cancelled', cancellation_requested=True, publication_prevented=True, worker_settled=False, execution_state='cancellation_requested')
             return True
 
     def close(self):
@@ -163,14 +167,14 @@ class Operations:
             self.save(identifier, 'refused' if result.get('outcome') in ('refused', 'withheld') else 'complete', **links)
             return result
         except DeadlineReached:
-            self.save(identifier, 'cancelled', reason='deadline')
+            self.save(identifier, 'cancelled', reason='deadline', settlement_reason='deadline', cancellation_requested=False, publication_prevented=True, worker_settled=True, execution_state='settled')
             raise
         except OperationCancelled:
-            self.save(identifier, 'cancelled')
+            self.save(identifier, 'cancelled', settlement_reason='cancellation', cancellation_requested=True, publication_prevented=True, worker_settled=True, execution_state='settled')
             raise
         except Exception as exc:
             if control.event.is_set():
-                self.save(identifier, "cancelled")
+                self.save(identifier, "cancelled", settlement_reason="cancellation", cancellation_requested=True, publication_prevented=True, worker_settled=True, execution_state="settled")
                 raise OperationCancelled() from exc
             self.save(identifier, 'refused' if isinstance(exc, HTTPException) and exc.status_code in (400,409,423) else 'failed')
             raise

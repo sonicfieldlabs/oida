@@ -5,8 +5,8 @@ bounded decision, with ``state``, a pinned ``model`` and a map of typed
 questions. The adapter owns the wire contract, the retry budget (429/529 with
 ``Retry-After`` inside the run deadline), response validation (question
 coverage, option membership, finite distributions that sum to 1) and the
-mapping of the chosen option into a typed ``DecisionProposal``. Khipu never
-embeds this in the browser and never calls TypeSafe directly.
+mapping of the chosen option into a typed ``DecisionProposal``. Host applications delegate this transport to Oída;
+provider calls and credentials remain outside browser code.
 """
 
 from __future__ import annotations

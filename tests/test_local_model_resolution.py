@@ -50,7 +50,7 @@ def test_http_resolves_explicitly_configured_external_checkpoint(
     monkeypatch.setenv("OIDA_MOSS_PREWARM", "0")
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setattr("oida.server.build_engine", lambda config: StubMossEngine())
-    monkeypatch.setattr("oida.server.scan_moss_models", lambda root: [])
+    monkeypatch.setattr("oida.server.scan_moss_models", lambda root, configured=(): [])
     audio = tmp_path / "fixture.wav"
     sf.write(audio, np.zeros(16000, dtype=np.float32), 16000)
     client = TestClient(create_app(profile=profile), base_url="http://127.0.0.1")

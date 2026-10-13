@@ -110,8 +110,8 @@ What is kept, and where:
 - **Local only.** `GET /sources/research-samples` (`oida/research-samples/v1`) lists
   unexpired samples as metadata, without paths, with `audience: "local"` and
   `exportable: false`. `GET /sources/research-samples/{id}/audio` serves the file after
-  checking its bytes against the recorded digest (409 if they changed). Khipu reads
-  these for its Listening Station section and never packages them.
+  checking its bytes against the recorded digest (409 if they changed). An authorized local
+  owner interface may read these samples; they remain excluded from exports.
 - **Expiring.** A sweep deletes a sample at `expires_at`. It runs every 30 s, and also
   at startup and before every listing, read and retention. Each deletion is journaled as a
   `research_sample` receipt with `status: "expired"`, `deleted_at` and
@@ -253,9 +253,9 @@ memory. Unsupported platforms report unknown. Expired jobs that never execute
 have no execution metrics. These measurements do not select model residency or
 raise inference concurrency. The single source executor preserves the previous
 acquisition bound; other existing Oída routes retain their own concurrency rules.
-The [local full-model profile](moss-hardware-profile.md) now supports retaining
-single-model residency and one source executor on the measured host. Different
-hardware, longer workloads or higher concurrency require fresh measurements.
+The [MOSS runtime guide](moss-runtime.md) retains single-model residency and
+one source executor as conservative defaults. Hardware-specific capacity,
+longer workloads and higher concurrency require separate measurements.
 
 ### Durable owner replay
 
