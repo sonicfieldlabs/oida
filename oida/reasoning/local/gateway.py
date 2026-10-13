@@ -89,13 +89,16 @@ def create_app(config_path=None):
                     metadata=dict(
                         revision=e["revision"],
                         recommended=e["id"] == config["recommended_model"],
+                        admitted_tasks=e.get("tasks", ["planning"]),
+                        **(dict(context_window=8192, token_counter_ref=counter_ref(e))
+                           if "inscription" in e.get("tasks", []) else {}),
                     ),
                 )
                 for e in config["models"]
             ],
         )
 
-    def execute(entry, body, stop):
+    def execute(entry, body, stop, *, count_only=False):
         def check():
             if stop.is_set():
                 raise InterruptedError("Planning cancelled")
@@ -105,7 +108,7 @@ def create_app(config_path=None):
         try:
             validate(entry)
             with (
-                heavy_lease("oida", "situated-planning", timeout=10, checkpoint=check),
+                heavy_lease("oida", "text-tokenization" if count_only else "situated-planning", timeout=10, checkpoint=check),
                 tempfile.TemporaryDirectory(prefix="centaur-plan-") as directory,
             ):
                 check()
@@ -119,6 +122,7 @@ def create_app(config_path=None):
                             messages=body["messages"],
                             schema=body["response_format"]["json_schema"]["schema"],
                             max_tokens=body.get("max_tokens", 1024),
+                            count_only=count_only,
                         )
                     )
                 )
@@ -171,8 +175,7 @@ def create_app(config_path=None):
         finally:
             slot.release()
 
-    @app.post("/v1/chat/completions")
-    async def complete(request: Request):
+    async def admitted_request(request):
         await auth(request)
         raw = bytearray()
         async for chunk in request.stream():
@@ -202,6 +205,28 @@ def create_app(config_path=None):
         # provisioned before routing and inquiry were evaluated admits planning only.
         if family not in entry.get("tasks", ["planning"]):
             raise HTTPException(422, f"Local reasoning task not admitted for this deployment: {family}")
+        return entry, body
+
+    def counter_ref(entry):
+        identity = json.dumps(dict(model=entry["id"], revision=entry["revision"],
+                                   files=entry["files"]), sort_keys=True, separators=(",", ":"))
+        return "oida:local-framed-token-count:v1:" + hashlib.sha256(identity.encode()).hexdigest()
+
+    @app.post("/v1/token-budget")
+    async def token_budget(request: Request):
+        entry, body = await admitted_request(request)
+        stop = threading.Event()
+        try:
+            value = await asyncio.to_thread(execute, entry, body, stop, count_only=True)
+            return dict(**value, method_ref=counter_ref(entry), model_id=entry["id"])
+        except (ValueError, TimeoutError, InterruptedError) as exc:
+            raise HTTPException(422, "Token framing is unavailable or exceeds the admitted context") from exc
+        finally:
+            stop.set()
+
+    @app.post("/v1/chat/completions")
+    async def complete(request: Request):
+        entry, body = await admitted_request(request)
         stop = threading.Event()
         task = asyncio.create_task(asyncio.to_thread(execute, entry, body, stop))
         try:

@@ -64,6 +64,10 @@ class ProviderRegistry:
     def ids(self) -> list[str]:
         return sorted(self._providers)
 
+    def enabled_ids(self) -> list[str]:
+        """Explicitly enabled adapters, without probing disabled hosts."""
+        return sorted(key for key, entry in self._providers.items() if entry.enabled)
+
     def get(self, provider_id: str) -> ProviderAdapter | None:
         entry = self._providers.get(provider_id)
         return entry.adapter if entry else None

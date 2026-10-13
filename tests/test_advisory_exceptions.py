@@ -56,12 +56,13 @@ def test_git_source_review_cannot_hide_registry_or_changed_dependencies():
     entry = {**value["exceptions"][0], "requirement": "example @ git+https://github.com/owner/repo.git@" + "a" * 40}
     value["unindexed_sources"] = [entry]
     requirements = "torch==2.10.0\n" + entry["requirement"] + "\nanyio==4.15.1\n"
-    registry, sources = registry_requirements(value, requirements)
+    reviewed = date.fromisoformat(entry["reviewed_on"])
+    registry, sources = registry_requirements(value, requirements, today=reviewed)
     assert registry == "torch==2.10.0\nanyio==4.15.1\n"
     assert sources == [entry]
     with pytest.raises(ValueError, match="Direct source changed"):
-        registry_requirements(value, requirements.replace("a" * 40, "b" * 40))
+        registry_requirements(value, requirements.replace("a" * 40, "b" * 40), today=reviewed)
     with pytest.raises(ValueError, match="no longer matches"):
-        registry_requirements(value, "torch==2.10.0\n")
+        registry_requirements(value, "torch==2.10.0\n", today=reviewed)
     with pytest.raises(ValueError, match="expired"):
         registry_requirements(value, requirements, today=date.fromisoformat(entry["expires_on"]))

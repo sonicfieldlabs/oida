@@ -1,3 +1,6 @@
-ed3ffdfcb02cf794f7303351a6e473259b78eba351efedb4b98645b5622649c2  vendor/akouo_contract-0.10.1-py3-none-any.whl
-ed3c2c41dbc20804deae9da7fb9d5797c3074deb0e03a899ce47adb650e34539  vendor/akousma-0.8.4-py3-none-any.whl
-b5138da23d7fe5289e40cc02816576ed21519aa217ffbd69052d2a2e7572213e  vendor/akousmata-0.8.3-py3-none-any.whl
+ed3ffdfcb02cf794f7303351a6e473259b78eba351efedb4b98645b5622649c2  akouo_contract-0.10.1-py3-none-any.whl
+82f0ef39dc3ebebe1113b662ef5c129c96b38d5b27946ba1eade19b5785b5369  akouo_contract-0.12.0-py3-none-any.whl
+b62406267017de15e0a43489aec570dc58d2602fcb80a46cec0cb00a56bd906d  akousma-0.10.0-py3-none-any.whl
+ed3c2c41dbc20804deae9da7fb9d5797c3074deb0e03a899ce47adb650e34539  akousma-0.8.4-py3-none-any.whl
+b5138da23d7fe5289e40cc02816576ed21519aa217ffbd69052d2a2e7572213e  akousmata-0.8.3-py3-none-any.whl
+1d1c286da46c070b146833eaadfe1e88f038cd58cd329ff71176f20dd23b8d5c  akousmata-0.9.0-py3-none-any.whl

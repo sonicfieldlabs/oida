@@ -23,9 +23,9 @@ from scripts.release_smoke import normalize_server_url
 class CompletedFeatureTests(unittest.TestCase):
     def test_source_candidate_and_published_citation_are_distinct(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        self.assertEqual(__version__, "0.11.2")
+        self.assertEqual(__version__, "0.13.1")
         self.assertIn(
-            'version = "0.11.2"',
+            'version = "0.13.1"',
             (root / "pyproject.toml").read_text(encoding="utf-8"),
         )
         self.assertIn(
@@ -33,7 +33,7 @@ class CompletedFeatureTests(unittest.TestCase):
             (root / "CITATION.cff").read_text(encoding="utf-8"),
         )
         self.assertIn(
-            "sonicfield-oida 0.11.2",
+            "sonicfield-oida 0.13.1",
             (root / "README.md").read_text(encoding="utf-8"),
         )
 

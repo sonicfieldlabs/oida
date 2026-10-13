@@ -3,6 +3,44 @@
   "packages": [
     {
       "distribution": "akouo-contract",
+      "version": "0.12.0",
+      "wheel": "vendor/akouo_contract-0.12.0-py3-none-any.whl",
+      "sha256": "82f0ef39dc3ebebe1113b662ef5c129c96b38d5b27946ba1eade19b5785b5369",
+      "source_repository": "akouo",
+      "base_commit": "f400f777abc7c39f54286446361e5bb1114fdbd5",
+      "build_state": "Uncommitted local LISTENING.md expansion Phase 5 cohort; base_commit is not the complete source identity.",
+      "source_changes_sha256": "932dd06d778b9e1cd157842cf178259829ea521f590f8483c4db4bae1a7a690c",
+      "source_changes_basis": "SHA256 of compact sorted JSON mapping explicit source-distribution input paths to file SHA256; excludes generated PKG-INFO.",
+      "published": false
+    },
+    {
+      "distribution": "akousma",
+      "version": "0.10.0",
+      "sha256": "b62406267017de15e0a43489aec570dc58d2602fcb80a46cec0cb00a56bd906d",
+      "source_repository": "earworm",
+      "base_commit": "a11908d4e44eddfc3bdd03d5fa90e9cc825ccbcf",
+      "build_state": "Uncommitted Phase 17 local selection; base commit alone is not the source identity.",
+      "source_changes_sha256": "171e3c0dce04f341cddf9389b4d231b12074c3adeaf77155296a66cdcabcc86f",
+      "source_changes_basis": "SHA256 of compact sorted current Git-selected source file SHA256 mapping; includes reviewed docs and vendor selection; exact build inputs retained separately.",
+      "published": false,
+      "wheel": "vendor/akousma-0.10.0-py3-none-any.whl"
+    },
+    {
+      "distribution": "akousmata",
+      "version": "0.9.0",
+      "sha256": "1d1c286da46c070b146833eaadfe1e88f038cd58cd329ff71176f20dd23b8d5c",
+      "source_repository": "akousmata",
+      "base_commit": "63a0ea00f01256bdf83c4d56e446b413c0ba6e86",
+      "build_state": "Uncommitted Phase 17 local selection; base commit alone is not the source identity.",
+      "source_changes_sha256": "262e218995075ef5c4a068ae486058721ac424fc8d3ed12dbb324205b78debec",
+      "source_changes_basis": "SHA256 of compact sorted current Git-selected source file SHA256 mapping; includes reviewed docs and vendor selection; exact build inputs retained separately.",
+      "published": false,
+      "wheel": "vendor/akousmata-0.9.0-py3-none-any.whl"
+    }
+  ],
+  "retained_previous_candidates": [
+    {
+      "distribution": "akouo-contract",
       "version": "0.10.1",
       "wheel": "vendor/akouo_contract-0.10.1-py3-none-any.whl",
       "sha256": "ed3ffdfcb02cf794f7303351a6e473259b78eba351efedb4b98645b5622649c2",
