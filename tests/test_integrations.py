@@ -212,7 +212,8 @@ class IntegrationAssetTests(unittest.TestCase):
             ),
         ):
             with TestClient(
-                create_app(profile="stub"), base_url="http://127.0.0.1"
+                create_app(profile="stub"), base_url="http://127.0.0.1",
+                client=("127.0.0.1", 53003),
             ) as client:
                 page = client.get("/library/")
                 health = client.get("/library/api/health")

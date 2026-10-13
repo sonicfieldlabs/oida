@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from io import BytesIO
 from pathlib import Path
+
 import soundfile as sf
 from akouo_contract.apertures import aperture_decision
 
@@ -17,6 +19,7 @@ def file_aperture(
     claim_kind="digital_dsp",
     apparatus_resolver=None,
     source_bytes=None,
+    window_s=None,
 ):
     path = Path(path)
     if not path.is_file() or path.stat().st_size > 96 * 1024**2:
@@ -30,6 +33,16 @@ def file_aperture(
     if not info.frames or info.samplerate <= 0:
         raise ValueError("Empty or invalid sampled representation")
     subject = hashlib.sha256(source_bytes).hexdigest()
+    duration = info.frames / info.samplerate
+    window = [0, duration] if window_s is None else list(window_s)
+    if (
+        len(window) != 2
+        or any(type(v) not in (int, float) or not math.isfinite(v) for v in window)
+        or not 0 <= window[0] < window[1] <= duration
+    ):
+        raise ValueError(
+            "Aperture window must be finite and within the sampled representation"
+        )
     nyquist = info.samplerate / 2
     if mode not in {"centaur", "human_reference", "beyond"}:
         raise ValueError("Unknown aperture mode")
@@ -47,14 +60,17 @@ def file_aperture(
     )
     request = dict(
         contract="akouo/aperture-request/v1",
-        request_id="aperture:" + subject,
+        request_id="aperture:"
+        + hashlib.sha256(
+            repr((subject, mode, bands, claim_kind, window)).encode()
+        ).hexdigest(),
         mode=mode,
         bands_hz=bands,
         subject_ref=subject,
         representation_ref="samples:" + subject,
         route_ref="oida:pyramid:v1",
         claim_kind=claim_kind,
-        window_s=[0, info.frames / info.samplerate],
+        window_s=window,
     )
     known = dict(
         status="known",
@@ -83,7 +99,11 @@ def file_aperture(
     return dict(
         request=request,
         requested_bands_hz=bands,
-        effective_bands_hz=[entry["band_hz"] for entry in decision["bands"] if entry["support"] == "supported"],
+        effective_bands_hz=[
+            entry["band_hz"]
+            for entry in decision["bands"]
+            if entry["support"] == "supported"
+        ],
         decision=decision,
         source_sha256=subject,
         sample_rate=info.samplerate,

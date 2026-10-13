@@ -1172,12 +1172,10 @@ def create_app(
         if (
             workspace_id
             and workspace_generation
-            and request.method.upper()
-            not in {
-                "GET",
-                "HEAD",
-                "OPTIONS",
-            }
+            and (
+                request.url.path.startswith("/owner/changes")
+                or request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+            )
         ):
             supplied = (
                 request.headers.get("x-centaur-workspace"),

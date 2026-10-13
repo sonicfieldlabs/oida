@@ -1,6 +1,8 @@
-"""Versioned contracts for decision routing. Shared field set with Khipu's (formerly Telar's)
-``telar/decision-routing`` contracts (model-routing plan §6.1); Oída accepts
-both namespace spellings so a run snapshot may carry either."""
+"""Versioned decision-routing contracts with compatible host projections.
+
+Oída accepts its own namespace and the established ``telar/decision-routing``
+namespace so existing run snapshots remain readable.
+"""
 
 from typing import Any, Literal
 import math
