@@ -1,6 +1,6 @@
 # Primary inscriptions and textual execution
 
-The unpublished Oída 0.13.1 candidate admits text as primary listening material
+Oída 0.13.2 admits text as primary listening material
 and can finish a sounding operation as a complete text work. Accounts and works
 retain separate identities, authorship and source relations. The owner chooses
 a text-capable provider and model explicitly. This path calls the existing

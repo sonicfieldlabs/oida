@@ -47,6 +47,7 @@ class MpsMossEngine(MossEngine):
             Path(data_dir) / "cache" / "weight-inventory.json" if data_dir else None
         )
         self._lock = threading.Lock()
+        self._native_decoder = None
         if config.moss_audio_repo:
             src = config.moss_audio_repo
             if str(src) not in sys.path:
@@ -62,7 +63,13 @@ class MpsMossEngine(MossEngine):
         return "cpu"
 
     def _model_id(self, settings: GenerationSettings) -> str:
+        if self._roles_overlap() and settings.model_kind in {"thinking", "music", "targeted_relisten"}:
+            raise EngineUnavailable("Instruct and Thinking resolve to one checkpoint; qualify distinct roles before a deep-model request")
         return self.model_id_for_kind(settings.model_kind)
+
+    def _roles_overlap(self):
+        instruct, thinking = getattr(self.config, "instruct_model", None), getattr(self.config, "thinking_model", None)
+        return bool(instruct and thinking and (instruct == thinking or (Path(instruct).is_dir() and Path(thinking).is_dir() and Path(instruct).resolve() == Path(thinking).resolve())))
 
     def model_id_for_kind(self, model_kind: str) -> str:
         from oida.engine_base import selected_model
@@ -89,6 +96,11 @@ class MpsMossEngine(MossEngine):
         self._moss_modules()
 
     def _moss_modules(self):
+        from oida.native_decoder import probe
+
+        self._native_decoder = probe()
+        if self._native_decoder.get("status") != "supported":
+            raise EngineUnavailable("Native TorchCodec/FFmpeg decoder unavailable before model loading (MOSS repository " + str(getattr(self.config, "moss_audio_repo", "unconfigured")) + "; install the moss extras and run the native decoder doctor): " + str(self._native_decoder.get("detail", "No decoder receipt")))
         try:
             from src.audio_io import load_audio
             from src.modeling_moss_audio import MossAudioModel
@@ -211,6 +223,13 @@ class MpsMossEngine(MossEngine):
         """
         thinking = str(getattr(self.config, "thinking_model", "") or "")
         instruct = str(getattr(self.config, "instruct_model", "") or "")
+        if self._roles_overlap() and str(model_id) in {thinking, instruct}:
+            name = Path(model_id).name.lower()
+            if "instruct" in name:
+                return "instruct", "loaded_model; configured roles overlap; checkpoint name identifies Instruct"
+            if "thinking" in name:
+                return "thinking", "loaded_model; configured roles overlap; checkpoint name identifies Thinking"
+            raise EngineUnavailable("Ambiguous checkpoint role; configure distinct identifiable model paths")
         if thinking and str(model_id) == thinking:
             actual = "thinking"
         elif instruct and str(model_id) == instruct:
@@ -288,6 +307,8 @@ class MpsMossEngine(MossEngine):
             "loaded_models": [Path(model_id).name for model_id in list(self._models)],
             "device": device,
             "thinking_budget_supported": False,
+            "native_decoder": getattr(self, "_native_decoder", None),
+            "role_ambiguity": self._roles_overlap(),
             "assignments": {
                 "instruct": Path(self.model_id_for_kind("instruct")).name,
                 "thinking": Path(self.model_id_for_kind("thinking")).name,

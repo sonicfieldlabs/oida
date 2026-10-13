@@ -1,0 +1,9 @@
+# Local decoder, checkpoint, result and settlement repairs
+
+`python -m oida.native_decoder` runs an isolated native TorchCodec generated-WAV decode with bounded output and a deadline. It loads no model weights and does not capture audio or contact a provider. Its receipt records actual loaded native library paths, sizes and hashes. The native loader directory must be selected before launching the owner; a declared directory must match the library actually loaded. Decoder support is separate from model readiness and inference qualification.
+
+Local model discovery includes configured checkpoints outside the default weights directory. Duplicate checkpoint basenames require the exact local selector. If Instruct and Thinking name the same checkpoint, the deep role is unavailable and cannot borrow an Instruct qualification.
+
+Gateway listening defaults to `response_mode="summary"`. It omits background/history siblings and replaces oversized fields with explicit retained-reference digests. The summary has a 128 KiB projection budget; oversized source prose is not silently presented as complete. `response_mode="full"` preserves explicit legacy full replies. Retained event expansion uses `/listening/results/{id}` with `offset`, `limit` (at most 4096 characters), and the previous page's `sha256`; the owner rechecks current privacy/covenant policy on every page. A changed projection refuses continuation. Unretained or ephemeral events have no expansion promise. Trace pages are opt-in through `/memory/trace/{id}?offset=0` and the same page parameters.
+
+Operation receipts distinguish `cancellation_requested`, `publication_prevented`, `worker_settled`, `execution_state`, and `settlement_reason`. The cancellation mechanism is cooperative: an acknowledgement does not guarantee hard worker termination. A deadline that settles is distinct from caller cancellation. Restart reports interrupted unknown execution, with no automatic replay.

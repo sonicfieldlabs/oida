@@ -31,7 +31,7 @@ from oida.contracts import now_iso
 CONTRACT = "oida/research-sample/v1"
 KIND = "research_sample"
 MAX_BYTES = 64 * 1024 * 1024
-IDENTIFIER = re.compile(r"^rs_[0-9a-f]{24}$")
+IDENTIFIER = re.compile(r"rs_[0-9a-f]{24}")
 
 
 class ResearchSampleRefused(ValueError):
@@ -76,7 +76,7 @@ class ResearchSamples:
             value = json.loads(sidecar.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        if value.get("contract") != CONTRACT or not IDENTIFIER.match(
+        if value.get("contract") != CONTRACT or not IDENTIFIER.fullmatch(
             str(value.get("id"))
         ):
             return None
@@ -210,7 +210,7 @@ class ResearchSamples:
 
     def delete(self, identifier: str, reason: str = "operator request") -> dict:
         """Delete one sample before it expires, with a receipt."""
-        if not IDENTIFIER.match(identifier):
+        if not IDENTIFIER.fullmatch(identifier):
             raise KeyError(identifier)
         with self.lock:
             sidecar = self.root / f"{identifier}.json"
@@ -243,7 +243,7 @@ class ResearchSamples:
 
     def audio(self, identifier: str) -> tuple[Path, dict]:
         """The sample's file, only if it is still unexpired and its bytes still match."""
-        if not IDENTIFIER.match(identifier):
+        if not IDENTIFIER.fullmatch(identifier):
             raise KeyError(identifier)
         self.sweep()
         value = self._read(self.root / f"{identifier}.json")

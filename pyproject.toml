@@ -1,6 +1,6 @@
 [project]
 name = "sonicfield-oida"
-version = "0.13.1"
+version = "0.13.2"
 description = "oída unified local listening agent and gateway: AKOÚŌ, Earworm, Akousmata, and optional local audio engines."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,9 +23,9 @@ classifiers = [
 ]
 dependencies = [
   "anyio>=4.14.2,<5",
-  "akouo-contract>=0.12.0",
-  "akousma>=0.10.0",
-  "akousmata>=0.9.0",
+  "akouo-contract>=0.12.1",
+  "akousma>=0.10.1",
+  "akousmata>=0.9.1",
   "fastapi>=0.139",
   "httpx2>=2.12,<3",
   "jsonschema>=4.22",
@@ -45,12 +45,13 @@ Issues = "https://github.com/sonicfieldlabs/oida/issues"
 
 [tool.uv.sources]
 # Reviewed wheels include packaged resources and cannot be masked by siblings.
-akousma = { path = "vendor/akousma-0.10.0-py3-none-any.whl" }
-akouo-contract = { path = "vendor/akouo_contract-0.12.0-py3-none-any.whl" }
-akousmata = { path = "vendor/akousmata-0.9.0-py3-none-any.whl" }
+akousma = { path = "vendor/akousma-0.10.1-py3-none-any.whl" }
+akouo-contract = { path = "vendor/akouo_contract-0.12.1-py3-none-any.whl" }
+akousmata = { path = "vendor/akousmata-0.9.1-py3-none-any.whl" }
 
 [project.optional-dependencies]
 moss = [
+    "fsspec>=2026.6.0",
   "accelerate>=1.15.0",
   "torch==2.10.0",
   "torchaudio==2.10.0",
@@ -63,6 +64,7 @@ dev = [
   "twine>=7,<8",
 ]
 songid = [
+    "multidict>=6.9.1",
   "shazamio>=0.4",
   "audioop-lts>=0.2.2; python_version >= '3.13'"
 ]

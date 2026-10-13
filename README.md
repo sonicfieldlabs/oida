@@ -2,7 +2,7 @@
 
 > **Public alpha · Open research release · Local-first · Open-source · Under active development**
 
-The unpublished 0.13.1 source candidate adds primary inscription reading and
+The 0.13.2 source adds primary inscription reading and
 textual sounding. Text, JSON, Morse, notation, MIDI registries, glyphs and code
 can enter an explicit owner route; a completed text can remain its output and
 become another input. Complete LISTENING.md revisions require separate scoped
@@ -254,10 +254,10 @@ component for explicit cultivation handoffs.
 
 | Component | Version / contract | Role in OÍDA |
 | --- | --- | --- |
-| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | Local candidate `akouo-contract 0.12.0` / `akouo/v0.10` | Representation routes and complete-file scoped lifecycle beside the existing listening vocabulary and claim boundaries. |
-| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | Local candidate `akousma 0.10.0` / opt-in spec v1.9 | Exact representation custody, current shared material uses and returns beside existing audio memory. |
-| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | Local candidate `akousmata 0.9.0` | Embedded library and private inscription reader with comparison, selected export and prepared returns. |
-| OÍDA gateway | Local candidate `sonicfield-oida 0.13.1` / `oida/gateway/v0.6` plus `oida/representation-execution/v1` | Versioned primary-text execution and adoption alongside existing REST, MCP, audio and host-perception paths. |
+| [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | Local candidate `akouo-contract 0.12.1` / `akouo/v0.10` | Representation routes and complete-file scoped lifecycle beside the existing listening vocabulary and claim boundaries. |
+| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | Local candidate `akousma 0.10.1` / opt-in spec v1.9 | Exact representation custody, current shared material uses and returns beside existing audio memory. |
+| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | Local candidate `akousmata 0.9.1` | Embedded library and private inscription reader with comparison, selected export and prepared returns. |
+| OÍDA gateway | Local candidate `sonicfield-oida 0.13.2` / `oida/gateway/v0.6` plus `oida/representation-execution/v1` | Versioned primary-text execution and adoption alongside existing REST, MCP, audio and host-perception paths. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.3 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |

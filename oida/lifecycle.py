@@ -203,6 +203,8 @@ def doctor() -> dict[str, Any]:
         "akousmata",
         "mcp",
     )
+    from oida.native_decoder import probe
+    checks["moss_runtime"]["native_decoder"] = probe()
     checks["ok"] = all(packages[name] for name in required_packages) and bool(checks["executables"]["ffmpeg"])
     return checks
 

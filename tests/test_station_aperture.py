@@ -127,6 +127,23 @@ def test_preview_binds_file_limits_without_analysis_or_writes(
     assert not (tmp_path / "store" / "index.sqlite").exists()
 
 
+def test_preview_hides_low_level_file_errors(tmp_path, monkeypatch):
+    from oida.station_aperture import PreviewRequest, preview
+
+    def fail(*args, **kwargs):
+        raise OSError("private source path and decoder details")
+
+    monkeypatch.setattr("oida.apertures.file_aperture", fail)
+    result = preview(
+        PreviewRequest(path=str(tmp_path / "audio.wav"), aperture={"mode": "centaur"})
+    )
+    assert result["admission"] == {
+        "status": "undetermined",
+        "reason": "Source preview unavailable; check the audio file and requested window",
+    }
+    assert "aperture" not in result
+
+
 def test_requested_bands_have_separate_measurements_and_resolution_limits(tmp_path):
     from oida.agent_native import NativeRequest, native_measure
 
@@ -280,3 +297,24 @@ def test_explicit_cloud_selection_catalog_and_pre_capture_refusal(client, tmp_pa
         assert 'pending M2' in response.text
     body['model_id'] = 'thinking'
     assert 'not both' in client.post('/gateway/listen', json=body).text
+
+
+def test_preview_refuses_nonregular_source_before_opening(tmp_path, monkeypatch):
+    import os
+    from oida.apertures import read_source_bytes
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    monkeypatch.setattr(os, "open", lambda *a, **kw: pytest.fail("must refuse before opening"))
+    with pytest.raises(ValueError, match="regular file"):
+        read_source_bytes(directory)
+
+
+def test_source_read_rechecks_the_open_descriptor(tmp_path, monkeypatch):
+    import os
+    from types import SimpleNamespace
+    from oida.apertures import read_source_bytes
+    source = tmp_path / "audio.wav"
+    source.write_bytes(b"fixture")
+    monkeypatch.setattr(os, "fstat", lambda fd: SimpleNamespace(st_mode=0, st_size=7))
+    with pytest.raises(ValueError, match="regular file"):
+        read_source_bytes(source)

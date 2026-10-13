@@ -16,6 +16,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Reusable CI must not share the calling release workflow concurrency group.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Python, Web, and macOS checks
@@ -28,6 +33,7 @@ jobs:
       - name: Checkout Oída
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           ref: ${{ inputs.release_ref || github.ref }}
           path: oida
 
@@ -36,6 +42,11 @@ jobs:
 
       - name: Verify reviewed canonical dependency wheels
         run: shasum -a 256 -c vendor/SHA256SUMS
+
+      - name: Install audio fixture tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: command -v ffmpeg >/dev/null || brew install ffmpeg
 
       - name: Install Python dependencies
         run: uv sync --extra dev --locked

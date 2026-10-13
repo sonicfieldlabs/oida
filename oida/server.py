@@ -23,7 +23,7 @@ from typing import Any, Literal
 import jsonschema
 
 try:
-    from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+    from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
     from fastapi.responses import (
         FileResponse,
         HTMLResponse,
@@ -388,7 +388,7 @@ class GatewayListenRequest(ListenEventRequest):
     # can reach it. Validated and recorded by apply_declared_lineage, which
     # refuses an unrecognised relation type rather than coercing it.
     declared_lineage: dict[str, Any] | None = None
-    response_mode: Literal["full", "summary"] = "full"
+    response_mode: Literal["full", "summary"] = "summary"
     ephemeral_delivery: bool = False
     operation_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     # A caller's hard deadline, in epoch seconds. Absent, admitted work runs to completion,
@@ -617,14 +617,19 @@ class SonicFieldRevealRequest(OidaRequest):
     path: str
 
 
-def scan_moss_models(weights_dir: Path) -> list[dict[str, object]]:
+def scan_moss_models(weights_dir: Path, configured=()) -> list[dict[str, object]]:
     """List locally available MOSS checkpoints (weights/<name> with a config.json)."""
     models: list[dict[str, object]] = []
-    if not weights_dir.exists():
-        return models
-    for candidate in sorted(weights_dir.iterdir()):
+    candidates = list(sorted(weights_dir.iterdir())) if weights_dir.is_dir() else []
+    candidates.extend(Path(value).expanduser() for value in configured if value)
+    seen = set()
+    for candidate in candidates[:128]:
         if not candidate.is_dir() or not (candidate / "config.json").exists():
             continue
+        candidate = candidate.resolve()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
         size_bytes = 0
         for file in candidate.glob("*.safetensors"):
             try:
@@ -641,6 +646,7 @@ def scan_moss_models(weights_dir: Path) -> list[dict[str, object]]:
             {
                 "name": candidate.name,
                 "path": str(candidate),
+                "selector": "local:" + hashlib.sha256(str(candidate).encode()).hexdigest()[:24],
                 "size_gb": round(size_bytes / 1_073_741_824, 2) if size_bytes else None,
                 "kind_hint": kind_hint,
                 "description": description,
@@ -736,7 +742,7 @@ def create_app(
     engine_monitor_lock = threading.RLock()
     perception_role_notes: list[str] = []
     weights_root = REPO_ROOT / "weights"
-    available_models = scan_moss_models(weights_root)
+    available_models = scan_moss_models(weights_root, (config.instruct_model, config.thinking_model, config.backup_model))
 
     def current_listening_identity_snapshot() -> ListeningIdentitySnapshot:
         try:
@@ -807,12 +813,16 @@ def create_app(
                     and (Path(configured) / "config.json").is_file()
                 ):
                     return configured
+        matches = [item for item in available_models if normalized in {str(item.get("name")), str(item.get("path")), str(item.get("selector"))}]
+        if len(matches) > 1:
+            raise HTTPException(400, "Ambiguous checkpoint name; select its exact local selector")
         selected = next(
             (
                 item
                 for item in available_models
                 if str(item.get("name")) == normalized
                 or str(item.get("path")) == normalized
+                or str(item.get("selector")) == normalized
             ),
             None,
         )
@@ -883,6 +893,7 @@ def create_app(
                 metadata={
                     "role": "deep_perception",
                     **configured_metadata(config.thinking_model),
+                    **({"available": False, "role_ambiguity": "Configured Instruct and Thinking refer to the same checkpoint; deep role refused"} if runtime.get("role_ambiguity") else {}),
                 },
             ),
         ]
@@ -893,9 +904,9 @@ def create_app(
                     if (spec := find_model_spec("oida_moss", str(item["name"])))
                     is not None
                     else str(item["name"])
-                ),
+                ) if sum(other["name"] == item["name"] for other in available_models) == 1 else str(item["selector"]),
                 provider_id="oida_moss",
-                name=(spec.name if spec is not None else str(item["name"])),
+                name=(model_spec.name if (model_spec := find_model_spec("oida_moss", str(item["name"]))) is not None else str(item["name"])),
                 capabilities=[
                     "audio",
                     "perception",
@@ -910,6 +921,7 @@ def create_app(
                 ],
                 locality="local",
                 metadata={
+                    "selector": item.get("selector"),
                     "size_gb": item.get("size_gb"),
                     "kind_hint": item.get("kind_hint"),
                     "description": item.get("description"),
@@ -983,6 +995,8 @@ def create_app(
                 ),
                 "available_models": available_models,
                 "role_application_notes": list(perception_role_notes),
+                "native_decoder": runtime.get("native_decoder"),
+                "role_ambiguity": runtime.get("role_ambiguity", False),
             }
 
     def enrich_music_id(
@@ -1172,12 +1186,10 @@ def create_app(
         if (
             workspace_id
             and workspace_generation
-            and request.method.upper()
-            not in {
-                "GET",
-                "HEAD",
-                "OPTIONS",
-            }
+            and (
+                request.url.path.startswith("/owner/changes")
+                or request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+            )
         ):
             supplied = (
                 request.headers.get("x-centaur-workspace"),
@@ -2028,18 +2040,14 @@ def create_app(
                 status_code=400,
                 detail="model_kind must be instruct, thinking, transcription, music, or targeted_relisten",
             )
-        selected = next(
-            (
-                item
-                for item in available_models
-                if item["name"] == req.model or item["path"] == req.model
-            ),
-            None,
-        )
+        matches = [item for item in available_models if req.model in {item["name"], item["path"], item["selector"]}]
+        if len(matches) > 1:
+            raise HTTPException(400, "Ambiguous checkpoint name; choose its exact local selector or configured path")
+        selected = matches[0] if matches else None
         if selected is None:
             valid = (
                 ", ".join(str(item["name"]) for item in available_models)
-                or "none found in weights/"
+                or "none found in weights/ or explicitly configured paths"
             )
             raise HTTPException(
                 status_code=400,
@@ -2418,6 +2426,22 @@ def create_app(
         if request:
             broadcaster.publish("capture_cancelled", request)
         return {"cancelled": bool(request), "capture_request": request}
+
+    @app.get("/listening/results/{identifier}")
+    def retained_result_endpoint(identifier: str, offset: int = Query(0, ge=0), limit: int = Query(4096, ge=1, le=4096), sha256: str | None = None):
+        from oida.listening_response import result_page
+        from oida.reasoning.evidence import covenant_blocks_untyped_prose
+        event = find_listening_event(identifier)
+        if event is None:
+            raise HTTPException(404, "No retained listening result")
+        event = apply_current_conversation_covenant(event)
+        if background.config.incognito or event.get("privacy_mode") == "incognito" or covenant_blocks_untyped_prose(event.get("covenant")):
+            raise HTTPException(423, "Current privacy or covenant prevents whole-result expansion")
+        event = redact_event_audio_for_policy(event, str(event.get("raw_audio_policy") or "external_ref"))
+        try:
+            return result_page(event, offset=offset, limit=limit, expected_sha256=sha256)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @app.get("/background/history")
     def background_history_endpoint(
@@ -3460,7 +3484,7 @@ def create_app(
             "perception_report": perception_dict,
             "command_output": command_output,
             "background": background.status()
-            if getattr(req, "response_mode", "full") == "full"
+            if getattr(req, "response_mode", "summary") == "full"
             else {},
         }
 
@@ -3603,7 +3627,13 @@ def create_app(
             with stage_timing.collecting() as summary:
                 result = callback()
                 timings = summary()
-            return {**result, "timings": timings} if isinstance(result, dict) else result
+            if not isinstance(result, dict):
+                return result
+            value = {**result, "timings": timings}
+            if value.get("response_mode") == "summary":
+                from oida.listening_response import bounded_acknowledgement
+                return bounded_acknowledgement(value)
+            return value
 
         return run
 
@@ -5409,12 +5439,16 @@ def create_app(
         )
 
     @app.get("/memory/trace/{trace_id}")
-    def memory_trace_endpoint(trace_id: str) -> dict[str, object]:
+    def memory_trace_endpoint(trace_id: str, offset: int | None = Query(None, ge=0), limit: int = Query(4096, ge=1, le=4096), sha256: str | None = None) -> dict[str, object]:
         try:
-            return {
-                "trace": memory.get(trace_id),
-                "similar": memory.similar_to_trace(trace_id),
-            }
+            trace = memory.get(trace_id)
+            from oida.reasoning.evidence import covenant_blocks_untyped_prose
+            if background.config.incognito or covenant_blocks_untyped_prose((apply_current_conversation_covenant(trace)).get("covenant")):
+                raise HTTPException(423, "Current policy prevents trace expansion")
+            if offset is not None:
+                from oida.listening_response import result_page
+                return result_page(trace, offset=offset, limit=limit, expected_sha256=sha256)
+            return {"trace": trace, "similar": memory.similar_to_trace(trace_id)}
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

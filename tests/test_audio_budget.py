@@ -469,3 +469,21 @@ def test_authorized_audio_probe():
 
         # Probe persisted in budget database
         assert budget.is_probed("google", "gemini-3.5-flash-lite") is True
+
+
+def test_failed_audio_probe_does_not_expose_provider_exception(tmp_path, monkeypatch):
+    router, _, budget = _setup_test_router(
+        tmp_path, transport=FakeTransport({}), budget_enabled=True
+    )
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("private provider credential and local source details")
+
+    monkeypatch.setattr(router, "generate", fail)
+    result = router.probe_audio("google", "gemini-3.5-flash-lite")
+    assert result == {
+        "ok": False,
+        "status": "failed",
+        "error": "Audio probe failed; check provider configuration and availability",
+    }
+    assert not budget.is_probed("google", "gemini-3.5-flash-lite")

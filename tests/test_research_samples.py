@@ -27,6 +27,15 @@ from tests.test_source_capture import source
 ATTESTATION = "Operator attestation, fixture: local research sample of a public stream."
 
 
+@pytest.mark.parametrize("identifier", ["../outside", "rs_" + "a" * 24 + "\n", "rs_" + "a" * 24 + "/x"])
+def test_sample_identifiers_require_an_exact_match(tmp_path, identifier):
+    samples = ResearchSamples(tmp_path / "samples", None)
+    for method in (samples.delete, samples.audio):
+        with pytest.raises(KeyError):
+            method(identifier)
+    assert not samples.root.exists()
+
+
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     """The same isolated owner as tests/test_source_capture.py."""

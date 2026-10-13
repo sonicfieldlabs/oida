@@ -26,6 +26,15 @@ from oida.source_capture import (
 )
 
 
+@pytest.mark.parametrize("identifier", ["../outside", "/absolute", "valid\n", "", "x" * 81])
+def test_receipts_reject_unsafe_identifier_before_journal_write(tmp_path, identifier):
+    receipts = AcquisitionReceipts(tmp_path / "receipts")
+    with pytest.raises(ValueError, match="Invalid acquisition identifier"):
+        receipts.save({"id": identifier, "status": "queued"})
+    assert receipts.journal.get("acquisition", identifier) is None
+    assert not list(receipts.root.iterdir())
+
+
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     for key in list(os.environ):

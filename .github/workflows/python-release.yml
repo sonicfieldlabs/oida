@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   checks:
     uses: ./.github/workflows/ci.yml
@@ -23,10 +27,12 @@ jobs:
     needs: checks
     name: Build and verify distributions
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Oída
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref_name }}
           fetch-depth: 0
           path: oida
@@ -87,7 +93,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.project }} to PyPI
     needs: build
-    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.PYPI_PUBLISH_ENABLED == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -102,6 +108,7 @@ jobs:
             directory: akousmata
             environment: pypi-akousmata
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: ${{ matrix.environment }}
     permissions:
       contents: read
@@ -126,8 +133,9 @@ jobs:
     needs:
       - build
       - publish
-    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' && vars.PYPI_OIDA_PUBLISH_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.PYPI_PUBLISH_ENABLED == 'true' && vars.PYPI_OIDA_PUBLISH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: pypi-sonicfield-oida
     permissions:
       contents: read
