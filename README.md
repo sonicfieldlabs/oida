@@ -78,7 +78,7 @@ instead of promising one universal RAM minimum.
 | How does it connect? | [The Listening Stack](https://sonicfield.org/stack) and [GERM handoff](#stack-compatibility) |
 | How do I install the tested models? | [MOSS-Audio setup](docs/model-setup.md) |
 | Which models and licenses apply? | [Models and licensing](docs/models-and-licensing.md) |
-| What is unfinished? | [Known limitations](#known-limitations) and [roadmap](ROADMAP.md) |
+| What is unfinished? | [Known limitations](#known-limitations) |
 | How can I help? | [Contribution guide](CONTRIBUTING.md) |
 | How should I cite it? | [CITATION.cff](CITATION.cff) |
 
@@ -250,7 +250,7 @@ component for explicit cultivation handoffs.
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | `akouo-contract 0.9.2` / `akouo/v0.9` | Listening vocabulary, embodied heard boundary, attributed text boundaries, provenance, temporal passes, route decisions, corpus listening, covenants, and sovereign mode. |
 | [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | `akousma 0.8.0` / spec v1.8 | Addressable human, agent, hybrid, plural, decision-only, and legacy accounts; immutable machine core; provenance, lineage, and additive revision. |
 | [Akousmata](https://github.com/sonicfieldlabs/akousmata) | `akousmata 0.8.0` | Embedded library at `/library/`, listener-type filtering, locally owned human accounts and revisions, accountable-memory audit, and the shared durable store. |
-| OÍDA gateway | `sonicfield-oida 0.11.1` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
+| OÍDA gateway | `sonicfield-oida 0.11.2` / `oida/gateway/v0.6` | Unified REST, MCP, agent, dashboard, separate linked human/machine memory, local perception, host perception v0.4, listening events v0.3, and route outcomes. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.3 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
@@ -516,8 +516,8 @@ variables as the fallback; they are never written into reasoning settings.
   `raw-audio/wipe` does not remove them; `DELETE /sources/research-samples/{id}` deletes
   one early, with a receipt.
 
-The [roadmap](ROADMAP.md) states the public research priorities without
-promising production stability.
+Current limitations are listed above; contribution boundaries are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Repository Notes
 
@@ -536,7 +536,7 @@ promising production stability.
   configuration, and verification.
 - `docs/models-and-licensing.md` — model attribution, installation boundaries,
   and third-party terms.
-- `ROADMAP.md` — current public-alpha priorities and non-goals.
+- [Runtime dependencies](docs/dependencies.md) — package and optional runtime boundaries.
 - `integrations/` — the bundled Hermes, Codex, Claude, OpenClaw, OpenCode, and
   remote adapters.
 - CI (`.github/workflows/ci.yml`) runs pytest, compileall, a JS syntax check,
@@ -557,7 +557,7 @@ Unreleased runtime integration: [apparatus decisions and per-pass provenance](do
 Bounded source declarations: [source admission](docs/source-admission.md).
 
 Measured local MOSS runtime and conservative residency decision:
-[hardware profile](docs/moss-hardware-profile.md).
+[runtime guide](docs/moss-runtime.md).
 
 Durable owner receipt and record APIs: [owner journal](docs/owner-journal.md).
 

@@ -2,6 +2,7 @@
 
 ## Unreleased — observation freshness at reception
 
+- Package 0.11.2 with receiving-time freshness, repaired owner packages and updated registry dependencies.
 - Add `effective_freshness` to observation reception and its persisted source-admission metadata, evaluated against the receiving clock and declared expiry.
 - Preserve source snapshots, hashes, producer freshness and receiving claim boundaries. Stale/future/archive observations remain attributable accounts; reception requests no execution and does not make them current.
 

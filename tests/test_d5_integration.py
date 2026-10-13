@@ -38,6 +38,19 @@ def test_cosmo_remote_origin_refused(monkeypatch):
         request_from_feed(dict(mode="fixture", observation_ref="x", consent_ref="x", remember=False, operation_id="x"))
 
 
+def test_embedded_library_keeps_the_owner_request_boundary(setup):
+    from fastapi.testclient import TestClient
+
+    configured = setup()
+    local = TestClient(configured.app, base_url="http://127.0.0.1", client=("127.0.0.1", 53001))
+    assert local.get("/library/api/health").status_code == 200
+    assert local.get("/library/api/health", headers={"Host": "foreign.example"}).status_code in {400, 403}
+    assert local.get("/library/api/health", headers={"X-Forwarded-For": "127.0.0.1"}).status_code == 400
+    assert local.post("/library/api/wiki/rebuild", headers={"Origin": "https://foreign.example"}).status_code == 403
+    remote = TestClient(configured.app, base_url="http://127.0.0.1", client=("203.0.113.8", 53002))
+    assert remote.get("/library/api/health").status_code == 403
+
+
 def test_cached_pass_delegate_and_current_forgetting(tmp_path, monkeypatch):
     monkeypatch.setenv("AKOUSMATA_PATH", str(tmp_path / "source"))
     record = json.loads((Path(__file__).parent / "fixtures/sources/cached-listening.json").read_text())
