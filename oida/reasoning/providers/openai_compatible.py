@@ -248,6 +248,8 @@ class OpenAICompatibleProvider:
                     name=str(item.get("name") or model_id),
                     capabilities=[value for value in self.capabilities if value != "models"],
                     locality=endpoint_locality(self.base_url),
+                    context_window=(item.get("metadata", {}).get("context_window")
+                                    if self.provider_id == "local_ecology" and isinstance(item.get("metadata"), dict) else None),
                     metadata={"owned_by": item.get("owned_by"), **(item.get("metadata", {}) if self.provider_id == "local_ecology" and isinstance(item.get("metadata"), dict) else {})},
                 )
             )

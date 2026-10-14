@@ -178,6 +178,8 @@ class IntegrationAssetTests(unittest.TestCase):
             tools,
             {
                 "oida_capabilities",
+                "oida_inscription",
+                "oida_representation_memory",
                 "oida_listening_identity",
                 "oida_route",
                 "oida_listen",

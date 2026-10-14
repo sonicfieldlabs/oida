@@ -5659,6 +5659,17 @@ def create_app(
         )
     )
 
+    from oida.representation_api import build_router as representation_router
+    from oida.textual_budget import execution_budget
+    from akousma import default_store_path as representation_memory_root
+    app.include_router(representation_router(
+        data_dir=config.data_dir, memory_root=representation_memory_root,
+        workspace_ref=workspace_id or "oida-local", actor_ref="owner:" + (workspace_id or "oida-local"),
+        registry_factory=reasoning_registry, require_admin=require_local_admin,
+        legacy_covenant=covenant_store.engine,
+        execution_budget_factory=execution_budget,
+    ))
+
     return app
 
 

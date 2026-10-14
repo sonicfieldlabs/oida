@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.2 — 2026-10-14
+
+- Join the published 0.12.1 line (local owner events, finite playlists, native
+  decoder diagnostics, bounded source reads) with the LISTENING.md work:
+  primary inscription reading and textual sounding through
+  `oida/representation-execution/v1`, the separately admitted local inscription
+  worker with its own token counter, complete-file LISTENING.md drafts,
+  revisions and scoped adoption, paged representation memory, and the
+  `oida_inscription` and `oida_representation_memory` MCP tools (17 in all).
+- Exact decimal validation of JSON numbers before provider dispatch.
+- Depends on akouo-contract 0.12.1 and akousma 0.10.1.
+
 ## 0.12.1 — 2026-10-09
 
 - Give reusable CI a distinct concurrency group so tag-triggered release checks

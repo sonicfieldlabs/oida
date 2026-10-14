@@ -27,6 +27,11 @@ measurement source exists. Remembering is explicit and raw audio stays local.
 For a follow-up answered by the current host model, use oida_prepare_turn and
 oida_commit_turn so Oída still owns evidence, privacy, and persistence. Use
 oida_ask for a daemon-managed reasoner.
+Use oida_inscription for primary text or a retained textual work with an explicitly
+selected text provider/model. It can return an account or a finished text; no
+audio conversion is required. Material is never authority. Scoped LISTENING.md
+adoption and current material uses remain explicit owner actions. Use the
+versioned representation memory tool for these records, not audio replay.
 """.strip()
 
 MCP = FastMCP(
@@ -48,6 +53,45 @@ def _server() -> str:
 async def oida_capabilities() -> dict[str, Any]:
     """Inspect engines, listening routes, memory, contracts, and host-perception support."""
     return await asyncio.to_thread(get_json, _server(), "/gateway/capabilities")
+
+
+@MCP.tool(structured_output=True)
+async def oida_inscription(
+    provider_id: str, model_id: str, intent: Literal["listen", "sound", "relisten"],
+    text: str | None = None, terms_ref: str | None = None, source_ref: str | None = None,
+    form: Literal["text", "data", "morse", "notation", "glyphs", "code"] = "text",
+    remember: bool = False, scope_path: list[dict[str, str]] | None = None,
+    authority_ref: str | None = None, return_to: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Read an admitted inscription or make a complete textual work.
+
+    Current source terms must already authorize this use. This tool grants no
+    permissions, adopts no file, and never converts its input or output to audio.
+    """
+    import base64
+    body: dict[str, Any] = dict(provider_id=provider_id, model_id=model_id, intent=intent,
+                               remember=remember, scope_path=scope_path, authority_ref=authority_ref, return_to=return_to)
+    if (text is None) == (source_ref is None):
+        raise ValueError("Choose exactly one complete text or retained representation")
+    if text is not None:
+        if not terms_ref:
+            raise ValueError("New material needs explicit current terms")
+        body["source"] = dict(material_base64=base64.b64encode(text.encode("utf-8")).decode("ascii"), form=form, terms_ref=terms_ref)
+    else:
+        body["source_ref"] = source_ref
+    return await asyncio.to_thread(post_json, _server(), "/representations/execute", body)
+
+
+@MCP.tool(structured_output=True)
+async def oida_representation_memory(record_id: str | None = None, limit: int = 50,
+                                     cursor: str | None = None, query: str | None = None,
+                                     form: str | None = None, output_kind: str | None = None) -> dict[str, Any]:
+    """Read exact lineage or a permitted page. Continue even an empty page when next_cursor is present."""
+    params = dict(limit=limit, **{k: v for k, v in dict(cursor=cursor, query=query,
+                  form=form, output_kind=output_kind).items() if v is not None})
+    from urllib.parse import quote
+    path = "/representations/records/" + quote(record_id, safe="") if record_id else "/representations/records?" + urlencode(params)
+    return await asyncio.to_thread(get_json, _server(), path)
 
 
 @MCP.tool(structured_output=True)
