@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.13.2 — unreleased
+## 0.13.2 — 2026-10-14
 
 - Join the published 0.12.1 line (local owner events, finite playlists, native
   decoder diagnostics, bounded source reads) with the LISTENING.md work:
