@@ -21,6 +21,8 @@
   JSON handling; the planner is re-admitted for planning, routing and inquiry.
 - Require mcp 1.30 or later; update aiohttp 3.14.5, certifi 2026.10.19 and
   yarl 1.25.1 in the lock.
+- Pin the tested interpreter with `.python-version` (3.13): CI runners now offer
+  Python 3.15, for which the locked scipy has no wheel.
 - Source release; not published to PyPI.
 
 ## 0.13.2 — 2026-10-14
