@@ -25,6 +25,54 @@ def test_only_exact_inscription_schema_is_an_admitted_family():
         task_of(changed)
 
 
+def test_inscription_schema_matches_no_structural_family():
+    # task_of checks the structural families first; this keeps that order equivalent.
+    schema = packet()["schema"]
+    assert "Move" not in (schema.get("$defs") or {})
+    assert set(schema.get("properties") or {}) != {"candidate_id"}
+    assert not ("answer_blocks" in schema["properties"] and "AnswerBlock" in (schema.get("$defs") or {}))
+
+
+def test_structural_families_need_no_oida_in_the_model_environment():
+    """The gateway runs the worker with the model's own Python, without Oída installed."""
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from oida.reasoning.contracts import EvidencePacket, ReasoningProfile
+    from oida.reasoning.prompts import PromptCompiler
+    from oida.routing.providers import CandidateAnswer
+    from oida.situated_listener import Decision
+
+    packet_ = EvidencePacket(primary_event_id="a", question="What is heard?",
+                             items=[dict(ref="event:a:summary", kind="summary", value="fixture")])
+    compiled = PromptCompiler().compile(packet=packet_, profile=ReasoningProfile(id="default", name="Default"),
+                                        evidence_chars=7000)
+    schemas = dict(planning=strict_output_schema(Decision.model_json_schema()),
+                   routing=strict_output_schema(CandidateAnswer.model_json_schema()),
+                   inquiry=strict_output_schema(compiled.response_schema),
+                   unsupported=packet()["schema"])
+    worker = Path(__file__).resolve().parents[1] / "oida/reasoning/local/worker.py"
+    code = (
+        "import json,runpy,sys\n"
+        "class Block:\n"
+        " def find_spec(self,name,path=None,target=None):\n"
+        "  if name=='oida' or name.startswith('oida.'): raise ImportError('Oida is not installed here')\n"
+        "sys.meta_path.insert(0,Block())\n"
+        "task_of=runpy.run_path(sys.argv[1])['task_of']\n"
+        "out={}\n"
+        "for name,schema in json.loads(sys.stdin.read()).items():\n"
+        " try: out[name]=task_of(schema)\n"
+        " except ValueError as exc: out[name]='refused: '+str(exc)\n"
+        "print(json.dumps(out))\n"
+    )
+    result = subprocess.run([sys.executable, "-I", "-c", code, str(worker)], input=json.dumps(schemas),
+                            capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == dict(planning="planning", routing="routing", inquiry="inquiry",
+                                             unsupported="refused: Unsupported local reasoning task")
+
+
 class Tokenizer:
     def apply_chat_template(self, messages, **options):
         assert options == dict(tokenize=False, add_generation_prompt=True, enable_thinking=False)

@@ -2,7 +2,10 @@
 
 > **Public alpha · Open research release · Local-first · Open-source · Under active development**
 
-The 0.13.2 source adds primary inscription reading and
+The 0.14.0 source adds selected research context: exact Sonic Field Discovery
+records and hand-selected local passages a reasoner may consult, shown with its
+answer, under previewed, bounded recipes ([Research context](docs/research-context.md)).
+The 0.13.2 source added primary inscription reading and
 textual sounding. Text, JSON, Morse, notation, MIDI registries, glyphs and code
 can enter an explicit owner route; a completed text can remain its output and
 become another input. Complete LISTENING.md revisions require separate scoped
@@ -187,7 +190,20 @@ name **oída**.
   returns `409` rather than inventing a local installation.
   Opt-in song identification (`OIDA_SONGID=1`, ShazamIO) enriches the record's
   `extensions.songid`.
-- **Sonic Field bridge**: "Explore in the wiki" searches the configured wiki,
+- **Public Sonic Field retrieval**: explicit exact-page, family/identity,
+  bounded search and outgoing Lexicon-reference reads use the existing public
+  Discovery service. Citations retain source snapshots, coverage, language and
+  rights; no query is inferred from private audio. See [public research](docs/research-context.md).
+- **Selected local passages**: an explicit metadata catalog binds read-only source
+  byte ranges, editions and source ancestry to the shared owner's current uses.
+  Private context and its retained responses stay behind current-use checks;
+  each inquiry requires fresh selection. See [local research](docs/local-research-context.md).
+- **Bounded research recipes**: preview exact selected-context steps and limits,
+  then dispatch on the existing queue with durable call reservations, current-use
+  checks, cancellation and recovery without replay. One explicit owner-linked
+  local re-listen is optional; MCP recipes expose the public-context subset.
+  See [recipes and limits](docs/research-recipes.md).
+- **Local Sonic Field bridge**: "Explore in the wiki" searches the configured wiki,
   topics, journal, library, paths, research, notes, and labs for related
   concepts, with taxonomy alias normalization and Finder reveal.
 - Event-grounded **conversation** (`/conversation/ask`): Oída composes the
@@ -257,8 +273,8 @@ component for explicit cultivation handoffs.
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | Local candidate `akouo-contract 0.12.1` / `akouo/v0.10` | Representation routes and complete-file scoped lifecycle beside the existing listening vocabulary and claim boundaries. |
 | [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | Local candidate `akousma 0.10.1` / opt-in spec v1.9 | Exact representation custody, current shared material uses and returns beside existing audio memory. |
 | [Akousmata](https://github.com/sonicfieldlabs/akousmata) | Local candidate `akousmata 0.9.1` | Embedded library and private inscription reader with comparison, selected export and prepared returns. |
-| OÍDA gateway | Local candidate `sonicfield-oida 0.13.2` / `oida/gateway/v0.6` plus `oida/representation-execution/v1` | Versioned primary-text execution and adoption alongside existing REST, MCP, audio and host-perception paths. |
-| [GERM](https://github.com/sonicfieldlabs/germ) | 0.3.3 optional integration | Explicit sound, prompt, and lineage handoff when separately installed and enabled. |
+| OÍDA gateway | Local candidate `sonicfield-oida 0.14.0` / `oida/gateway/v0.6` plus `oida/representation-execution/v1` | Versioned primary-text execution and adoption alongside existing REST, MCP, audio and host-perception paths. |
+| [GERM](https://github.com/sonicfieldlabs/germ) | Optional owner; 0.7.0 source | Explicit sound, prompt, and lineage handoff when separately installed and enabled; exact environment/owner qualification is separate. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
 
@@ -583,7 +599,8 @@ in [ensembles and second reports](docs/ensembles-second-reports.md) (unreleased)
 [Retained influence and local record exchange](docs/influence-exchange.md) documents
 validated decision traces, negotiated handoff and durable idempotent receipts.
 
-Unreleased [Akousmata-owned research integration](docs/research-integration.md)
+[Akousmata-owned research integration](docs/research-integration.md), included
+in the current source/local candidate,
 delegates canonical proposals and changed-record reconciliation to the existing
 shared service and scheduled watcher.
 

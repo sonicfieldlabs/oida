@@ -1,6 +1,6 @@
 [project]
 name = "sonicfield-oida"
-version = "0.13.2"
+version = "0.14.0"
 description = "oída unified local listening agent and gateway: AKOÚŌ, Earworm, Akousmata, and optional local audio engines."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -29,7 +29,7 @@ dependencies = [
   "fastapi>=0.139",
   "httpx2>=2.12,<3",
   "jsonschema>=4.22",
-  "mcp>=1.27,<2",
+  "mcp>=1.30,<2",
   "numpy>=1.26",
   "pydantic>=2.8",
   "referencing>=0.35",

@@ -51,12 +51,22 @@ class TurnOptions:
     include_memory_content: bool | None = None
     allow_targeted_relisten: bool | None = None
     research: dict[str, Any] = field(default_factory=dict)
+    include_conversation_history: bool = True
+    explicit_relisten: dict[str, Any] | None = None
+    relisten_event: dict[str, Any] | None = None
 
 
 def _inquiry_bound(provider_id):
     from oida.reasoning.bounded import BOUNDED_CONTEXT
 
     return (BOUNDED_CONTEXT.get(provider_id) or {}).get("inquiry_chars")
+
+
+def _prepared_packet(packet, compiled):
+    if compiled.included_evidence_refs is None:
+        return packet  # Compatibility with an explicitly supplied legacy compiler.
+    included = set(compiled.included_evidence_refs)
+    return packet.model_copy(update={"items":[item for item in packet.items if item.ref in included]})
 
 
 @dataclass
@@ -110,10 +120,12 @@ class ReasoningOrchestrator:
         relistener: TargetedRelistener | None = None,
         registry_factory: RegistryFactory | None = None,
         prepare_ttl_seconds: float = 600.0,
+        local_passages=None,
     ) -> None:
         self.settings_store = settings_store
         self.secret_store = secret_store
         self.conversations = conversations
+        self.local_passages = local_passages
         self.memory = memory
         self.listening_identity_store = listening_identity_store
         self.relistener = relistener
@@ -140,6 +152,35 @@ class ReasoningOrchestrator:
         options: TurnOptions | None = None,
     ) -> dict[str, Any]:
         context = self._context(event=event, question=question, options=options or TurnOptions())
+        from oida.research_recipes import active
+        budget = active()
+        if budget is not None:
+            selected = {s["reference"] for s in context.options.research.get("sources",[]) if s.get("kind") in {"sonicfield","local_passage"}}
+            prepared = {item.ref.removeprefix("context:") for item in _prepared_packet(context.packet,context.compiled).items if item.source in {"sonicfield","local_passage"}}
+            if selected != prepared:
+                from fastapi import HTTPException
+                raise HTTPException(409,"Recipe selected context does not fit the prepared evidence packet")
+        if context.options.explicit_relisten is not None:
+            if budget is None:
+                raise ValueError("An explicit research re-listen requires the bounded owner recipe")
+            budget.stage("local_relisten")
+            selected = context.options.explicit_relisten
+            sidecar, error = self._perform_relisten(context, question=selected["question"],
+                model_id=selected["model_id"],time_range={k:selected[k] for k in ("start_s","end_s")})
+            if sidecar is None:
+                from fastapi import HTTPException
+                raise HTTPException(409,error or "Selected acoustic return unavailable")
+            context.relisten = sidecar
+            context.packet = _packet_with_relisten(context.packet,sidecar)
+            context.compiled = self.prompt_compiler.compile(packet=context.packet,profile=context.profile,
+                route_instructions=context.route_instructions,listening_identity=context.listening_identity,
+                evidence_chars=_inquiry_bound(context.provider_id),conversation_history=[])
+            relisten_ref = f"relisten:{sidecar.get('id')}:observation:0"
+            if relisten_ref not in {item.ref for item in _prepared_packet(context.packet, context.compiled).items}:
+                from fastapi import HTTPException
+                raise HTTPException(409, "The selected re-listen does not fit this reasoner's evidence bound")
+        if budget is not None:
+            budget.stage("reason")
         response, execution = self._execute(context)
         return self._commit_context(context, response, execution=execution)
 
@@ -183,7 +224,7 @@ class ReasoningOrchestrator:
         return dict(
             response=response.model_dump(mode="json"),
             execution=execution,
-            evidence_packet=context.packet.model_dump(mode="json"),
+            evidence_packet=_prepared_packet(context.packet, context.compiled).model_dump(mode="json"),
             pass_id=context.turn_id,
         )
 
@@ -200,6 +241,7 @@ class ReasoningOrchestrator:
         # instead of exporting a packet to an unselected host.
         if context.provider_id == "local_structured":
             raise ValueError("the active reasoner is daemon-managed; use oida_ask instead")
+        self._check_local_context(context, external=True)
         token = self._issue_token(context, stage=0)
         return self._prepared_payload(token, context, stage=0)
 
@@ -214,7 +256,7 @@ class ReasoningOrchestrator:
         try:
             validated = self.validator.validate(
                 response,
-                packet=context.packet,
+                packet=_prepared_packet(context.packet, context.compiled),
                 allow_targeted_relisten=prepared.stage == 0 and self._relisten_allowed(context),
             )
         except ResponseValidationError:
@@ -234,7 +276,7 @@ class ReasoningOrchestrator:
                     route_instructions=context.route_instructions,
                     listening_identity=context.listening_identity,
                     evidence_chars=_inquiry_bound(context.provider_id),
-                    conversation_history=self._history_for_packet(
+                    conversation_history=[] if not context.options.include_conversation_history else self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
                         context.options.research.get("scope"),
@@ -328,7 +370,7 @@ class ReasoningOrchestrator:
             include_memory_content=include_memory_content,
             references=[] if incognito else options.research.get("sources", []),
         )
-        history = [] if incognito else self._history_for_packet(options.conversation_id, packet, options.research.get("scope"))
+        history = [] if incognito or not options.include_conversation_history else self._history_for_packet(options.conversation_id, packet, options.research.get("scope"))
         route_instructions = trusted_route_instructions(event)
         listening_identity_snapshot = self._listening_identity_snapshot()
         listening_identity = listening_identity_snapshot.text.strip()
@@ -344,7 +386,7 @@ class ReasoningOrchestrator:
             event=event,
             conversation_id=options.conversation_id,
         )
-        return _TurnContext(
+        context = _TurnContext(
             event=event,
             question=normalized_question,
             options=options,
@@ -366,6 +408,44 @@ class ReasoningOrchestrator:
             turn_id=new_id("turn"),
             forced_fallback_reason=forced_fallback,
         )
+        self._check_local_context(context)
+        return context
+
+    def _check_local_context(self, context, *, external=None):
+        sources = context.options.research.get("sources", [])
+        if not any(s.get("kind") == "local_passage" for s in sources):
+            return
+        from oida.local_passages import LocalPassageDenied
+        if (self.local_passages is None or context.event.get("privacy_mode") == "incognito"
+                or not context.options.research.get("scope", {}).get("local_passages")):
+            raise LocalPassageDenied()
+        # All offered snapshots will be retained. Only whole prepared items can
+        # cross the selected provider boundary; withheld items never appear in metadata.
+        self.local_passages.check_sources(sources,
+            actions=("read", "read_metadata", "execute", "retain", "retain_metadata"))
+        sent = {item.ref.removeprefix("context:")
+                for item in _prepared_packet(context.packet, context.compiled).items
+                if item.source == "local_passage"}
+        remote = not self._local_passage_provider(context) if external is None else external
+        self.local_passages.check_sources([s for s in sources if s.get("reference") in sent],
+            actions=("read", "read_metadata", "execute"), external=remote)
+
+    def _local_passage_provider(self, context):
+        if context.provider_id == "local_structured":
+            return True  # This path calls the built-in deterministic reasoner.
+        # A persisted locality label or a host CLI's loopback transport does not
+        # prove local inference. Inspect the selected endpoint without probing it.
+        configured = context.settings.providers.get(context.provider_id)
+        if context.provider_id != "local_ecology" and (configured is None or configured.kind.value not in {"ollama", "openai_compatible"}):
+            return False
+        if configured and configured.kind.value == "ollama" and str(context.model_id or "").lower().endswith("cloud"):
+            return False
+        adapter = self.registry_factory(context.settings).get(context.provider_id)
+        endpoint = getattr(adapter, "base_url", None)
+        try:
+            return isinstance(endpoint, str) and endpoint_locality(endpoint) == "local"
+        except ValueError:
+            return False
 
     def _listening_identity_snapshot(self) -> ListeningIdentitySnapshot:
         if self.listening_identity_store is None:
@@ -379,8 +459,9 @@ class ReasoningOrchestrator:
             return ListeningIdentitySnapshot.empty()
 
     def _execute(self, context: _TurnContext) -> tuple[ReasoningResponse, dict[str, Any]]:
+        self._check_local_context(context)
         if context.forced_fallback_reason:
-            response = self.local_provider.answer(context.packet, profile=context.profile)
+            response = self.local_provider.answer(_prepared_packet(context.packet, context.compiled), profile=context.profile)
             return response, self._fallback_execution(context, context.forced_fallback_reason, attempts=0)
 
         registry = self.registry_factory(context.settings)
@@ -392,7 +473,7 @@ class ReasoningOrchestrator:
         )
         if response is None:
             reason = errors[-1] if errors else "The selected provider returned no valid structured response."
-            local = self.local_provider.answer(context.packet, profile=context.profile)
+            local = self.local_provider.answer(_prepared_packet(context.packet, context.compiled), profile=context.profile)
             return local, self._fallback_execution(context, reason, attempts=attempts)
 
         execution = {
@@ -421,7 +502,7 @@ class ReasoningOrchestrator:
                     route_instructions=context.route_instructions,
                     listening_identity=context.listening_identity,
                     evidence_chars=_inquiry_bound(context.provider_id),
-                    conversation_history=self._history_for_packet(
+                    conversation_history=[] if not context.options.include_conversation_history else self._history_for_packet(
                         context.options.conversation_id,
                         context.packet,
                         context.options.research.get("scope"),
@@ -441,7 +522,7 @@ class ReasoningOrchestrator:
                         final_result.model_id if final_result is not None else execution["model_id"]
                     ) or execution["model_id"]
                 else:
-                    response = self.local_provider.answer(context.packet, profile=context.profile)
+                    response = self.local_provider.answer(_prepared_packet(context.packet, context.compiled), profile=context.profile)
                     execution = self._fallback_execution(
                         context,
                         "The selected provider failed after the local re-listen: "
@@ -465,7 +546,7 @@ class ReasoningOrchestrator:
             return (
                 self.validator.validate_provider_result(
                     result,
-                    packet=context.packet,
+                    packet=_prepared_packet(context.packet, compiled),
                     allow_targeted_relisten=allow_targeted_relisten,
                 ),
                 result,
@@ -491,7 +572,7 @@ class ReasoningOrchestrator:
             return (
                 self.validator.validate_provider_result(
                     repaired_result,
-                    packet=context.packet,
+                    packet=_prepared_packet(context.packet, repair),
                     allow_targeted_relisten=allow_targeted_relisten,
                 ),
                 repaired_result,
@@ -510,6 +591,7 @@ class ReasoningOrchestrator:
         *,
         allow_relisten: bool,
     ):
+        self._check_local_context(context)
         effort = {"brief": "low", "balanced": "medium", "deep": "high"}.get(
             context.profile.depth.value,
             "medium",
@@ -518,7 +600,7 @@ class ReasoningOrchestrator:
             provider_id=context.provider_id,
             model_id=context.model_id,
             metadata={
-                "evidence_packet": context.packet.model_dump(mode="json"),
+                "evidence_packet": _prepared_packet(context.packet, compiled).model_dump(mode="json"),
                 "reasoning_effort": effort,
                 "reasoning_profile": context.profile.model_dump(mode="json"),
                 "allow_targeted_relisten": allow_relisten,
@@ -537,15 +619,21 @@ class ReasoningOrchestrator:
         action = response.requested_action
         if action is None:
             return None, None
+        return self._perform_relisten(context,question=action.question,time_range=action.time_range,
+            model_id=context.settings.roles[ModelRole.TARGETED_RELISTEN].model_id)
+
+    def _perform_relisten(self, context, *, question, time_range, model_id):
+        if self.relistener is None:
+            return None, "The local audio re-listening engine is unavailable."
         conversation = context.conversation_prepared["conversation"]
         try:
             sidecar = self.relistener.run(
-                event=context.event,
-                question=action.question,
+                event=context.options.relisten_event or context.event,
+                question=question,
                 conversation_id=str(conversation["id"]),
                 turn_id=context.turn_id,
-                model_id=context.settings.roles[ModelRole.TARGETED_RELISTEN].model_id,
-                time_range=action.time_range,
+                model_id=model_id,
+                time_range=time_range,
                 allow_speech_content=context.packet.permissions.transcript_included,
                 parent_question=context.question,
                 listening_identity_snapshot=context.listening_identity_snapshot,
@@ -556,7 +644,7 @@ class ReasoningOrchestrator:
                 # spoken words. Transcript permission is therefore the only
                 # structural gate that lets the observation enter another
                 # prompt, response, or durable conversation.
-                "observation_shared_to_reasoner": bool(context.include_transcript),
+                "observation_shared_to_reasoner": bool(context.packet.permissions.transcript_included),
             }
             return sidecar, None
         except RelistenUnavailable as exc:
@@ -575,6 +663,7 @@ class ReasoningOrchestrator:
         *,
         execution: dict[str, Any],
     ) -> dict[str, Any]:
+        self._check_local_context(context)
         response = response.model_copy(update={"requested_action": None})
         response_payload = response.model_dump(mode="json")
         fallback = execution.get("fallback")
@@ -601,7 +690,7 @@ class ReasoningOrchestrator:
                 block.text for block in response.answer_blocks if block.kind in {"fact", "answer"}
             ],
             "uncertainty_notes": list(response.uncertainties),
-            "evidence": [_legacy_evidence(item) for item in context.packet.items],
+            "evidence": [_legacy_evidence(item) for item in _prepared_packet(context.packet, context.compiled).items],
             "memory_context": [_memory_context_item(item) for item in context.memory_context],
             "provider": execution["provider_id"],
             "reasoner": {
@@ -627,7 +716,9 @@ class ReasoningOrchestrator:
             },
             "audit": {
                 "evidence_contract": context.packet.contract,
-                "evidence_refs": [item.ref for item in context.packet.items],
+                "evidence_refs": [item.ref for item in _prepared_packet(context.packet, context.compiled).items],
+                "offered_evidence_refs": [item.ref for item in context.packet.items],
+                "withheld_evidence_refs": list(context.compiled.withheld_evidence_refs),
                 "prompt_hash": context.compiled.prompt_hash,
                 "listening_identity": identity_block,
                 "profile_id": context.profile.id,
@@ -636,15 +727,44 @@ class ReasoningOrchestrator:
                 "memory_content_included": context.packet.permissions.memory_content_included,
                 "raw_audio_external": False,
                 "targeted_relisten_count": 1 if context.relisten else 0,
+                # Shared means the reasoner received it: permitted and inside the bounded packet.
                 "relisten_observation_shared_to_reasoner": bool(
                     context.relisten
                     and context.relisten.get("observation_shared_to_reasoner")
+                    and f"relisten:{context.relisten.get('id')}:observation:0"
+                    in {item.ref for item in _prepared_packet(context.packet, context.compiled).items}
                 ),
             },
         }
         if context.options.research:
-            turn["research"] = context.options.research
+            turn["research"] = dict(context.options.research)
+            if context.options.explicit_relisten and context.relisten and turn["research"].get("comparison"):
+                turn["research"]["comparison"] = {**turn["research"]["comparison"],"acoustic_access":"one local targeted pass recorded; initial retained account unchanged"}
+            if context.options.research.get("exposure") is not None:
+                from oida.research_references import ResearchContext
+                exposure = ResearchContext.model_validate(context.options.research["exposure"])
+                sent = {item.ref.removeprefix("context:") for item in _prepared_packet(context.packet, context.compiled).items
+                        if item.source == "sonicfield"}
+                prepared = [ref for ref in exposure.reference_refs if ref in sent]
+                withheld = [ref for ref in exposure.reference_refs if ref not in sent]
+                turn["research"]["exposure"] = ResearchContext.model_validate(exposure.model_dump() | dict(
+                    context_basis="informed_context" if prepared else "selected_context",
+                    prepared_reference_refs=prepared, withheld_reference_refs=withheld,
+                )).model_dump()
+            if context.options.research.get("local_exposure") is not None:
+                from oida.local_passages import LocalExposure
+                exposure = LocalExposure.model_validate(context.options.research["local_exposure"])
+                sent = {item.ref.removeprefix("context:") for item in _prepared_packet(context.packet, context.compiled).items
+                        if item.source == "local_passage"}
+                prepared = [ref for ref in exposure.reference_refs if ref in sent]
+                turn["research"]["local_exposure"] = LocalExposure.model_validate(exposure.model_dump() | dict(
+                    context_basis="informed_context" if prepared else "selected_context",
+                    prepared_reference_refs=prepared,
+                    withheld_reference_refs=[ref for ref in exposure.reference_refs if ref not in sent],
+                )).model_dump()
         from oida.operation_control import checkpoint
+        from oida.research_recipes import finalize
+        finalize(turn, context.conversation_prepared["stored_event"])
         checkpoint(seal=True)
         prepared = context.conversation_prepared
         result = self.conversations.append_turn(
@@ -704,8 +824,12 @@ class ReasoningOrchestrator:
         for turn in list(conversation.get("turns") or [])[-6:]:
             if not isinstance(turn, dict):
                 continue
+            # Private context is never replayed implicitly, even to another local
+            # model. A fresh explicit selection is required for every inquiry.
+            if any(s.get("kind") == "local_passage" for s in (turn.get("research") or {}).get("sources", [])):
+                continue
             previous_scope = (turn.get("research") or {}).get("scope", {})
-            if any(previous_scope.get(key) and not (context_scope or {}).get(key) for key in ("web", "wiki", "memories")):
+            if any(previous_scope.get(key) and not (context_scope or {}).get(key) for key in ("web", "wiki", "memories", "sonicfield")):
                 continue
             audit = turn.get("audit") if isinstance(turn.get("audit"), dict) else None
             if audit is None and (not allow_transcript or not allow_memory_content):
@@ -780,6 +904,7 @@ class ReasoningOrchestrator:
         }
 
     def _prepared_payload(self, token: str, context: _TurnContext, *, stage: int) -> dict[str, Any]:
+        self._check_local_context(context, external=True)
         return {
             "version": "0.2",
             "mode": "host_managed_reasoning",
@@ -792,7 +917,7 @@ class ReasoningOrchestrator:
             "model_id": context.model_id,
             "system_prompt": context.compiled.system_prompt,
             "user_prompt": context.compiled.user_prompt,
-            "evidence_packet": context.packet.model_dump(mode="json"),
+            "evidence_packet": _prepared_packet(context.packet, context.compiled).model_dump(mode="json"),
             "response_schema": context.compiled.response_schema,
             "prompt_hash": context.compiled.prompt_hash,
             "raw_audio_included": False,

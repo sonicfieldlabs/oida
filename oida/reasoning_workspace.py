@@ -7,7 +7,9 @@ read-only here; an automatic session can never enqueue itself as a listening.
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import nullcontext
 import hashlib
+import re
 import json
 import threading
 import time
@@ -20,6 +22,10 @@ from oida.contracts import now_iso
 from oida.owner_journal import canonical
 from oida.reasoning.orchestrator import TurnOptions
 from oida.reasoning_context import read_record, retained_event, retrieve
+from oida.research_references import ResearchContext, SelectedRecord
+from oida.local_passages import LocalExposure, LocalPassageDenied, SelectedPassage
+from oida.research_views import Comparison, resolve_comparison, research_record, research_session
+from oida.research_recipes import Recipe, Budget, bounded, plan as recipe_plan, canonical_bytes
 
 
 class Scope(BaseModel):
@@ -27,6 +33,8 @@ class Scope(BaseModel):
     memories: bool = True
     wiki: bool = True
     web: bool = False
+    sonicfield: bool = False
+    local_passages: bool = False
 
 
 class Selection(BaseModel):
@@ -47,6 +55,11 @@ class Ask(Selection):
     record_refs: list[str] = Field(default_factory=list, max_length=8)
     inquiry_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     deadline_at: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    sonicfield_records: list[SelectedRecord] = Field(default_factory=list, max_length=5)
+    local_passages: list[SelectedPassage] = Field(default_factory=list, max_length=5)
+    comparison: Comparison | None = None
+    recipe: Recipe | None = None
+    recipe_plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class Automatic(Selection):
@@ -70,6 +83,9 @@ class Workspace:
         *,
         reader=read_record,
         retriever=retrieve,
+        public=None,
+        local=None,
+        acoustic_reader=None,
     ):
         self.journal, self.conversations, self.reasoning = (
             journal,
@@ -82,6 +98,10 @@ class Workspace:
             event_policy,
         )
         self.reader, self.retriever = reader, retriever
+        self.acoustic_reader = acoustic_reader
+        from oida.sonicfield_discovery import PublicDiscovery
+        self.public = public if public is not None else PublicDiscovery()
+        self.local = local if local is not None else getattr(reasoning, "local_passages", None)
         if reader is read_record:
             # The canonical reader reads the store; batch archive digests may read it too.
             from oida.reasoning_context import read_raw_records
@@ -133,6 +153,8 @@ class Workspace:
 
     def configure(self, req):
         with self.lock:
+            if req.enabled and req.scope.local_passages:
+                raise HTTPException(409, "Local passages require a fresh manual selection for each inquiry")
             if req.enabled:
                 self.validate_selection(req)
             old = self.config()
@@ -166,16 +188,95 @@ class Workspace:
         self.journal.save("reasoning_job", job["id"], job)
         return job
 
-    @staticmethod
-    def public_job(job):
+    def check_local_job(self, job, *, actions=("read", "read_metadata")):
+        selections = (job.get("request") or {}).get("local_passages", [])
+        if selections:
+            if self.local is None:
+                raise LocalPassageDenied()
+            self.local.check_selections([SelectedPassage.model_validate(s) for s in selections], actions=actions)
+
+    def visible_jobs(self, limit=50, *, include_local=True):
+        values = []
+        for job in self.values("reasoning_job", limit):
+            if not include_local and (job.get("request") or {}).get("local_passages"):
+                continue
+            try:
+                values.append(self.public_job(job))
+            except LocalPassageDenied:
+                continue
+        return values
+
+    def public_job(self, job):
+        self.check_local_job(job)
         return {
             key: value
             for key, value in job.items()
             if key not in {"event", "request", "request_hash"}
         }
 
+    def preview_recipe(self, req):
+        from oida.research_views import current_anchor
+        if req.recipe is None:
+            raise HTTPException(409,"Select a bounded research recipe")
+        record, _ = current_anchor(self,req.record_id)
+        self.validate_selection(req)
+        if req.sonicfield_records and not req.scope.sonicfield:
+            raise HTTPException(409,"Selected public sources require their context scope")
+        if req.local_passages:
+            if self.local is None or not req.scope.local_passages:
+                raise LocalPassageDenied()
+            self.local.check_selections(req.local_passages,actions=("read","read_metadata","execute","retain","retain_metadata"))
+        anchor = self.journal.record_digest(record)
+        resolve_comparison(self,req,anchor)
+        if req.recipe.relisten:
+            self.recipe_acoustic_event(req,record)
+        prepared = recipe_plan(req,anchor)
+        if canonical_bytes(prepared)>req.recipe.limits.retained_bytes:
+            raise HTTPException(409,"Recipe selection exceeds the retained-byte limit")
+        return prepared
+
+    def acoustic_choices(self, record):
+        ids = {p.get("payload",{}).get("listening_event_id") for p in record.get("listening",{}).values() if isinstance(p,dict) and isinstance(p.get("payload"),dict)}
+        reference = self.journal.get("record_reference",record["akousma_id"]) or {}
+        ids.add(reference.get("event_id"))
+        choices = []
+        if self.acoustic_reader:
+            for identifier in sorted(i for i in ids if isinstance(i,str))[:12]:
+                event = self.acoustic_reader(identifier)
+                if not isinstance(event,dict) or event.get("id")!=identifier:
+                    continue
+                event = self.event_policy(deepcopy(event))
+                from oida.reasoning.evidence import covenant_blocks_untyped_prose
+                if event.get("privacy_mode")=="incognito" or covenant_blocks_untyped_prose(event.get("covenant")):
+                    continue
+                ref = (event.get("segment") or {}).get("data_ref") or {}
+                if re.fullmatch(r"[a-f0-9]{64}",str(ref.get("sha256") or "")):
+                    choices.append(dict(event_id=identifier,sha256=ref["sha256"],basis="owner-linked source metadata; actual file and bounds rechecked before inference"))
+        return choices
+
+    def recipe_acoustic_event(self, req, record=None):
+        record = self.reader(req.record_id) if record is None else record
+        selected = req.recipe.relisten
+        if not any(c["event_id"]==selected.event_id and c["sha256"]==selected.expected_audio_sha256 for c in self.acoustic_choices(record)):
+            raise HTTPException(409,"Selected acoustic source is not currently linked and available; no audio was reconstructed")
+        event = self.acoustic_reader(selected.event_id)
+        if not isinstance(event,dict) or event.get("id")!=selected.event_id or ((event.get("segment") or {}).get("data_ref") or {}).get("sha256")!=selected.expected_audio_sha256:
+            raise HTTPException(409,"Selected acoustic source changed")
+        return self.event_policy(deepcopy(event))
+
     def enqueue(self, req, mode="manual"):
         with self.lock:
+            if req.local_passages:
+                if not req.scope.local_passages or mode != "manual":
+                    raise HTTPException(409, "Local passages require explicit manual context scope")
+                if req.scope.web or req.web_query:
+                    raise HTTPException(409, "Private passage consultation cannot initiate a public search")
+                if self.local is None:
+                    raise LocalPassageDenied()
+                self.local.check_selections(req.local_passages,
+                    actions=("read", "read_metadata", "execute", "retain", "retain_metadata"))
+            if req.sonicfield_records and not req.scope.sonicfield:
+                raise HTTPException(409, "Selected Sonic Field records require explicit public context scope")
             if req.deadline_at is not None and req.deadline_at <= time.time():
                 raise HTTPException(409, "Inquiry deadline expired")
             selection = None
@@ -189,6 +290,11 @@ class Workspace:
                 if req.web_query and req.web_query != selection["web_query"]:
                     raise HTTPException(409, "Inquiry query differs from the selected evidence")
             payload = req.model_dump()
+            if req.comparison is None:
+                payload.pop("comparison")  # Preserve pre-P5 request-idempotency bytes.
+            for name in ("recipe","recipe_plan_sha256"):
+                if payload[name] is None:
+                    payload.pop(name)
             digest = hashlib.sha256(canonical(payload).encode()).hexdigest()
             old = self.journal.get("reasoning_job", req.request_id)
             if old:
@@ -225,11 +331,15 @@ class Workspace:
             record = self.reader(req.record_id)
             event = retained_event(record)
             record_hash = self.journal.record_digest(record)
+            resolve_comparison(self, req, record_hash)
             event = self.event_policy(deepcopy(event))
             if event.get("privacy_mode") == "incognito":
                 raise HTTPException(
                     423, "Persistent research is unavailable in incognito mode"
                 )
+            prepared = self.preview_recipe(req) if req.recipe else None
+            if prepared and prepared["plan_sha256"] != req.recipe_plan_sha256:
+                raise HTTPException(409,"Preview the exact recipe selection before dispatch")
             job = dict(
                 id=req.request_id,
                 status="queued",
@@ -246,6 +356,10 @@ class Workspace:
                 model_id=req.model_id,
                 inquiry_selection=selection,
             )
+            if prepared:
+                job.update(recipe_plan=prepared,deadline_at=min(time.time()+req.recipe.limits.time_seconds,req.deadline_at or float("inf")))
+                if canonical_bytes(job)>req.recipe.limits.retained_bytes:
+                    raise HTTPException(409,"Recipe queue payload exceeds its retained-byte limit")
             self.save_job(job)
             self.wake.set()
             return self.public_job(job)
@@ -315,23 +429,43 @@ class Workspace:
             self.save_job({**job, "status": "running"})
         try:
             admitted_memories = {}
+            budget = None
+            if job.get("recipe_plan"):
+                def reserve(receipt):
+                    with self.lock:
+                        current = self.journal.get("reasoning_job",job["id"]) or job
+                        self.save_job({**current,"recipe_execution":receipt})
+                budget = Budget(job["recipe_plan"],deadline_at=job["deadline_at"],notify=reserve)
 
             def run():
                 req = Ask.model_validate(job["request"])
                 def check_inquiry():
                     current = self.journal.get("reasoning_job", job["id"]) or {}
-                    if current.get("cancel_requested") or (req.deadline_at is not None and time.time() >= req.deadline_at):
+                    deadline = job.get("deadline_at",req.deadline_at)
+                    if current.get("cancel_requested") or (deadline is not None and time.time() >= deadline):
                         raise HTTPException(409, "Inquiry cancelled or deadline expired")
                 check_inquiry()
                 self.validate_selection(req)
                 record = self.reader(req.record_id)
                 if self.journal.record_digest(record) != job["record_sha256"]:
                     raise HTTPException(409, "Inquiry anchor changed while queued")
+                comparison = resolve_comparison(self, req, job["record_sha256"])
                 event = self.event_policy(retained_event(record))
                 if event.get("privacy_mode") == "incognito":
                     raise HTTPException(
                         423, "Persistent research is unavailable in incognito mode"
                     )
+                if req.recipe:
+                    if self.preview_recipe(req)["plan_sha256"] != job["recipe_plan"]["plan_sha256"]:
+                        raise HTTPException(409,"Recipe selection changed while queued")
+                    if req.recipe.searches:
+                        budget.stage("public_search")
+                        for query in req.recipe.searches:
+                            budget.discovery(self.public.search(query))
+                    if req.recipe.leads:
+                        budget.stage("reference_leads")
+                        budget.discovery(self.public.relations(req.recipe.leads))
+                    budget.stage("selected_context")
                 selection = None
                 if req.record_refs or req.inquiry_sha256:
                     from oida.routing.archive import inquiry
@@ -341,6 +475,24 @@ class Workspace:
                 sources, notes, query = self.retriever(
                     event, req.question, req.scope.model_dump(), req.web_query
                 )
+                public_receipts = []
+                if req.scope.sonicfield:
+                    from oida.reasoning.evidence import covenant_blocks_untyped_prose
+                    if covenant_blocks_untyped_prose(event.get("covenant")):
+                        notes.append("Selected public context withheld by the current covenant")
+                    elif req.sonicfield_records:
+                        selected_public, public_notes, public_receipts = self.public.selected(req.sonicfield_records)
+                        sources = selected_public + sources
+                        notes.extend(public_notes)
+                    else:
+                        notes.append("No Sonic Field records selected; no public request was made")
+                if req.local_passages:
+                    from oida.reasoning.evidence import covenant_blocks_untyped_prose
+                    if covenant_blocks_untyped_prose(event.get("covenant")):
+                        raise LocalPassageDenied()
+                    local_sources = [self.local.read(s, actions=("read", "read_metadata", "execute", "retain", "retain_metadata")).source()
+                                     for s in req.local_passages]
+                    sources = local_sources + sources
                 if selection and req.scope.memories:
                     selected = selection["sources"]
                     selected_refs = {item["reference"] for item in selected}
@@ -368,6 +520,10 @@ class Workspace:
                             continue
                     admitted_sources.append(source)
                 sources = admitted_sources
+                if budget:
+                    if len([s for s in sources if s.get("kind") in {"sonicfield","local_passage"}]) != len(req.sonicfield_records)+len(req.local_passages):
+                        raise HTTPException(409,"Recipe stopped because a selected source could not be read")
+                    budget.size(dict(sources=sources,event=event,receipt=budget.snapshot()))
                 from oida.operation_control import checkpoint
 
                 checkpoint()
@@ -383,8 +539,12 @@ class Workspace:
                         include_memory_content=False,
                         include_transcript=True,
                         allow_targeted_relisten=False,
+                        include_conversation_history=comparison is None,
+                        explicit_relisten=req.recipe.relisten.model_dump() if req.recipe and req.recipe.relisten else None,
+                        relisten_event=self.recipe_acoustic_event(req,record) if req.recipe and req.recipe.relisten else None,
                         research=dict(
                             request_id=job["id"],
+                            comparison=comparison,
                             record_id=req.record_id,
                             requested_provider_id=req.provider_id,
                             requested_model_id=req.model_id,
@@ -396,6 +556,13 @@ class Workspace:
                             query=query,
                             inquiry_selection=selection,
                             input_sources_sha256=hashlib.sha256(canonical(sources).encode()).hexdigest(),
+                            public_retrieval=public_receipts,
+                            local_exposure=(LocalExposure(subject_ref=req.record_id,
+                                reference_refs=[s["reference"] for s in sources if s.get("kind") == "local_passage"]
+                            ).model_dump() if any(s.get("kind") == "local_passage" for s in sources) else None),
+                            exposure=(ResearchContext(subject_ref=req.record_id,
+                                reference_refs=[s["reference"] for s in sources if s.get("kind") == "sonicfield"]
+                            ).model_dump() if any(s.get("kind") == "sonicfield" for s in sources) else None),
                         ),
                     ),
                 )
@@ -403,6 +570,11 @@ class Workspace:
                 return result
 
             def recheck():
+                self.check_local_job(job, actions=("read", "read_metadata", "execute", "retain", "retain_metadata"))
+                resolve_comparison(self, Ask.model_validate(job["request"]), job["record_sha256"])
+                req = Ask.model_validate(job["request"])
+                if req.recipe and req.recipe.relisten:
+                    self.recipe_acoustic_event(req)
                 current = self.journal.get("reasoning_job", job["id"]) or {}
                 if current.get("cancel_requested"):
                     raise HTTPException(409, "Inquiry cancelled")
@@ -426,10 +598,11 @@ class Workspace:
                     actual = (self.journal.record_digest(projection["record"]), hashlib.sha256(canonical(projection["events"][ref]).encode()).hexdigest())
                     if actual != expected:
                         raise HTTPException(409, "Retrieved memory evidence changed")
-            result = self.operations.run("reason_" + job["id"][:73], run, recheck=recheck, deadline_at=job["request"].get("deadline_at"))
+            with bounded(budget) if budget else nullcontext():
+                result = self.operations.run("reason_" + job["id"][:73], run, recheck=recheck, deadline_at=job.get("deadline_at",job["request"].get("deadline_at")))
             self.save_job(
                 {
-                    **job,
+                    **(self.journal.get("reasoning_job",job["id"]) or job),
                     "status": "complete",
                     "conversation_id": result["conversation_id"],
                     "reasoner": result["turn"].get("reasoner"),
@@ -438,9 +611,14 @@ class Workspace:
             )
         except Exception as exc:
             cancelled = (self.journal.get("reasoning_job", job["id"]) or {}).get("cancel_requested")
+            if budget:
+                budget.status = "cancelled" if cancelled else "stopped"
+                receipt = budget.snapshot()
+                receipt["stop_reason"] = str(getattr(exc,"detail",str(exc)))[:600]
+                reserve(receipt)
             self.save_job(
                 {
-                    **job,
+                    **(self.journal.get("reasoning_job",job["id"]) or job),
                     "status": "cancelled" if cancelled else "failed",
                     "detail": str(getattr(exc, "detail", str(exc)))[:600],
                 }
@@ -471,14 +649,13 @@ class Workspace:
             if job["status"] != "running":
                 continue
             found = None
+            found_turn = None
             for summary in self.conversations.list(
                 event_id=job["record_id"], limit=500
             ):
                 conversation = self.conversations.get(summary["id"])
-                if any(
-                    t.get("research", {}).get("request_id") == job["id"]
-                    for t in conversation.get("turns", [])
-                ):
+                found_turn = next((t for t in conversation.get("turns",[]) if t.get("research",{}).get("request_id")==job["id"]),None)
+                if found_turn:
                     found = summary["id"]
                     break
             self.save_job(
@@ -490,6 +667,7 @@ class Workspace:
                     if found
                     else "Service stopped during research; start a new turn to retry",
                 }
+                | ({"recipe_execution":found_turn["research"]["recipe_execution"]} if found_turn and found_turn.get("research",{}).get("recipe_execution") else {})
             )
         self.stopped.clear()
         self.thread = threading.Thread(
@@ -523,35 +701,20 @@ class Workspace:
             self.thread.join(timeout=2)
 
     def session(self, identifier):
-        conversation = self.conversations.get(identifier)
-        return {
-            **self.conversations.summary(conversation),
-            "record_id": conversation["anchor_event_id"],
-            "turns": [
-                {
-                    k: v
-                    for k, v in turn.items()
-                    if k
-                    in {
-                        "id",
-                        "created_at",
-                        "question",
-                        "answer",
-                        "reasoner",
-                        "fallback",
-                        "research",
-                        "suggested_questions",
-                    }
-                }
-                for turn in conversation.get("turns", [])
-            ],
-        }
+        return research_session(self, identifier)
 
 
 def workspace_router(
     workspace, providers, models, require_admin, invalidate_probes=None
 ):
     router = APIRouter(prefix="/reasoning/workspace")
+
+    def private_read(request):
+        try:
+            require_admin(request)
+            return True
+        except HTTPException:
+            return False
 
     @router.get("/options")
     def options():
@@ -564,6 +727,17 @@ def workspace_router(
     @router.get("/models")
     def model_list(provider_id: str):
         return models(provider_id)
+
+    @router.get("/recipes")
+    def recipes(request: Request):
+        require_admin(request)
+        from oida.research_recipes import descriptions
+        return descriptions()
+
+    @router.post("/recipes/preview")
+    def preview_recipe(req: Ask, request: Request):
+        require_admin(request)
+        return workspace.preview_recipe(req)
 
     @router.post("/enable")
     def enable(selection: Selection, request: Request):
@@ -589,22 +763,31 @@ def workspace_router(
         return options()
 
     @router.get("/state")
-    def state():
+    def state(request: Request):
+        local = private_read(request)
         return dict(
             automatic=workspace.config(),
-            jobs=[
-                workspace.public_job(j) for j in workspace.values("reasoning_job", 50)
-            ],
-            sessions=workspace.conversations.list(limit=100),
+            jobs=workspace.visible_jobs(include_local=local),
+            sessions=workspace.conversations.list(limit=100, include_local=local),
             error=workspace.last_error,
         )
 
     @router.get("/sessions/{identifier}")
-    def session(identifier: str):
+    def session(identifier: str, request: Request):
         try:
-            return workspace.session(identifier)
+            value = workspace.session(identifier)
+            if workspace.conversations.contains_local(value):
+                require_admin(request)
+            return value
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(404, "Reasoning session not found") from exc
+
+    @router.get("/records/{identifier}")
+    def record(identifier: str, request: Request):
+        require_admin(request)
+        if not re.fullmatch(r"[A-Za-z0-9_:-]{1,100}", identifier):
+            raise HTTPException(422, "Invalid retained account identity")
+        return research_record(workspace, identifier)
 
     @router.post("/ask", status_code=202)
     def ask(req: Ask, request: Request):
@@ -615,10 +798,12 @@ def workspace_router(
             raise HTTPException(400, str(exc)) from exc
 
     @router.get("/jobs/{identifier}")
-    def job(identifier: str):
+    def job(identifier: str, request: Request):
         value = workspace.journal.get("reasoning_job", identifier)
         if value is None:
             raise HTTPException(404, "Inquiry job not found")
+        if (value.get("request") or {}).get("local_passages"):
+            require_admin(request)
         from oida.routing.archive import archive_view
         projection = archive_view(workspace, value["record_id"])
         if projection["view"]["state"] != "available":

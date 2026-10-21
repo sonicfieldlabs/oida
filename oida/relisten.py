@@ -113,6 +113,12 @@ class TargetedRelistener:
                 raise RelistenUnavailable("the local audio changed during targeted re-listening") from exc
 
         verify_source()
+        from oida.research_recipes import active
+        if active() is not None:
+            info = audio_info(audio_path)
+            seconds = float(info.get("durationSeconds") or 0)
+            if not 0 < seconds <= 60 or (time_range and time_range["end_s"] > seconds+0.05):
+                raise RelistenUnavailable("A recipe needs retained audio already bounded to 60 seconds and an interval inside it; focus does not crop the supplied clip")
         caps = [
             cap
             for cap in (_historical_max_window(event), _active_max_window(active_engine))
@@ -204,6 +210,8 @@ class TargetedRelistener:
                         )
                 try:
                     verify_source()
+                    from oida.research_recipes import consume
+                    consume("audio_calls")
                     result = self.engine.generate(str(audio_path), prompt, TARGETED_RELISTEN_REASONING)
                     verify_source()
                 except EngineUnavailable as exc:

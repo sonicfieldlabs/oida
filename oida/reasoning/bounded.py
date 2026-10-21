@@ -14,7 +14,9 @@ BOUNDED_CONTEXT = {
     "local_ecology": {"evidence_chars": 8000, "max_choices": 20, "inquiry_chars": 7000, "routing_chars": 7000}
 }
 
-_PRIORITY = {"event_anchor": 0, "summary": 1, "reference": 2}
+# An explicitly selected re-listen is selected context, like a reference: without this it
+# ranked after every claim and a bounded reasoner never received it (P8b, 21 Oct 2026).
+_PRIORITY = {"event_anchor": 0, "summary": 1, "reference": 2, "relisten": 2}
 
 
 def _rank(kind) -> int:

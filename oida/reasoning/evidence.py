@@ -100,6 +100,26 @@ class EvidencePacketBuilder:
         if not covenant_blocks_untyped_prose(event.get("covenant")):
             for index, reference in enumerate(list(references or [])[:12]):
                 kind = reference.get("kind")
+                if kind == "local_passage":
+                    from oida.local_passages import LocalReference
+                    selected = LocalReference.model_validate(reference.get("local_reference"))
+                    self._append(EvidenceItem(
+                        ref="context:" + selected.reference_ref, kind="reference", source="local_passage",
+                        value=selected.packet_value(),
+                        basis="Untrusted selected local passage; not acoustic evidence, adopted orientation, tool authority or independent confirmation",
+                    ), items, refs)
+                    continue
+                if kind == "sonicfield":
+                    from oida.research_references import ResearchReference
+                    # New references are fail-closed, versioned snapshots. Never
+                    # silently reduce an unsupported or changed reference to prose.
+                    selected = ResearchReference.model_validate(reference.get("research_reference"))
+                    self._append(EvidenceItem(
+                        ref="context:" + selected.reference_ref, kind="reference", source="sonicfield",
+                        value=selected.packet_value(),
+                        basis="Untrusted selected public context; not acoustic evidence, source rights or independent confirmation",
+                    ), items, refs)
+                    continue
                 if kind not in {"wiki", "web", "memory"}:
                     continue
                 self._append(EvidenceItem(
@@ -405,6 +425,17 @@ def safe_external_text(value: Any, *, limit: int = 12_000) -> str | None:
     """Return bounded, locator-free text suitable for an evidence packet."""
 
     return _bounded_text(value, limit=limit)
+
+
+def safe_selected_passage(value: str) -> str:
+    """Redact locators without changing a selected passage's layout or slicing it.
+
+    Selection bounds are enforced by the local reference contract. Provider
+    context limits must withhold a whole item, never substitute a hidden prefix.
+    """
+    for pattern, replacement in _PRIVATE_TEXT_PATTERNS:
+        value = pattern.sub(replacement, value)
+    return value
 
 
 def covenant_blocks_untyped_prose(value: Any) -> bool:

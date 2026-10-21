@@ -7,7 +7,7 @@ import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from oida.config import data_dir
 from oida.contracts import new_id, now_iso
@@ -19,7 +19,22 @@ from oida.storage import write_json_atomic
 @dataclass(frozen=True)
 class ConversationStore:
     root: Path = field(default_factory=lambda: data_dir() / "sessions" / "conversations")
+    local_passage_policy: Callable | None = field(default=None, repr=False, compare=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False, compare=False)
+
+    def _authorize_local(self, conversation, *, actions=("read", "read_metadata")):
+        if not self.contains_local(conversation):
+            return
+        if self.local_passage_policy is None:
+            from oida.local_passages import LocalPassageDenied
+            raise LocalPassageDenied()
+        self.local_passage_policy(conversation, actions=actions)
+
+    @staticmethod
+    def contains_local(conversation):
+        return any(source.get("kind") == "local_passage"
+                   for turn in conversation.get("turns", [])
+                   for source in (turn.get("research") or {}).get("sources", []))
 
     def ask(
         self,
@@ -195,6 +210,7 @@ class ConversationStore:
                 conversation["comparison_event_ids"] = list(comparison_event_ids)
                 conversation["comparison_events"] = list(comparison_events or [])
             if persistent:
+                self._authorize_local(conversation, actions=("read", "read_metadata", "retain", "retain_metadata"))
                 self._write(conversation)
             return {
                 "version": "0.2",
@@ -217,9 +233,11 @@ class ConversationStore:
             raise ValueError(f"invalid conversation record JSON: {conversation_id}") from exc
         if not isinstance(value, dict):
             raise ValueError(f"invalid conversation record JSON: {conversation_id}")
-        return self._normalize_record(value)
+        record = self._normalize_record(value)
+        self._authorize_local(record)
+        return record
 
-    def list(self, *, event_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list(self, *, event_id: str | None = None, limit: int = 100, include_local: bool = True) -> list[dict[str, Any]]:
         if not self.root.exists():
             return []
         rows: list[dict[str, Any]] = []
@@ -231,6 +249,12 @@ class ConversationStore:
             if not isinstance(value, dict):
                 continue
             record = self._normalize_record(value)
+            if not include_local and self.contains_local(record):
+                continue
+            try:
+                self._authorize_local(record)
+            except PermissionError:
+                continue
             if event_id and str(record.get("anchor_event_id") or "") != str(event_id):
                 continue
             rows.append(self.summary(record))

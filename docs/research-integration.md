@@ -1,4 +1,8 @@
-# Akousmata-owned research integration (unreleased O18)
+# Akousmata-owned research integration
+
+O18 is included in the Oída 0.14.0 source line and selected local
+Akousmata 0.9.1 candidate. This statement identifies source/candidate inclusion,
+not registry publication, an installed runtime, or a newly qualified owner.
 
 Oida delegates `/owner/research/proposals`, `/requests/{id}/cancel`,
 `/changes/{id}`, `/reconcile` and `/changes/{id}/acknowledge` to the installed
@@ -24,3 +28,14 @@ Synthetic owner-API tests cover the full mounted route, retained record links,
 retry/restart, new/changed notification, stale acknowledgment, scheduled watcher
 reconciliation and failure. Shared service tests additionally cover cancellation,
 interrupted canonical commit, ancestry deduplication and disclosure/forgetting.
+
+Public Sonic Field references use a separate optional [research reference
+wrapper](research-context.md). They remain selected context in an existing
+reasoning turn and do not manufacture A11 canonical source IDs. The canonical
+proposal/review service above retains ownership and its current validation.
+
+Selected private wiki passages use [local research context](local-research-context.md)
+and the existing shared material-use table. Their optional snapshots remain in
+reasoning custody, with current-use gates on their retained responses. They do
+not create canonical records, independent confirmation, grants or an additional
+research scheduler. The source wikis remain read-only.

@@ -17,10 +17,12 @@ import json
 import logging
 import re
 import threading
+import unicodedata
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 
 LOGGER = logging.getLogger(__name__)
@@ -76,7 +78,9 @@ class SonicFieldEntry:
 
 
 class SonicFieldBridge:
-    def __init__(self, root: Path | None) -> None:
+    def __init__(self, root: Path | None, *, public=None) -> None:
+        from oida.sonicfield_discovery import PublicDiscovery
+        self.public = public if public is not None else PublicDiscovery()
         self.root = Path(root).expanduser().resolve() if root else None
         self._lock = threading.Lock()
         self._entries: list[SonicFieldEntry] | None = None
@@ -105,6 +109,8 @@ class SonicFieldBridge:
             "counts": counts,
             "build_ms": self._build_ms,
             "error": self._error,
+            "scope": "legacy local index; not public service health or whole-corpus coverage",
+            "public": self.public.status(),
         }
 
     # ----------------------------------------------------------------- index
@@ -181,7 +187,7 @@ class SonicFieldBridge:
                     route=f"/wiki/{slug}" if slug else "/wiki",
                     tags=[str(tag) for tag in meta.get("tags", []) if isinstance(tag, str)],
                     summary=content[:280].replace("\n", " ").strip(),
-                    body=content[:BODY_EXCERPT_CHARS].lower(),
+                    body=content[:BODY_EXCERPT_CHARS],
                     kind=str(meta.get("type") or "concept"),
                 )
             )
@@ -209,7 +215,7 @@ class SonicFieldBridge:
                     tags=_string_list(front.get("tags")) + _string_list(front.get("topics")) + _string_list(front.get("categories")),
                     aliases=_string_list(front.get("aliases")) + _string_list(front.get("relatedTopics")),
                     summary=str(front.get("summary") or "").strip(),
-                    body=body[:BODY_EXCERPT_CHARS].lower(),
+                    body=body[:BODY_EXCERPT_CHARS],
                     kind=str(front.get("type") or surface),
                 )
             )
@@ -222,7 +228,7 @@ class SonicFieldBridge:
         slugs: list[tuple[str, Path]] = []
         for file_path in directory.iterdir():
             if file_path.suffix in {".mdx", ".md"}:
-                slugs.append((file_path.stem.lower(), file_path))
+                slugs.append((file_path.stem, file_path))
         return slugs
 
     # ---------------------------------------------------------------- search
@@ -270,11 +276,11 @@ class SonicFieldBridge:
     def _score_entry(self, entry: SonicFieldEntry, terms: list[str]) -> tuple[float, list[str]]:
         score = 0.0
         matched: list[str] = []
-        title = entry.title.lower()
-        slug = entry.slug.lower().replace("-", " ")
+        title = _fold(entry.title)
+        slug = _fold(entry.slug).replace("-", " ")
         tags = [self._aliases.get(_norm_term(tag), _norm_term(tag)) for tag in entry.tags]
         aliases = [_norm_term(alias) for alias in entry.aliases]
-        summary = entry.summary.lower()
+        summary = _fold(entry.summary)
         for term in terms:
             spaced = term.replace("-", " ")
             hit = 0.0
@@ -288,7 +294,7 @@ class SonicFieldBridge:
                 hit = max(hit, 2.0)
             if spaced and spaced in summary:
                 hit = max(hit, 1.2)
-            if spaced and spaced in entry.body:
+            if spaced and spaced in _fold(entry.body):
                 hit = max(hit, 0.6)
             if hit:
                 score += hit
@@ -302,7 +308,7 @@ class SonicFieldBridge:
             return []
         candidates: list[tuple[float, str, Path, list[str]]] = []
         for slug, file_path in self._archive_slugs:
-            spaced = slug.replace("-", " ")
+            spaced = _fold(slug).replace("-", " ")
             matched = [term for term in terms if term.replace("-", " ") in spaced]
             if not matched:
                 continue
@@ -328,7 +334,7 @@ class SonicFieldBridge:
             slug=slug,
             title=str(front.get("title") or _title_from_slug(slug)),
             path=str(file_path),
-            route=f"/library/{slug}",
+            route="/library?item=" + quote(slug, safe=""),
             tags=_string_list(front.get("tags")),
             summary=str(front.get("summary") or "").strip(),
             body="",
@@ -365,12 +371,16 @@ def terms_from_event(event: dict[str, Any] | None, extra_query: str | None = Non
 
 
 def _tokenize(text: str) -> list[str]:
-    tokens = re.findall(r"[a-z0-9][a-z0-9-]{1,}", text.lower())
+    tokens = re.findall(r"[^\W_]+(?:[-’'][^\W_]+)*", _fold(text))
     return [token.strip("-") for token in tokens if token.strip("-")]
 
 
 def _norm_term(value: str) -> str:
-    return re.sub(r"\s+", "-", str(value).strip().lower())
+    return re.sub(r"\s+", "-", _fold(str(value)).strip())
+
+
+def _fold(value: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", value.casefold()) if not unicodedata.combining(c))
 
 
 def _title_from_slug(slug: str) -> str:
@@ -391,7 +401,15 @@ def _excerpt(entry: SonicFieldEntry, matched: list[str]) -> str:
     body = entry.body
     for term in matched:
         spaced = term.replace("-", " ")
-        index = body.find(spaced)
+        # Match normalized terms while slicing the original case and diacritics.
+        positions = []
+        folded = []
+        for i, char in enumerate(body):
+            part = _fold(char)
+            positions.extend([i] * len(part))
+            folded.append(part)
+        at = "".join(folded).find(spaced)
+        index = positions[at] if at >= 0 else -1
         if index >= 0:
             start = max(0, index - 90)
             end = min(len(body), index + 130)
