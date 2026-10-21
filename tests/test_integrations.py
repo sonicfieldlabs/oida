@@ -178,6 +178,13 @@ class IntegrationAssetTests(unittest.TestCase):
             tools,
             {
                 "oida_capabilities",
+                "oida_sonic_field_search",
+                "oida_sonic_field_record",
+                "oida_sonic_field_relations",
+                "oida_research_recipe_preview",
+                "oida_research_recipe_start",
+                "oida_research_recipe_status",
+                "oida_research_recipe_cancel",
                 "oida_inscription",
                 "oida_representation_memory",
                 "oida_listening_identity",

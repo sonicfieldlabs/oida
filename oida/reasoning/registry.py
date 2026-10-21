@@ -209,6 +209,10 @@ class ProviderRegistry:
             return error_result(request, f"Reasoning provider {request.provider_id!r} is disabled")
         if request.model_id is None and entry.configured and entry.configured.default_model:
             request = request.model_copy(update={"model_id": entry.configured.default_model})
+        from oida.research_recipes import active
+        if (budget := active()) is not None:
+            budget.consume("provider_calls")
+            request = request.model_copy(update={"max_output_tokens": min(request.max_output_tokens, budget.prepared["limits"]["output_tokens"])})
         try:
             result = entry.adapter.complete(request)
             checkpoint()

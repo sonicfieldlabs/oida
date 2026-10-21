@@ -16,16 +16,22 @@ def task_of(schema):
     """
     defs = schema.get("$defs") or {}
     properties = schema.get("properties") or {}
-    from oida.textual_sounding import RESULT_SCHEMA
-    from oida.reasoning.contracts import strict_output_schema
-    if schema == strict_output_schema(RESULT_SCHEMA):
-        return "inscription"
+    # The worker runs in the model's own environment, where Oída may not be
+    # installed. The three structural families need no Oída import; the exact
+    # inscription schema can match none of them, so checking it last is equivalent.
     if "Move" in defs:
         return "planning"
     if set(properties) == {"candidate_id"}:
         return "routing"
     if "answer_blocks" in properties and "AnswerBlock" in defs:
         return "inquiry"
+    try:
+        from oida.textual_sounding import RESULT_SCHEMA
+        from oida.reasoning.contracts import strict_output_schema
+    except ImportError:
+        raise ValueError("Unsupported local reasoning task") from None
+    if schema == strict_output_schema(RESULT_SCHEMA):
+        return "inscription"
     raise ValueError("Unsupported local reasoning task")
 
 
@@ -53,10 +59,15 @@ def inquiry_schema(base, content):
 
     refs = list(dict.fromkeys(_re.findall(r'"ref"\s*:\s*"([^"]{1,300})"', content)))
     schema = deepcopy(base)
+    # A 4B local model loops or overruns its budget on long lists; keep answers short.
+    for key, cap in (("answer_blocks", 6), ("hypotheses", 3), ("uncertainties", 4)):
+        if key in schema.get("properties", {}):
+            schema["properties"][key]["maxItems"] = cap
     if refs:
         for name in ("AnswerBlock", "ReasoningHypothesis"):
             props = schema["$defs"][name]["properties"]
-            props["evidence_refs"] = {"type": "array", "items": {"type": "string", "enum": refs}, "uniqueItems": True, "maxItems": 12}
+            props["evidence_refs"] = {"type": "array", "items": {"type": "string", "enum": refs},
+                                      "uniqueItems": True, "minItems": 1, "maxItems": 6}
     return schema
 
 
@@ -200,7 +211,10 @@ def prepare_request(request):
             "(a summary or account is always an interpretation), or answer; cite the exact ref strings the "
             "packet gives in evidence_refs. Put untested ideas in hypotheses with a confidence, open issues in "
             "uncertainties. Model accounts are interpretations, not facts; generated sounds do not corroborate their "
-            "sources. Omit requested_action unless a targeted re-listening is clearly needed. /no_think"
+            "sources. Omit requested_action unless a targeted re-listening is clearly needed. Be brief: at most "
+            "6 answer_blocks, 3 hypotheses, 4 uncertainties and 3 suggested_questions, one sentence each, each "
+            "different; every answer block and hypothesis cites 1 to 6 evidence_refs. Start with { and end "
+            "with }. /no_think"
             "\nReturn one JSON object matching this schema, without markdown or deliberation:\n"
             + json.dumps(prompt_schema)
         )
@@ -263,6 +277,16 @@ def count_request(request):
                 output_token_reserve=request["max_tokens"])
 
 
+def unfenced(text):
+    """Accept one leading Markdown code fence around the JSON object; never other prose."""
+    body = text.lstrip()
+    if body.startswith("```"):
+        first, _, rest = body.partition("\n")
+        if first.strip() in ("```", "```json"):
+            return rest.lstrip()
+    return body
+
+
 def run(request):
     from mlx_lm import load, stream_generate
     from mlx_lm.sample_utils import make_sampler
@@ -284,7 +308,7 @@ def run(request):
         text += response.text
         count += 1
         try:
-            candidate, _ = json.JSONDecoder().raw_decode(text.lstrip())
+            candidate, _ = json.JSONDecoder().raw_decode(unfenced(text))
             if isinstance(candidate, dict):
                 value = candidate
                 break  # Stop at the completed structured response; no trailing prose.

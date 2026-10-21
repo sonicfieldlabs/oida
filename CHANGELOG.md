@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.14.0 — 2026-10-21
+
+- Add optional research context to retained-listening returns: versioned
+  `oida/research-reference/v1` and `oida/research-context/v1` contracts, exact
+  Sonic Field Discovery records over REST and MCP with live identity checks, and
+  hand-selected local passages (`oida/local-passage/v1`) granted under terms,
+  read locally and never exported. Every consulted source is shown with the
+  answer; a source is context, never acoustic evidence.
+- Add bounded research recipes, `selected_context_return` and
+  `local_relisten_return`: an exact preview plan digest, explicit start,
+  reserved call, time and byte limits, cancellation, and restart reconciliation
+  without replay. Four MCP tools, `oida_research_recipe_preview`, `_start`,
+  `_status` and `_cancel`, bring the total to 24.
+- A recipe's targeted re-listen now reaches a reasoner with a bounded context:
+  it ranks with selected references, a recipe whose re-listen cannot fit stops
+  with 409, and the audit marks it shared only when the reasoner received it.
+  Before this, the observation was always withheld from the local planner.
+- Repair the local planner worker's task detection, inquiry caps and fenced
+  JSON handling; the planner is re-admitted for planning, routing and inquiry.
+- Require mcp 1.30 or later; update aiohttp 3.14.5, certifi 2026.10.19 and
+  yarl 1.25.1 in the lock.
+- Source release; not published to PyPI.
+
 ## 0.13.2 — 2026-10-14
 
 - Join the published 0.12.1 line (local owner events, finite playlists, native

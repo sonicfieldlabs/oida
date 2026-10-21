@@ -170,6 +170,17 @@ class SonicFieldBridgeTests(unittest.TestCase):
         joined = " ".join(terms)
         self.assertIn("drone", joined)
 
+    def test_unicode_matching_preserves_original_excerpt_and_current_library_link(self) -> None:
+        root = Path(self.tmp.name)
+        original = "La Oída situada conserva CH’IXI y sus diferencias."
+        (root / "data" / "runtime" / "wiki-pages.json").write_text(json.dumps([
+            {"meta":{"slug":"oida-situada","title":"Oída situada","type":"concept"},"content":original}
+        ]))
+        result = self.bridge.explore(["OÍDA", "CH’IXI"])
+        assert result["groups"]["wiki"][0]["excerpt"] == original
+        library = self.bridge.explore(["drone"])["groups"]["library"][0]
+        assert library["route"] == "/library?item=drone-and-duration"
+
     def test_missing_root_reports_unavailable(self) -> None:
         bridge = SonicFieldBridge(Path(self.tmp.name) / "missing")
         self.assertFalse(bridge.available)

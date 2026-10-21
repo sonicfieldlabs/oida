@@ -694,7 +694,10 @@ def create_app(
     covenant_store = CovenantStore(config.data_dir)
     listening_identity_store = ListeningIdentityStore(config.data_dir)
     background = BackgroundRuntime()
-    conversations = ConversationStore(config.data_dir / "sessions" / "conversations")
+    from oida.local_passages import LocalPassages, install_denial_handler, local_passage_router
+    local_passages = LocalPassages.from_environment()
+    conversations = ConversationStore(config.data_dir / "sessions" / "conversations",
+                                      local_passage_policy=local_passages.authorize_conversation)
     reasoning_settings = ReasoningSettingsStore(
         config.data_dir / "settings" / "reasoning.json"
     )
@@ -961,6 +964,7 @@ def create_app(
             covenant_store,
         ),
         registry_factory=reasoning_registry,
+        local_passages=local_passages,
     )
     openrouter_oauth = OpenRouterOAuth(reasoning_secrets)
 
@@ -1163,6 +1167,7 @@ def create_app(
             code: copy.deepcopy(error_response) for code in documented_error_codes
         },
     )
+    install_denial_handler(app)
 
     workspace_id = os.getenv("LISTENINGSTACK_WORKSPACE_ID")
     workspace_generation = os.getenv("LISTENINGSTACK_WORKSPACE_GENERATION")
@@ -1398,6 +1403,8 @@ def create_app(
                 status_code=403,
                 detail="reasoning settings, credentials, and OAuth may only be changed from this computer",
             )
+
+    app.include_router(local_passage_router(local_passages, require_local_admin))
 
     def analyze_capture(
         capture: dict[str, object],
@@ -1828,7 +1835,7 @@ def create_app(
         governed["covenant"] = block
         return governed
 
-    def conversation_event(req: ConversationAskRequest) -> dict[str, Any]:
+    def conversation_event(req: ConversationAskRequest, request: Request) -> dict[str, Any]:
         event: dict[str, Any] | None = None
         if req.conversation_id:
             try:
@@ -1838,6 +1845,8 @@ def create_app(
                     status_code=404,
                     detail=f"unknown conversation: {req.conversation_id}",
                 ) from exc
+            if conversations.contains_local(stored):
+                require_local_admin(request)
             candidate = stored.get("event") if isinstance(stored, dict) else None
             event = dict(candidate) if isinstance(candidate, dict) else None
             supplied_id = req.event_id
@@ -2073,6 +2082,10 @@ def create_app(
     @app.get("/sonicfield/status")
     def sonicfield_status_endpoint() -> dict[str, object]:
         return sonicfield.status()
+
+    from oida.sonicfield_discovery import public_router
+
+    app.include_router(public_router(sonicfield.public, operations))
 
     @app.post("/sonicfield/explore")
     def sonicfield_explore_endpoint(req: SonicFieldExploreRequest) -> dict[str, object]:
@@ -2317,6 +2330,13 @@ def create_app(
             getattr(route, "path", None) == "/germ/handoff" for route in app.routes
         )
         optional_components["germ"] = germ
+        optional_components["public_research"] = {
+            **sonicfield.public.status(),
+            "reference_contract":"oida/research-reference/v1",
+            "context_contract":"oida/research-context/v1",
+            "reference_schema":"/sonicfield/schema/reference",
+            "context_schema":"/sonicfield/schema/context",
+        }
         try:
             identity_status = listening_identity_store.status()
             listening_identity: dict[str, object] = {
@@ -5029,14 +5049,19 @@ def create_app(
 
     @app.get("/conversation")
     def conversation_list_endpoint(
-        event_id: str | None = None, limit: int = 100
+        request: Request, event_id: str | None = None, limit: int = 100
     ) -> dict[str, object]:
-        values = conversations.list(event_id=event_id, limit=limit)
+        try:
+            require_local_admin(request)
+            include_local = True
+        except HTTPException:
+            include_local = False
+        values = conversations.list(event_id=event_id, limit=limit, include_local=include_local)
         return {"version": "0.2", "conversations": values, "count": len(values)}
 
     @app.post("/conversation/ask")
-    def conversation_ask_endpoint(req: ConversationAskRequest) -> dict[str, object]:
-        event = conversation_event(req)
+    def conversation_ask_endpoint(req: ConversationAskRequest, request: Request) -> dict[str, object]:
+        event = conversation_event(req, request)
         comparisons = comparison_events(req.comparison_event_ids, event.get("id"))
         try:
             return reasoning.ask(
@@ -5048,8 +5073,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/conversation/ask/stream", responses=event_stream_response)
-    async def conversation_ask_stream_endpoint(req: ConversationAskRequest) -> Any:
-        event = conversation_event(req)
+    async def conversation_ask_stream_endpoint(req: ConversationAskRequest, request: Request) -> Any:
+        event = conversation_event(req, request)
         comparisons = comparison_events(req.comparison_event_ids, event.get("id"))
         options = conversation_options(req, comparisons)
 
@@ -5110,8 +5135,8 @@ def create_app(
         )
 
     @app.post("/conversation/prepare")
-    def conversation_prepare_endpoint(req: ConversationAskRequest) -> dict[str, object]:
-        event = conversation_event(req)
+    def conversation_prepare_endpoint(req: ConversationAskRequest, request: Request) -> dict[str, object]:
+        event = conversation_event(req, request)
         comparisons = comparison_events(req.comparison_event_ids, event.get("id"))
         try:
             return reasoning.prepare(
@@ -5139,11 +5164,14 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/conversation/{conversation_id}")
-    def conversation_get_endpoint(conversation_id: str) -> dict[str, object]:
+    def conversation_get_endpoint(conversation_id: str, request: Request) -> dict[str, object]:
         try:
+            value = conversations.get(conversation_id)
+            if conversations.contains_local(value):
+                require_local_admin(request)
             return {
                 "version": "0.2",
-                "conversation": conversations.get(conversation_id),
+                "conversation": value,
             }
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -5604,6 +5632,8 @@ def create_app(
         reasoning_settings,
         operations,
         workspace_event_policy,
+        public=sonicfield.public,
+        acoustic_reader=find_listening_event,
     )
     source_shutdown_callbacks.append(reasoning_workspace.close)
     app.include_router(

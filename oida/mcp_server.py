@@ -9,6 +9,7 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from harness.http_client import get_json, post_json, put_json
 from oida.lifecycle import ensure_gateway, server_url
@@ -32,6 +33,17 @@ selected text provider/model. It can return an account or a finished text; no
 audio conversion is required. Material is never authority. Scoped LISTENING.md
 adoption and current material uses remain explicit owner actions. Use the
 versioned representation memory tool for these records, not audio replay.
+Use oida_sonic_field_search with short operator-selected public-safe terms,
+then oida_sonic_field_record with an exact selected identity or page URL.
+Never derive an outbound query from private listening text without selected-use
+authority. These are public context references, not acoustic observations,
+identity adoption, full papers, training permission or executable catalog tools.
+Outgoing Lexicon links are leads only; detail reads are separate actions.
+For a bounded public-context recipe, preview the exact selection, then explicitly
+start it with that plan digest and a stable caller-chosen request ID. Status and
+cancellation never replay execution. These tools do not expose private passage
+recipes, earlier conversations or local acoustic returns to a model host; use
+the trusted local owner interface for those separately admitted operations.
 """.strip()
 
 MCP = FastMCP(
@@ -43,16 +55,138 @@ MCP = FastMCP(
     streamable_http_path="/",
 )
 _HTTP_APP = None
+PUBLIC_READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False,
+                              idempotentHint=True, openWorldHint=True)
 
 
 def _server() -> str:
     return server_url()
 
 
+def _public_recipe_request(value):
+    from oida.reasoning_workspace import Ask
+    req = Ask.model_validate(value)
+    if (req.recipe is None or req.recipe.name!="selected_context_return" or req.local_passages
+            or req.scope.local_passages or req.conversation_id or req.comparison is None
+            or req.comparison.kind!="initial_account"):
+        raise ValueError("MCP recipes require public context and a fresh retained-account baseline; private passage/audio and earlier-conversation selection stay in the trusted local interface")
+    return req
+
+
+def _recipe_job(value):
+    selected = (value.get("recipe_plan") or {}).get("selection")
+    if not selected:
+        raise ValueError("This tool reads public-context recipe jobs only")
+    try:
+        _public_recipe_request(selected)
+    except (ValueError,TypeError):
+        raise ValueError("This tool reads valid public-context recipe jobs only") from None
+    return {k:value[k] for k in ("id","status","conversation_id","provider_id","model_id","recipe_execution","detail","created_at","updated_at") if k in value}
+
+
+@MCP.tool(structured_output=True, annotations=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True,openWorldHint=False))
+async def oida_research_recipe_preview(request: dict[str, Any]) -> dict[str, Any]:
+    """Preview fixed public-context steps/limits without executing or saving work.
+
+    Supply an existing account and digest-bound initial comparison, exact public
+    source IDs, explicit provider and a supported recipe. No private/audio scope.
+    """
+    req = _public_recipe_request(request)
+    return await asyncio.to_thread(post_json,_server(),"/reasoning/workspace/recipes/preview",req.model_dump(mode="json"))
+
+
+@MCP.tool(structured_output=True, annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=False,idempotentHint=True,openWorldHint=True))
+async def oida_research_recipe_start(request: dict[str, Any]) -> dict[str, Any]:
+    """Explicitly dispatch one exact preview with request_id and recipe_plan_sha256.
+
+    Keep the same ID after timeout/uncertainty and check status. Never manufacture
+    another ID to retry a dispatched call. Source availability is rechecked.
+    """
+    if not request.get("request_id") or not request.get("recipe_plan_sha256"):
+        raise ValueError("Supply the inspected plan digest and a stable explicit request ID")
+    req = _public_recipe_request(request)
+    value = await asyncio.to_thread(post_json,_server(),"/reasoning/workspace/ask",req.model_dump(mode="json"))
+    return _recipe_job(value)
+
+
+@MCP.tool(structured_output=True, annotations=ToolAnnotations(readOnlyHint=True,destructiveHint=False,idempotentHint=True,openWorldHint=False))
+async def oida_research_recipe_status(request_id: str, include_result: bool = False) -> dict[str, Any]:
+    """Read status/receipt, optionally the exact public-context result; no replay."""
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}",request_id):
+        raise ValueError("Select an exact recipe request ID")
+    value = await asyncio.to_thread(get_json,_server(),"/reasoning/workspace/jobs/"+request_id)
+    if value.get("id")!=request_id:
+        raise ValueError("Recipe job identity changed")
+    result = _recipe_job(value)
+    if include_result and value.get("status")=="complete" and value.get("conversation_id"):
+        session = await asyncio.to_thread(get_json,_server(),"/reasoning/workspace/sessions/"+value["conversation_id"])
+        turn = next((t for t in session.get("turns",[]) if t.get("research",{}).get("request_id")==request_id),None)
+        if turn is None or turn.get("relisten") or any(s.get("kind")!="sonicfield" for s in turn.get("research",{}).get("sources",[])):
+            raise ValueError("An exact public-context result is unavailable")
+        result["result"] = {k:turn[k] for k in ("id","question","answer_blocks","hypotheses","uncertainties","reasoner","fallback") if k in turn}
+        result["result"]["research"] = {k:turn["research"][k] for k in ("sources","comparison","exposure","recipe_execution","public_retrieval") if k in turn["research"]}
+    return result
+
+
+@MCP.tool(structured_output=True, annotations=ToolAnnotations(readOnlyHint=False,destructiveHint=False,idempotentHint=True,openWorldHint=False))
+async def oida_research_recipe_cancel(request_id: str) -> dict[str, Any]:
+    """Request cancellation of the same public recipe; commit fences still apply."""
+    await oida_research_recipe_status(request_id)
+    value = await asyncio.to_thread(post_json,_server(),"/reasoning/workspace/jobs/"+request_id+"/cancel",{})
+    return _recipe_job(value)
+
+
 @MCP.tool(structured_output=True)
 async def oida_capabilities() -> dict[str, Any]:
     """Inspect engines, listening routes, memory, contracts, and host-perception support."""
     return await asyncio.to_thread(get_json, _server(), "/gateway/capabilities")
+
+
+@MCP.tool(structured_output=True, annotations=PUBLIC_READ)
+async def oida_sonic_field_search(
+    query: str, families: list[str] | None = None, locale: Literal["en", "es"] = "en",
+    limit: int = 5, filters: dict[str, dict[str, str]] | None = None, cursor: str | None = None,
+    operation_id: str | None = None,
+) -> dict[str, Any]:
+    """Search bounded public SF collections. Only supply deliberately selected public-safe terms.
+
+    Maximum five results. Continue with the same input and returned cursor;
+    report hasMore/partial coverage. No account, audio, model or tool execution.
+    """
+    body = dict(query=query, locale=locale, limit=limit, filters=filters or {})
+    body.update({k:v for k,v in dict(families=families, cursor=cursor, operation_id=operation_id).items() if v is not None})
+    return await asyncio.to_thread(post_json, _server(), "/sonicfield/search", body)
+
+
+@MCP.tool(structured_output=True, annotations=PUBLIC_READ)
+async def oida_sonic_field_record(
+    family: str | None = None, slug: str | None = None, expected_id: str | None = None,
+    page_url: str | None = None, locale: Literal["en", "es"] = "en", operation_id: str | None = None,
+) -> dict[str, Any]:
+    """Read an exact selected public SF identity or supported canonical page URL.
+
+    Preserve expected_id from a search. A Library entry is bibliographic context;
+    unknown rights/language remain unknown. Does not select audio or adopt a file.
+    """
+    if page_url is not None and slug is not None:
+        raise ValueError("Choose an exact page URL or family/slug")
+    body = {k:v for k,v in dict(family=family, slug=slug, expectedId=expected_id,
+                               locale=locale, operation_id=operation_id).items() if v is not None}
+    path = "/sonicfield/record"
+    if page_url is not None:
+        body["url"], path = page_url, "/sonicfield/page"
+    return await asyncio.to_thread(post_json, _server(), path, body)
+
+
+@MCP.tool(structured_output=True, annotations=PUBLIC_READ)
+async def oida_sonic_field_relations(slug: str, locale: Literal["en", "es"] = "en", limit: int = 5,
+                                     operation_id: str | None = None) -> dict[str, Any]:
+    """Read one bounded page of outgoing Lexicon links. Not incoming edges, influence or a complete graph."""
+    body = dict(slug=slug, locale=locale, limit=limit)
+    if operation_id is not None:
+        body["operation_id"] = operation_id
+    return await asyncio.to_thread(post_json, _server(), "/sonicfield/relations", body)
 
 
 @MCP.tool(structured_output=True)
