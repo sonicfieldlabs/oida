@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.1 — Unreleased audit repair candidate
+
+- Enforce explicit re-listen checkpoint selection through the server resolver,
+  reject unsupported roles and mismatched returns, and keep selections request-local.
+
+- Retain exact bounded research evidence values for subsequent review.
+- Require measured evidence for acoustic fact blocks. The optional `claim_scope`
+  field distinguishes attributed `source_report` statements; old inputs default
+  to `acoustic`. Generated strict provider schemas include the field.
+- Derive operation identities from complete request IDs, preserve old jobs, and
+  avoid guessed cancellation of ambiguous legacy running jobs.
+- Resolve uncertain submissions with durable owner abandonment before admission;
+  late arrivals with that ID are refused. Existing jobs are never replayed.
+- Apply conversation anchor filtering before unrelated private-source checks.
+
 ## 0.14.0 — 2026-10-21
 
 - Add optional research context to retained-listening returns: versioned

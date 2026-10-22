@@ -249,13 +249,13 @@ class ConversationStore:
             if not isinstance(value, dict):
                 continue
             record = self._normalize_record(value)
+            if event_id and str(record.get("anchor_event_id") or "") != str(event_id):
+                continue
             if not include_local and self.contains_local(record):
                 continue
             try:
                 self._authorize_local(record)
             except PermissionError:
-                continue
-            if event_id and str(record.get("anchor_event_id") or "") != str(event_id):
                 continue
             rows.append(self.summary(record))
         rows.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
