@@ -962,6 +962,7 @@ def create_app(
         relistener=TargetedRelistener(
             engine,
             covenant_store,
+            model_resolver=resolve_moss_model,
         ),
         registry_factory=reasoning_registry,
         local_passages=local_passages,
