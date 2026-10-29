@@ -54,13 +54,13 @@ moss = [
     "fsspec>=2026.6.0",
   "accelerate>=1.15.0",
   "torch==2.10.0",
-  "torchaudio==2.10.0",
-  "transformers==5.14.1",
-  "torchcodec==0.10.0"
+  "torchaudio==2.11.0",
+  "transformers==5.21.0",
+  "torchcodec==0.17.0"
 ]
 dev = [
   "pytest>=8.2",
-  "ruff>=0.15,<0.16",
+  "ruff>=0.15,<0.18",
   "twine>=7,<8",
 ]
 songid = [
