@@ -358,7 +358,7 @@ def test_stricter_turn_does_not_replay_prior_transcript_or_memory_content() -> N
         return {
             "answer_blocks": [
                 {"kind": "answer", "text": "TRANSCRIPT_SECRET", "evidence_refs": [transcript_ref]},
-                {"kind": "fact", "text": "MEMORY_SECRET", "evidence_refs": [memory_ref]},
+                {"kind": "fact", "claim_scope": "source_report", "text": "MEMORY_SECRET", "evidence_refs": [memory_ref]},
             ]
         }
 

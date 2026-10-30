@@ -36,11 +36,21 @@ class ResponseValidator:
             raise ResponseValidationError(errors) from exc
 
         allowed_refs = {item.ref for item in packet.items}
+        measured_refs = {item.ref for item in packet.items if item.category == "measured"}
         errors: list[str] = []
         for index, block in enumerate(response.answer_blocks):
             if not block.evidence_refs:
                 errors.append(f"answer_blocks[{index}] requires at least one evidence ref")
             errors.extend(_invalid_refs(block.evidence_refs, allowed_refs, f"answer_blocks[{index}]"))
+            if (
+                block.kind == "fact"
+                and block.claim_scope == "acoustic"
+                and not measured_refs.intersection(block.evidence_refs)
+            ):
+                errors.append(
+                    f"answer_blocks[{index}] acoustic fact requires measured evidence; "
+                    "use interpretation for model accounts or source_report for a statement about a cited source"
+                )
             if _contains_private_locator(block.text):
                 errors.append(f"answer_blocks[{index}] contains a local path or raw-audio locator")
         for index, hypothesis in enumerate(response.hypotheses):

@@ -96,6 +96,29 @@ class DecisionCandidate(Strict):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class CircuitContext(Strict):
+    """Where a listening circuit stands, stated by the host that runs it (Khipu).
+
+    The host derives it from its run memory and its station rules. A decider reads it to order
+    the offered moves; it never widens them.
+    """
+
+    source_key: str | None = Field(default=None, min_length=1, max_length=255)
+    frame: str | None = Field(default=None, pattern=r"^/[a-z][a-z-]{0,30}$")
+    layer: Literal["general", "focused", "corrective", "sounding", "recall"] = "general"
+    depth: int = Field(default=0, ge=0, le=8)
+    max_depth: int = Field(default=2, ge=0, le=8)
+    heard_modes: list[str] = Field(default_factory=list, max_length=17)
+    heard_listening_modes: list[str] = Field(default_factory=list, max_length=8)
+    declined: bool = False
+    declined_model: str | None = Field(default=None, min_length=1, max_length=255)
+    repeated: bool = False
+    must_move: bool = False
+    prefer_stay: bool = False
+    allow_speech_content: bool = False
+    station_rule: str | None = Field(default=None, min_length=1, max_length=240)
+
+
 class DecisionContext(Strict):
     """The immutable, hashed state one decision is asked about."""
 
@@ -118,6 +141,7 @@ class DecisionContext(Strict):
     permitted_operations: list[str] = Field(default_factory=list, max_length=12)
     fresh_until: str | None = Field(default=None, min_length=1, max_length=40)
     reasoning_job_ids: list[str] = Field(default_factory=list, max_length=8)
+    circuit: CircuitContext | None = None
 
     @model_validator(mode="after")
     def bounded_candidates(self):

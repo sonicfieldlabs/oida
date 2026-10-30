@@ -1,6 +1,6 @@
 [project]
 name = "sonicfield-oida"
-version = "0.14.0"
+version = "0.15.0"
 description = "oída unified local listening agent and gateway: AKOÚŌ, Earworm, Akousmata, and optional local audio engines."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,9 +23,9 @@ classifiers = [
 ]
 dependencies = [
   "anyio>=4.14.2,<5",
-  "akouo-contract>=0.12.1",
-  "akousma>=0.10.1",
-  "akousmata>=0.9.1",
+  "akouo-contract>=0.13.0",
+  "akousma>=0.11.0",
+  "akousmata>=0.10.0",
   "fastapi>=0.139",
   "httpx2>=2.12,<3",
   "jsonschema>=4.22",
@@ -45,22 +45,22 @@ Issues = "https://github.com/sonicfieldlabs/oida/issues"
 
 [tool.uv.sources]
 # Reviewed wheels include packaged resources and cannot be masked by siblings.
-akousma = { path = "vendor/akousma-0.10.1-py3-none-any.whl" }
-akouo-contract = { path = "vendor/akouo_contract-0.12.1-py3-none-any.whl" }
-akousmata = { path = "vendor/akousmata-0.9.1-py3-none-any.whl" }
+akousma = { path = "vendor/akousma-0.11.0-py3-none-any.whl" }
+akouo-contract = { path = "vendor/akouo_contract-0.13.0-py3-none-any.whl" }
+akousmata = { path = "vendor/akousmata-0.10.0-py3-none-any.whl" }
 
 [project.optional-dependencies]
 moss = [
     "fsspec>=2026.6.0",
   "accelerate>=1.15.0",
   "torch==2.10.0",
-  "torchaudio==2.10.0",
-  "transformers==5.14.1",
-  "torchcodec==0.10.0"
+  "torchaudio==2.11.0",
+  "transformers==5.21.0",
+  "torchcodec==0.17.0"
 ]
 dev = [
   "pytest>=8.2",
-  "ruff>=0.15,<0.16",
+  "ruff>=0.15,<0.18",
   "twine>=7,<8",
 ]
 songid = [
@@ -95,3 +95,8 @@ artifacts = ["oida/static/*", "oida/schemas/*"]
 # Explicit source inputs exclude local reports, plans and operator state.
 [tool.hatch.build.targets.sdist]
 include = ["oida", "harness", "bench_adapter", "integrations", "pyproject.toml", "README.md", "LICENSE", "NOTICE", "vendor/*.whl", "vendor/SHA256SUMS", "vendor/compatibility.json", "vendor/NOTICE.md"]
+
+[tool.ruff.lint]
+# The rules ruff selected by default through 0.16. Ruff 0.17 selects many more by default;
+# adopting them is a change of its own.
+select = ["E4", "E7", "E9", "F"]

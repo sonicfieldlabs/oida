@@ -13,6 +13,8 @@ Requires the ``akousma`` package (earworm/packages/py-akousma).
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import os
 import re
 import time
@@ -648,6 +650,7 @@ def build_akousma_from_listen(
     actions: list[dict[str, Any]] | None = None,
     auditum: dict[str, Any] | None = None,
     lineage: dict[str, Any] | None = None,
+    circuit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a valid akousma record from an oída listen result.
 
@@ -698,7 +701,65 @@ def build_akousma_from_listen(
         record["provenance"]["device"] = device
     if lineage:
         apply_declared_lineage(record, lineage)
+    if circuit:
+        apply_declared_circuit(record, circuit)
     return record
+
+
+#: Moves whose executed step lands in a listening of the record it is written with.
+_LANDING_MOVES = ("relisten_same", "new_fragment", "switch_source")
+
+
+def complete_declared_circuit(declared: dict[str, Any], *, listening_id: str, akousma_id: str) -> dict[str, Any]:
+    """Name where the caller's executed moves landed: this record's listening, or this record.
+
+    The caller (Khipu) knows which moves led here but not the identifiers Oída gives the new
+    record and its listening; an executed step that names neither is completed with them.
+    """
+    if not isinstance(declared, dict):
+        raise ValueError("a declared circuit must be an object")
+    circuit = deepcopy(declared)
+    for step in circuit.get("steps") or []:
+        if not isinstance(step, dict) or (step.get("outcome") or {}).get("status") != "executed":
+            continue
+        if step.get("to_listening_id") or step.get("to_akousma_id"):
+            continue
+        if step.get("move") in _LANDING_MOVES:
+            step["to_listening_id"] = listening_id
+        elif step.get("move") == "sound":
+            step["to_akousma_id"] = akousma_id
+    return circuit
+
+
+def declared_circuit_errors(declared: Any) -> list[str]:
+    """Check a declared circuit before any listening runs (identifiers not yet known)."""
+    from akousma.listening_circuit import listening_circuit_errors
+
+    try:
+        circuit = complete_declared_circuit(declared, listening_id="lst_pending", akousma_id="akm_pending")
+    except ValueError as exc:
+        return [str(exc)]
+    return listening_circuit_errors(circuit)
+
+
+def apply_declared_circuit(record: dict[str, Any], declared: dict[str, Any]) -> None:
+    """Record the moves that produced this listening (``earworm/listening-circuit/v1``).
+
+    Like a declared lineage, a circuit is what the caller knows and Oída cannot observe: which
+    move a listening loop chose, among which offered ones, by which decider and route. It is
+    validated against the record it is written with and refused, not trimmed, when it does not fit.
+    """
+    from akousma.listening_circuit import CIRCUIT_EXTENSION, listening_circuit_errors
+
+    listenings = ((record.get("auditum") or {}).get("listenings") or [])
+    first = next((item.get("listening_id") for item in listenings if isinstance(item, dict) and item.get("listening_id")), None)
+    if first is None:
+        raise ValueError("a declared circuit needs a record with an attributable listening")
+    circuit = complete_declared_circuit(declared, listening_id=first, akousma_id=record["akousma_id"])
+    errors = listening_circuit_errors(circuit, record)
+    if errors:
+        raise ValueError("declared circuit refused: " + "; ".join(errors[:5]))
+    record.setdefault("extensions", {})[CIRCUIT_EXTENSION] = circuit
 
 
 #: Relation types the akousma schema defines. A declared lineage may only use
