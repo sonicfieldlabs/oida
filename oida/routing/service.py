@@ -513,7 +513,14 @@ def routing_router(workspace, require_admin):
 
     @router.post("/archive/visibility")
     def archive_visibility(payload: ArchiveVisibilityRequest, request: Request):
-        """Batch current archive policy checks for a private Memory page."""
+        """Batch current archive policy checks for a private Memory page.
+
+        A record's state never depends on its relations, so the states come from
+        ``archive_states`` (one query, policy applied to each) rather than from a full view of
+        each record. Khipu's station feed asks for every record it lists every few seconds
+        during a run; resolving each record's relations made those batches pile up
+        (30 October 2026).
+        """
         require_admin(request)
         if len(set(payload.ids)) != len(payload.ids) or any(
             not isinstance(identifier, str)
@@ -521,9 +528,10 @@ def routing_router(workspace, require_admin):
             for identifier in payload.ids
         ):
             raise HTTPException(400, "Choose distinct valid Auditum references")
-        from oida.routing.archive import archive_view
+        from oida.routing.archive import archive_states
 
-        return {"states": {identifier: archive_view(workspace, identifier)["view"]["state"] for identifier in payload.ids}}
+        views = archive_states(workspace, payload.ids)
+        return {"states": {identifier: views[identifier]["state"] for identifier in payload.ids}}
 
     @router.get("/inquiry/{identifier}")
     def inquiry_options(identifier: str, record_ref: list[str] = Query(default=[])):
