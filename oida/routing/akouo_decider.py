@@ -75,9 +75,13 @@ def candidate_ears(candidate: dict) -> set[str]:
     return ears
 
 
+#: Route presets whose passes transcribe speech (voice; deep runs every pass, transcription too).
+_SPEECH_PRESETS = {"voice", "deep"}
+
+
 def _speech_content(candidate: dict) -> bool:
     arguments = candidate.get("arguments") or {}
-    return arguments.get("route_preset") == "voice" or arguments.get("listening_mode") in _SPEECH_CONTENT
+    return arguments.get("route_preset") in _SPEECH_PRESETS or arguments.get("listening_mode") in _SPEECH_CONTENT
 
 
 def _purpose(candidate: dict) -> str | None:

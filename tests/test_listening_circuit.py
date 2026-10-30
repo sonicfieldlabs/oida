@@ -244,3 +244,16 @@ def test_a_declined_return_tries_a_model_other_than_the_one_that_declined():
     ]
     ctx["allowed_actions"] = ["relisten", "stop"]
     assert decide(ctx).candidate_id == "brief"
+
+
+def test_routes_that_transcribe_need_the_hosts_permission():
+    ctx = context(FOREST)
+    ctx["candidates"] = [
+        {"id": "relisten", "action": "relisten", "description": "deep", "arguments": {"route_preset": "deep"}},
+        {"id": "source_1", "action": "switch_source", "description": "another", "arguments": {"source_key": "there"}},
+        {"id": "stop", "action": "stop", "description": "stop", "arguments": {}},
+    ]
+    ctx["allowed_actions"] = ["relisten", "switch_source", "stop"]
+    assert decide(ctx).candidate_id == "source_1"
+    ctx["host_context"]["circuit"]["allow_speech_content"] = True
+    assert decide(ctx).candidate_id == "relisten"
