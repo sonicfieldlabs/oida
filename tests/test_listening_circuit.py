@@ -272,3 +272,15 @@ def test_an_akouo_listening_mode_is_its_own_ear():
     ctx["host_context"]["circuit"]["heard_listening_modes"] = ["musical-aesthetic-listening"]
     second = decide(ctx)
     assert (second.candidate_id, second.arguments["layer"]) == ("relisten_mode_0", "corrective")
+
+
+def test_the_owner_admits_the_deciders_proposals_with_their_annotations():
+    from oida.routing.service import admission_blockers
+
+    for ctx in (context(MUSIC), context(FOREST, must_move=True), context(MUSIC, heard_listening_modes=["music"])):
+        proposal = decide(ctx)
+        assert admission_blockers(ctx, proposal) == [], proposal.candidate_id
+    ctx = context(MUSIC)
+    proposal = decide(ctx)
+    changed = proposal.model_copy(update={"arguments": {**proposal.arguments, "route_preset": "voice"}})
+    assert admission_blockers(ctx, changed) == ["The proposal changed the offered execution arguments"]

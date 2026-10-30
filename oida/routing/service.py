@@ -334,6 +334,14 @@ def _read_current_record(workspace, identifier: str) -> dict:
     return record
 
 
+#: Proposal arguments that explain a move without executing it: a provider's reason and findings,
+#: and the circuit annotations the akouo decider adds (layer, targeted ear, route, reasoning,
+#: alternative reading). Every other argument must equal the offered candidate's.
+NON_EXECUTABLE_ARGUMENTS = frozenset(
+    {"reason", "summary", "confidence", "findings", "layer", "ear", "route", "reasoning", "alternative_reading"}
+)
+
+
 def admission_blockers(context: dict, proposal: DecisionProposal) -> list[str]:
     """Validate a proposal against the offered candidates and allowed actions."""
     blockers: list[str] = []
@@ -365,14 +373,12 @@ def admission_blockers(context: dict, proposal: DecisionProposal) -> list[str]:
         blockers.append("The chosen action does not match its candidate")
     else:
         executable = {
-            k: v
-            for k, v in proposal.arguments.items()
-            if k not in {"reason", "summary", "confidence", "findings"}
+            k: v for k, v in proposal.arguments.items() if k not in NON_EXECUTABLE_ARGUMENTS
         }
         expected = {
             k: v
             for k, v in candidate.get("arguments", {}).items()
-            if k not in {"reason", "summary", "confidence", "findings"}
+            if k not in NON_EXECUTABLE_ARGUMENTS
         }
         if executable != expected:
             blockers.append("The proposal changed the offered execution arguments")
