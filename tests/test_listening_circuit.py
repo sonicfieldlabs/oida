@@ -217,3 +217,11 @@ def test_the_thinking_budget_forces_a_close_then_lets_the_answer_run():
     assert not natural.forced
     with pytest.raises(ValueError):
         ThinkingBudget(2, 3, [])
+
+
+def test_a_radio_capture_carries_its_declared_circuit():
+    from oida.source_api import AcquisitionRequest
+
+    request = AcquisitionRequest(acquisition_id="acq_1", seconds=10.0, remember=True, declared_circuit=_circuit())
+    assert request.declared_circuit["run"]["source_key"] == "here"
+    assert AcquisitionRequest(acquisition_id="acq_2", seconds=10.0).declared_circuit is None

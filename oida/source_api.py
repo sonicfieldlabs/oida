@@ -11,7 +11,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -73,6 +73,9 @@ class AcquisitionRequest(BaseModel):
     # A caller's deadline (epoch seconds). The capture window and its listening both stop
     # at it, and a listening stopped there publishes nothing.
     deadline_at: float | None = None
+    # The listening loop's moves that led to this capture (earworm/listening-circuit/v1),
+    # declared by the host that runs the loop and recorded on the remembered record.
+    declared_circuit: dict[str, Any] | None = None
 
 
 class ScheduledAcquisitionRequest(AcquisitionRequest):
@@ -424,6 +427,11 @@ def source_router(
                                 else {}
                             ),
                             listening_mode=req.listening_mode,
+                            **(
+                                {"declared_circuit": req.declared_circuit}
+                                if req.declared_circuit is not None
+                                else {}
+                            ),
                             specialist_tasks=req.specialist_tasks,
                             specialist_deployments=req.specialist_deployments,
                             speech_vad=req.speech_vad,
