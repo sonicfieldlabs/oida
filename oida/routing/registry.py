@@ -41,13 +41,15 @@ def typesafe_qualification(workspace) -> tuple[bool, bool]:
 def build_decision_registry(workspace) -> dict:
     """The decision providers available right now.
 
-    ``rules`` is always available. Every registered text reasoning provider is
+    ``rules`` and ``akouo`` are always available. Every registered text reasoning provider is
     visible with its own availability so the operator can see why a choice is
     disabled; disabled or unreachable providers are never invoked. The
     TypeSafe adapter appears only when a credential is stored, and is
     selectable under Decision only — never for language reasoning.
     """
-    providers: dict[str, object] = {"rules": RulesDecisionProvider()}
+    from oida.routing.akouo_decider import AkouoDecisionProvider
+
+    providers: dict[str, object] = {"rules": RulesDecisionProvider(), "akouo": AkouoDecisionProvider()}
     settings = workspace.settings.load()
     registry = workspace.reasoning.registry_factory(settings)
     for provider_id in registry.ids():
@@ -83,7 +85,17 @@ def decision_options(workspace) -> list[dict]:
             locality="local",
             detail="Code-owned rubric over the offered candidates; no model call.",
             credential_configured=None,
-        )
+        ),
+        dict(
+            id="akouo",
+            name="AKOÚŌ · listening router",
+            kind="router",
+            enabled=True,
+            available=True,
+            locality="local",
+            detail="Orders the offered moves by what the retained account was heard as (AKOÚŌ's router) and the host's circuit: focus, correct, sound, move on. No model call.",
+            credential_configured=None,
+        ),
     ]
     typesafe_configured, typesafe_qualified = typesafe_qualification(workspace)
     options.append(

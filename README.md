@@ -2,9 +2,19 @@
 
 > **Public alpha · Open research release · Local-first · Open-source · Under active development**
 
-The 0.14.1 audit repair candidate preserves exact reasoner exposure, separates
-source reports from acoustic facts, and fixes inquiry identity and recovery.
+The 0.15.0 source lets a listening loop relisten by what it heard. A new local,
+deterministic decision provider, `akouo`, reads the retained account through
+AKOÚŌ's router (`akouo-contract` 0.13.0) and orders the offered moves: focus with
+the primary ear, correct, sound (Small Music for a musical ear, Small SFX
+otherwise), move on; a host may also choose a reasoner bounded by the same moves,
+with `akouo` as its fallback. A gateway listen may declare the circuit that
+produced it (`declared_circuit`, `earworm/listening-circuit/v1`), recorded on the
+record. MOSS Thinking passes on the embedded runtime now close their reasoning
+within a token budget, and a pass that never closed is not taken for an answer.
 It is unpublished and does not activate an owner or qualify a model.
+
+The 0.14.1 audit repair candidate preserved exact reasoner exposure, separated
+source reports from acoustic facts, and fixed inquiry identity and recovery.
 
 The 0.14.0 source adds selected research context: exact Sonic Field Discovery
 records and hand-selected local passages a reasoner may consult, shown with its
@@ -275,9 +285,9 @@ component for explicit cultivation handoffs.
 | Component | Version / contract | Role in OÍDA |
 | --- | --- | --- |
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | Local candidate `akouo-contract 0.12.1` / `akouo/v0.10` | Representation routes and complete-file scoped lifecycle beside the existing listening vocabulary and claim boundaries. |
-| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | Local candidate `akousma 0.10.1` / opt-in spec v1.9 | Exact representation custody, current shared material uses and returns beside existing audio memory. |
-| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | Local candidate `akousmata 0.9.1` | Embedded library and private inscription reader with comparison, selected export and prepared returns. |
-| OÍDA gateway | Local candidate `sonicfield-oida 0.14.1` / `oida/gateway/v0.6` plus `oida/representation-execution/v1` | Versioned primary-text execution and adoption alongside existing REST, MCP, audio and host-perception paths. |
+| [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | Local candidate `akousma 0.11.0` / opt-in spec v1.9, listening circuits | Exact representation custody, current shared material uses and returns beside existing audio memory; listening circuits and run memory. |
+| [Akousmata](https://github.com/sonicfieldlabs/akousmata) | Local candidate `akousmata 0.10.0` | Embedded library and private inscription reader with comparison, selected export and prepared returns; runs and circuits. |
+| OÍDA gateway | Local candidate `sonicfield-oida 0.15.0` / `oida/gateway/v0.6` plus `oida/representation-execution/v1` | Versioned primary-text execution and adoption alongside existing REST, MCP, audio and host-perception paths. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | Optional owner; 0.7.0 source | Explicit sound, prompt, and lineage handoff when separately installed and enabled; exact environment/owner qualification is separate. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |

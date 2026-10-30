@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.15.0 — Unreleased: relistening by what was heard
+
+- Add the `akouo` decision provider: local, deterministic, always available. It
+  reads the retained account (summaries, claims, routes and uncertainties; never
+  transcripts) through AKOÚŌ's router and orders the offered moves by an explicit
+  rubric: a station that must be left, a declined return (tried first on another
+  offered model), an undetermined or repeated account move on; otherwise focus
+  with the primary ear, then correct (the router's corrective, or the first
+  audible one when no route hears it), then sound below the recursion limit
+  (music or effects by what was heard), then a new fragment or another source.
+  Speech-content routes need the host's permission. It selects only an offered
+  candidate and adds the route, reasoning, alternative reading and target layer
+  as non-executable arguments.
+- Add an optional `circuit` to the decision context (`CircuitContext`: frame,
+  layer, depth and limit, ears and modes heard, declined, repeated, must-move,
+  prefer-stay, speech permission, station rule). Only a circuit request carries
+  AKOÚŌ's reading (`akouo_route`) and, for a local reasoner, the circuit and the
+  reading in its payload; requests without a circuit keep their journaled context
+  digests and the qualified decision prompt byte for byte.
+- `GatewayListenRequest.declared_circuit`: the moves of a listening loop that
+  produced this listening, checked before listening, completed with the new
+  listening's identifiers and validated against the record it is written with
+  (`extensions.earworm_listening_circuit`); it requires a remembered record.
+- MOSS Thinking on the embedded Transformers runtime: a logits processor closes
+  the reasoning within a token budget (the caller's, or the pass's maximum less
+  256 answer tokens) and records it in the pass's generation receipt; a budget
+  asked of any other checkpoint is still refused. `split_reasoning` reads the
+  answer after the last `</think>` even when `<think>` was opened in the prompt,
+  and a Thinking pass that never closed reached no answer rather than passing its
+  reasoning off as one.
+- Vendor akousma 0.11.0, akouo-contract 0.13.0 and akousmata 0.10.0.
+
 ## 0.14.1 — Unreleased audit repair candidate
 
 - Enforce explicit re-listen checkpoint selection through the server resolver,

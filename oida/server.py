@@ -388,6 +388,10 @@ class GatewayListenRequest(ListenEventRequest):
     # can reach it. Validated and recorded by apply_declared_lineage, which
     # refuses an unrecognised relation type rather than coercing it.
     declared_lineage: dict[str, Any] | None = None
+    # The moves of a listening loop that produced this listening, declared by the host that runs
+    # the loop (earworm/listening-circuit/v1). Validated before listening and again against the
+    # record it is written with; it requires remember.
+    declared_circuit: dict[str, Any] | None = None
     response_mode: Literal["full", "summary"] = "summary"
     ephemeral_delivery: bool = False
     operation_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$")
@@ -1516,6 +1520,7 @@ def create_app(
         human_listener_id: str | None = None,
         human_display_name: str | None = None,
         declared_lineage: dict[str, Any] | None = None,
+        declared_circuit: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Write one result through Oida's compatibility trace and the shared
         Akousmata store. The UI calls both simply "Memory"; callers still get
@@ -1654,6 +1659,7 @@ def create_app(
                 listening=listening,
                 origin=origin,
                 lineage=declared_lineage,
+                circuit=declared_circuit,
                 device=str(source.get("label") or "") or None,
                 session_id=str(session.get("id") or "") or None,
                 tags=[
@@ -3511,6 +3517,8 @@ def create_app(
 
     @app.post("/gateway/listen")
     def gateway_listen_endpoint(req: GatewayListenRequest) -> dict[str, object]:
+        if req.route_preset == "agent-native" and req.declared_circuit is not None:
+            raise HTTPException(400, "A declared circuit accompanies ordinary listening routes")
         if req.route_preset == "agent-native":
             if req.audio_model is not None:
                 raise HTTPException(
@@ -3674,6 +3682,14 @@ def create_app(
     def gateway_listen_impl(
         req: GatewayListenRequest, *, file_window=None
     ) -> dict[str, object]:
+        if req.declared_circuit is not None:
+            from oida.akousma_bridge import declared_circuit_errors
+
+            if not req.remember or req.privacy_mode == "incognito":
+                raise HTTPException(400, "A declared circuit is written with a remembered record")
+            errors = declared_circuit_errors(req.declared_circuit)
+            if errors:
+                raise HTTPException(422, "Declared circuit refused: " + "; ".join(errors[:5]))
         if req.aperture is None:
             return gateway_listen_prepared(req, file_window=file_window)
         from oida.station_aperture import prepare
@@ -3809,6 +3825,7 @@ def create_app(
                     human_display_name=req.human_display_name,
                     tags=req.tags,
                     declared_lineage=req.declared_lineage,
+                    declared_circuit=req.declared_circuit,
                 )
             trace = remembered["trace"]
         if native_analysis is not None and req.aperture.views:

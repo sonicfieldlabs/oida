@@ -215,14 +215,14 @@ wheels = [
 
 [[package]]
 name = "akouo-contract"
-version = "0.12.1"
-source = { path = "vendor/akouo_contract-0.12.1-py3-none-any.whl" }
+version = "0.13.0"
+source = { path = "vendor/akouo_contract-0.13.0-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
     { name = "referencing" },
 ]
 wheels = [
-    { filename = "akouo_contract-0.12.1-py3-none-any.whl", hash = "sha256:e67176aef00f028dc2c4448d6d59052c510952a8b0674114f2f5cb77c7a2841a" },
+    { filename = "akouo_contract-0.13.0-py3-none-any.whl", hash = "sha256:27b8e41499056268d23fe958dd40417d9e4cb772ab3d170e77ef0bb669c6fcb2" },
 ]
 
 [package.metadata]
@@ -233,14 +233,14 @@ requires-dist = [
 
 [[package]]
 name = "akousma"
-version = "0.10.1"
-source = { path = "vendor/akousma-0.10.1-py3-none-any.whl" }
+version = "0.11.0"
+source = { path = "vendor/akousma-0.11.0-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
     { name = "referencing" },
 ]
 wheels = [
-    { filename = "akousma-0.10.1-py3-none-any.whl", hash = "sha256:f3aa570f572f6e95c9ef31be3bda4bd3412998ccc58dbda688aa20057bf053e3" },
+    { filename = "akousma-0.11.0-py3-none-any.whl", hash = "sha256:3f5e086d285ac36bf80be506d85756f7934d76357cd77822e114dccf6a0e87ca" },
 ]
 
 [package.metadata]
@@ -253,8 +253,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "akousmata"
-version = "0.9.1"
-source = { path = "vendor/akousmata-0.9.1-py3-none-any.whl" }
+version = "0.10.0"
+source = { path = "vendor/akousmata-0.10.0-py3-none-any.whl" }
 dependencies = [
     { name = "akouo-contract" },
     { name = "akousma" },
@@ -265,13 +265,13 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { filename = "akousmata-0.9.1-py3-none-any.whl", hash = "sha256:6dca07c7402fc155a53bc0bfe920e9fbd3b06549038f866fc7e984fc2c0d8cfb" },
+    { filename = "akousmata-0.10.0-py3-none-any.whl", hash = "sha256:1ae55e7ba68254aa94a57579c0b4987254fdd267f30ab35b2dd2a4b8a732740d" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "akouo-contract", specifier = ">=0.12.1" },
-    { name = "akousma", specifier = ">=0.10.1" },
+    { name = "akousma", specifier = ">=0.11.0" },
     { name = "fastapi", specifier = ">=0.139" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.12,<3" },
@@ -2446,9 +2446,9 @@ songid = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'moss'", specifier = ">=1.15.0" },
-    { name = "akouo-contract", path = "vendor/akouo_contract-0.12.1-py3-none-any.whl" },
-    { name = "akousma", path = "vendor/akousma-0.10.1-py3-none-any.whl" },
-    { name = "akousmata", path = "vendor/akousmata-0.9.1-py3-none-any.whl" },
+    { name = "akouo-contract", path = "vendor/akouo_contract-0.13.0-py3-none-any.whl" },
+    { name = "akousma", path = "vendor/akousma-0.11.0-py3-none-any.whl" },
+    { name = "akousmata", path = "vendor/akousmata-0.10.0-py3-none-any.whl" },
     { name = "anyio", specifier = ">=4.14.2,<5" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13' and extra == 'songid'", specifier = ">=0.2.2" },
     { name = "fastapi", specifier = ">=0.139" },

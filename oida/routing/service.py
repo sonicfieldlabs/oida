@@ -53,7 +53,7 @@ ACTION_DESCRIPTIONS = {
 
 #: Provider ids the decision stage knows even before they are registered, so
 #: a missing credential is refused as "not available" rather than "unknown".
-KNOWN_DECISION_PROVIDERS = {"rules", "typesafe"}
+KNOWN_DECISION_PROVIDERS = {"rules", "akouo", "typesafe"}
 
 
 class ArchiveVisibilityRequest(BaseModel):
@@ -256,7 +256,8 @@ def _evidence_context(workspace, record_id: str, req: RoutingRequest, settings) 
         candidates.append(
             dict(id="stop", action="stop", description="Stop safely", arguments={})
         )
-    return {
+    circuit = req.context.circuit if req.context is not None else None
+    prepared = {
         "dependencies": dependencies,
         "record_sha256": workspace.journal.record_digest(record),
         "evidence": items,
@@ -276,8 +277,46 @@ def _evidence_context(workspace, record_id: str, req: RoutingRequest, settings) 
         "evidence_ref": evidence_ref,
         "evidence_sha256": evidence_sha256,
         "source_sha256": source_sha256,
-        "host_context": req.context.model_dump(mode="json") if req.context else None,
+        "host_context": host_context_view(req.context),
     }
+    if circuit is not None:
+        # Only a circuit request carries the router's reading, so earlier decisions keep the
+        # context digest they were journaled with.
+        prepared["akouo_route"] = account_route(items, circuit, generated=req.subject_generated)
+    return prepared
+
+
+#: Evidence kinds that make up a listening account for routing. Transcripts, memories and
+#: references are left out: the router reads what was heard, not what was said or recalled.
+ACCOUNT_KINDS = ("summary", "claim", "route", "uncertainty")
+
+
+def host_context_view(context) -> dict | None:
+    """The host context as journaled; an absent circuit is left out so earlier digests hold."""
+    if context is None:
+        return None
+    value = context.model_dump(mode="json")
+    if value.get("circuit") is None:
+        value.pop("circuit", None)
+    return value
+
+
+def account_route(items: list[dict], circuit=None, *, generated: bool = False) -> dict:
+    """AKOÚŌ's reading of the retained account, computed once so every decider sees the same."""
+    from akouo_contract.router import route_account
+
+    parts = []
+    for item in items:
+        if isinstance(item, dict) and item.get("kind") in ACCOUNT_KINDS:
+            value = item.get("value")
+            parts.append(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True))
+    account = " ".join(parts)[:8000]
+    return route_account(
+        account,
+        command=circuit.frame if circuit is not None else None,
+        heard=list(circuit.heard_modes) if circuit is not None else [],
+        generated=generated,
+    )
 
 
 def _read_current_record(workspace, identifier: str) -> dict:
