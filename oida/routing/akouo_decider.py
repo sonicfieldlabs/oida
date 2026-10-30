@@ -122,9 +122,14 @@ class AkouoDecisionProvider:
         current_source = circuit.get("source_key")
 
         def fresh(c: dict) -> bool:
-            mode = (c.get("arguments") or {}).get("listening_mode")
+            arguments = c.get("arguments") or {}
+            mode, preset = arguments.get("listening_mode"), arguments.get("route_preset")
+            if mode and mode in heard_listening:
+                return False
+            if not mode and preset and preset in heard_listening:
+                return False
             ears = candidate_ears(c)
-            return not (mode and mode in heard_listening) and not (ears and ears <= heard)
+            return not (ears and ears <= heard)
 
         def by_ear(mode: str | None) -> dict | None:
             if not mode:
@@ -144,7 +149,7 @@ class AkouoDecisionProvider:
                 return (stay or away or [None])[0]
             return (away or stay or [None])[0]
 
-        choice, layer, why = None, "general", ""
+        choice, layer, why, ear = None, "general", "", None
         if circuit.get("must_move"):
             choice = leave()
             why = f"The station rule says to move on ({circuit.get('station_rule') or 'dwell reached'})."
@@ -161,18 +166,18 @@ class AkouoDecisionProvider:
         if choice is None and not why:
             choice = by_ear(primary)
             if choice is not None:
-                layer, why = "focused", f"Focus with the primary ear, {primary}."
+                layer, why, ear = "focused", f"Focus with the primary ear, {primary}.", primary
             else:
                 # The router's corrective may be an ear no listening route hears (critical-political,
                 # for one); then the first audible corrective takes its place, and the reason says so.
-                for ear in (corrective, *AUDIBLE_CORRECTIVES):
-                    if ear == primary:
+                for target in (corrective, *AUDIBLE_CORRECTIVES):
+                    if target == primary:
                         continue
-                    choice = by_ear(ear)
+                    choice = by_ear(target)
                     if choice is not None:
-                        layer = "corrective"
-                        why = f"Check the focused reading with the corrective ear, {ear}" + (
-                            "." if ear == corrective else f", in place of {corrective}, which no offered route hears."
+                        layer, ear = "corrective", target
+                        why = f"Check the focused reading with the corrective ear, {target}" + (
+                            "." if target == corrective else f", in place of {corrective}, which no offered route hears."
                         )
                         break
         if choice is None and not why and generate and int(circuit.get("depth") or 0) < int(circuit.get("max_depth") or 0):
@@ -201,6 +206,7 @@ class AkouoDecisionProvider:
                 **(choice.get("arguments") or {}),
                 "reason": why or str(choice.get("description") or "Router move"),
                 "layer": layer,
+                "ear": ear,
                 "route": {key: route.get(key) for key in ("primary", "secondary", "corrective", "confidence", "heard_as", "router")},
                 "reasoning": reasoning or None,
                 "alternative_reading": route.get("alternative_reading"),

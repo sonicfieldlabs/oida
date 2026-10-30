@@ -225,3 +225,11 @@ def test_a_radio_capture_carries_its_declared_circuit():
     request = AcquisitionRequest(acquisition_id="acq_1", seconds=10.0, remember=True, declared_circuit=_circuit())
     assert request.declared_circuit["run"]["source_key"] == "here"
     assert AcquisitionRequest(acquisition_id="acq_2", seconds=10.0).declared_circuit is None
+
+
+def test_heard_presets_count_as_heard_and_the_targeted_ear_is_named():
+    first = decide(context(MUSIC))
+    assert first.arguments["ear"] == "musical-aesthetic-listening"
+    again = decide(context(MUSIC, heard_listening_modes=["music"]))
+    assert again.arguments.get("route_preset") != "music"
+    assert again.arguments["layer"] == "corrective" and again.arguments["ear"]
