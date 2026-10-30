@@ -257,3 +257,18 @@ def test_routes_that_transcribe_need_the_hosts_permission():
     assert decide(ctx).candidate_id == "source_1"
     ctx["host_context"]["circuit"]["allow_speech_content"] = True
     assert decide(ctx).candidate_id == "relisten"
+
+
+def test_an_akouo_listening_mode_is_its_own_ear():
+    ctx = context(MUSIC)
+    ctx["candidates"] = [
+        {"id": "relisten_mode_0", "action": "relisten", "description": "signal", "arguments": {"route_preset": "basic", "listening_mode": "signal-inspection-listening"}},
+        {"id": "relisten_mode_1", "action": "relisten", "description": "music", "arguments": {"route_preset": "basic", "listening_mode": "musical-aesthetic-listening"}},
+        {"id": "stop", "action": "stop", "description": "stop", "arguments": {}},
+    ]
+    ctx["allowed_actions"] = ["relisten", "stop"]
+    first = decide(ctx)
+    assert (first.candidate_id, first.arguments["layer"]) == ("relisten_mode_1", "focused")
+    ctx["host_context"]["circuit"]["heard_listening_modes"] = ["musical-aesthetic-listening"]
+    second = decide(ctx)
+    assert (second.candidate_id, second.arguments["layer"]) == ("relisten_mode_0", "corrective")

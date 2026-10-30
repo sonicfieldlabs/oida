@@ -70,6 +70,9 @@ def candidate_ears(candidate: dict) -> set[str]:
     mode = arguments.get("listening_mode")
     if isinstance(mode, str) and mode in MODE_EARS:
         ears |= MODE_EARS[mode]
+    elif isinstance(mode, str) and mode.endswith("-listening"):
+        # Khipu names an AKOÚŌ listening mode itself: that mode is the ear.
+        ears.add(mode)
     elif isinstance(preset, str):
         ears |= PRESET_EARS.get(preset, set())
     return ears
