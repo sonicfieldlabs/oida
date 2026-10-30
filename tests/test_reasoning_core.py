@@ -113,6 +113,22 @@ def listening_event(*, covenant: dict | None = None) -> dict:
     return event
 
 
+def test_fact_scope_preserves_measurements_and_attributed_source_reports():
+    from oida.reasoning.contracts import EvidenceItem, EvidencePacket
+
+    packet = EvidencePacket(primary_event_id="one", question="What is established?", items=[
+        EvidenceItem(ref="summary", kind="summary", value="A bell"),
+        EvidenceItem(ref="measurement", kind="feature", category="measured", source="dsp", value=-12),
+        EvidenceItem(ref="specialist", kind="feature", category="interpreted", value="A bell"),
+    ])
+    validator = ResponseValidator()
+    for ref in ("summary", "specialist"):
+        with pytest.raises(ResponseValidationError, match="requires measured evidence"):
+            validator.validate({"answer_blocks": [{"kind": "fact", "text": "A bell", "evidence_refs": [ref]}]}, packet=packet)
+    assert validator.validate({"answer_blocks": [{"kind": "fact", "text": "RMS -12 dBFS", "evidence_refs": ["measurement"]}]}, packet=packet)
+    assert validator.validate({"answer_blocks": [{"kind": "fact", "claim_scope": "source_report", "text": "The summary describes a bell", "evidence_refs": ["summary"]}]}, packet=packet)
+
+
 def test_reasoning_settings_are_local_first_and_secret_free(tmp_path: Path) -> None:
     settings = ReasoningSettings()
     assert settings.providers["local_structured"].enabled is True

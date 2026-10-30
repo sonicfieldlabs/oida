@@ -764,3 +764,47 @@ def test_global_incognito_forces_local_nonpersistent_reasoning() -> None:
             client.get("/conversation?event_id=evt_incognito_global").json()["count"]
             == 0
         )
+
+
+def test_real_app_relistener_enforces_selected_checkpoint_without_model_loading(tmp_path, monkeypatch):
+    from oida.engine_base import EngineResult, MossEngine, selected_model
+    from oida.relisten import RelistenUnavailable, TargetedRelistener
+    import pytest
+
+    for role, name in (("INSTRUCT", "MOSS-Audio-4B-Instruct"), ("THINKING", "MOSS-Audio-4B-Thinking")):
+        checkpoint = tmp_path / name
+        checkpoint.mkdir()
+        (checkpoint / "config.json").write_text("{}")
+        monkeypatch.setenv("OIDA_MOSS_" + role + "_MODEL", str(checkpoint))
+
+    class Engine(MossEngine):
+        profile = "test-local"
+        calls = 0
+        def generate(self, audio_path, prompt, settings, thinking_budget=None):
+            self.calls += 1
+            return EngineResult(text="A brief pulse; source uncertain.", model=selected_model(),
+                                profile=self.profile, settings=settings)
+    engine = Engine()
+    listeners = []
+    def capture(*args, **kwargs):
+        listener = TargetedRelistener(*args, **kwargs)
+        listeners.append(listener)
+        return listener
+    with patch("oida.server.build_engine", return_value=engine), patch("oida.server.TargetedRelistener", side_effect=capture):
+        with _Client():
+            listener = listeners[0]
+            assert callable(listener.model_resolver)
+            with tempfile.TemporaryDirectory() as tmp:
+                audio = Path(tmp)/"clip.wav"
+                audio.write_bytes(b"RIFF")
+                event = dict(id="fixture", privacy_mode="session", raw_audio_policy="external_ref",
+                             segment=dict(data_ref=dict(kind="path", uri=str(audio))))
+                for model in ("unregistered-checkpoint", "MOSS-Audio-4B-Instruct"):
+                    with pytest.raises(RelistenUnavailable):
+                        listener.run(event=event, question="Is there a pulse?", conversation_id="c", turn_id="t", model_id=model)
+                assert engine.calls == 0
+                result = listener.run(event=event, question="Is there a pulse?", conversation_id="c", turn_id="t",
+                                      model_id="MOSS-Audio-4B-Thinking")
+                assert result["model"] == listener.model_resolver("MOSS-Audio-4B-Thinking")
+                assert engine.calls == 1
+                assert selected_model() is None

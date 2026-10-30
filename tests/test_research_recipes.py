@@ -316,7 +316,7 @@ def test_explicit_local_audio_pass_uses_linked_original_without_theory_text(
         deepcopy(event) if identifier == event["id"] else None
     )
     engine = _Engine()
-    s.relistener = TargetedRelistener(engine)
+    s.relistener = TargetedRelistener(engine, model_resolver=lambda value: "MOSS-Audio-4B-Thinking" if value in {"thinking", "MOSS-Audio-4B-Thinking"} else None)
     recipe = dict(
         name="local_relisten_return",
         capabilities=["private_read", "local_relisten", "reason"],
