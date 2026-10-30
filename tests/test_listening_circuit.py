@@ -233,3 +233,14 @@ def test_heard_presets_count_as_heard_and_the_targeted_ear_is_named():
     again = decide(context(MUSIC, heard_listening_modes=["music"]))
     assert again.arguments.get("route_preset") != "music"
     assert again.arguments["layer"] == "corrective" and again.arguments["ear"]
+
+
+def test_a_declined_return_tries_a_model_other_than_the_one_that_declined():
+    ctx = context(MUSIC, declined=True, declined_model="thinking")
+    ctx["candidates"] = [
+        {"id": "deliberate", "action": "relisten", "description": "thinking", "arguments": {"listening_mode": "caption", "model_id": "thinking"}},
+        {"id": "brief", "action": "relisten", "description": "instruct", "arguments": {"listening_mode": "caption", "model_id": "instruct"}},
+        {"id": "stop", "action": "stop", "description": "stop", "arguments": {}},
+    ]
+    ctx["allowed_actions"] = ["relisten", "stop"]
+    assert decide(ctx).candidate_id == "brief"

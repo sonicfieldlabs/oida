@@ -136,11 +136,16 @@ class AkouoDecisionProvider:
                 return None
             return next((c for c in relistens if mode in candidate_ears(c) and fresh(c)), None)
 
+        declined_model = circuit.get("declined_model")
+
         def other_model() -> dict | None:
-            return next(
-                (c for c in relistens if (c.get("arguments") or {}).get("model_id") or (c.get("arguments") or {}).get("audio_model")),
-                None,
-            )
+            """A re-listening on a model other than the one that declined."""
+            for c in relistens:
+                arguments = c.get("arguments") or {}
+                model = arguments.get("model_id") or arguments.get("audio_model")
+                if model and model != declined_model:
+                    return c
+            return None
 
         def leave() -> dict | None:
             stay = [c for c in move_on if (c.get("arguments") or {}).get("source_key") == current_source]

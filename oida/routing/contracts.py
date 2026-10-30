@@ -111,6 +111,7 @@ class CircuitContext(Strict):
     heard_modes: list[str] = Field(default_factory=list, max_length=17)
     heard_listening_modes: list[str] = Field(default_factory=list, max_length=8)
     declined: bool = False
+    declined_model: str | None = Field(default=None, min_length=1, max_length=255)
     repeated: bool = False
     must_move: bool = False
     prefer_stay: bool = False
