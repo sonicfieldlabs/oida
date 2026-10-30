@@ -3,7 +3,6 @@
 from copy import deepcopy
 
 import pytest
-import torch
 
 from oida.akousma_bridge import (
     apply_declared_circuit,
@@ -204,6 +203,7 @@ def test_thinking_answers_are_separated_and_unanswered_passes_stay_empty():
 
 
 def test_the_thinking_budget_forces_a_close_then_lets_the_answer_run():
+    torch = pytest.importorskip("torch")  # the moss extras; CI runs without them
     scores = torch.zeros(1, 12)
     closer = ThinkingBudget(2, 3, [7, 8, 9], [8])
     assert closer(torch.tensor([[1, 1, 5]]), scores).min() == 0
