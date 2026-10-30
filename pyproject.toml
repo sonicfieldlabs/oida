@@ -95,3 +95,8 @@ artifacts = ["oida/static/*", "oida/schemas/*"]
 # Explicit source inputs exclude local reports, plans and operator state.
 [tool.hatch.build.targets.sdist]
 include = ["oida", "harness", "bench_adapter", "integrations", "pyproject.toml", "README.md", "LICENSE", "NOTICE", "vendor/*.whl", "vendor/SHA256SUMS", "vendor/compatibility.json", "vendor/NOTICE.md"]
+
+[tool.ruff.lint]
+# The rules ruff selected by default through 0.16. Ruff 0.17 selects many more by default;
+# adopting them is a change of its own.
+select = ["E4", "E7", "E9", "F"]
