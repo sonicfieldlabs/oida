@@ -265,7 +265,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { filename = "akousmata-0.10.0-py3-none-any.whl", hash = "sha256:1ae55e7ba68254aa94a57579c0b4987254fdd267f30ab35b2dd2a4b8a732740d" },
+    { filename = "akousmata-0.10.0-py3-none-any.whl", hash = "sha256:7c12297ddf7d40e4c579d40581d8c232ee4b55271c8362bdd5b5dc7f72f25508" },
 ]
 
 [package.metadata]
