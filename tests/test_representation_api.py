@@ -351,3 +351,37 @@ def test_stale_profile_generation_refuses_provider_and_has_a_permission_checked_
     receipt = client.get("/representations/executions/fixture_stale_generation", headers=headers)
     assert receipt.status_code == 200, receipt.text
     assert receipt.json()["status"] == "failed" and receipt.json()["provider_called"] is False
+
+
+def test_canonical_index_is_ready_before_parallel_consumers(tmp_path):
+    code = """
+import os
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from akousma import AkousmataStore
+from oida.server import create_app
+app = create_app(profile='stub')
+root = Path(os.environ['AKOUSMATA_PATH'])
+with sqlite3.connect(root / 'index.sqlite') as db:
+    columns = {row[1] for row in db.execute('PRAGMA table_info(akousmata)')}
+assert {'lat', 'lon', 'stop_decision_count', 'route_decision_count', 'record_class'} <= columns
+# These independent constructors model the watcher and request workers, without
+# starting hardware, providers, a daemon or a real network listener.
+def open_store(_):
+    with AkousmataStore(root) as store:
+        return store.conn.execute('PRAGMA table_info(akousmata)').fetchall()
+with ThreadPoolExecutor(max_workers=8) as pool:
+    assert all(list(pool.map(open_store, range(24))))
+"""
+    env = dict(os.environ)
+    env.update(
+        OIDA_DATA_DIR=str(tmp_path / "data"),
+        OIDA_AUDIO_DIR=str(tmp_path / "audio"),
+        OIDA_TRIAL_DIR=str(tmp_path / "trial"),
+        AKOUSMATA_PATH=str(tmp_path / "memory"),
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60
+    )
+    assert result.returncode == 0, result.stderr

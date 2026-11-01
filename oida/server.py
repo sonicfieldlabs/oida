@@ -681,6 +681,14 @@ def create_app(
         ) from FASTAPI_IMPORT_ERROR
 
     config = load_config(profile=profile, host=host, port=port)
+    # Migrate the shared canonical index before navigator/watchers or request
+    # workers can open it concurrently. Lazy first opens can both observe a
+    # missing column and race in the legacy check-then-ALTER migration.
+    from akousma import AkousmataStore as CanonicalAkousmataStore
+    from akousma import default_store_path as canonical_memory_root
+
+    with CanonicalAkousmataStore(canonical_memory_root()):
+        pass
     from oida.owner_journal import OwnerJournal
 
     owner_journal = OwnerJournal(config.data_dir / "owner-journal.sqlite3")
