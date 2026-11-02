@@ -1,4 +1,4 @@
-"""Audit a locked export; refuse expired or widened optional Torch exceptions."""
+"""Audit a locked export without suppressions; validate any retained historical review."""
 import argparse
 from datetime import date
 import json
@@ -24,6 +24,8 @@ def reviewed_exceptions(policy, requirements, *, today=None):
     if policy.get("contract") != "listening-stack/advisory-exceptions/v1":
         raise ValueError("Unknown advisory exception contract")
     entries = policy.get("exceptions", [])
+    if entries == []:
+        return []
     if len(entries) != 2 or {entry.get("id") for entry in entries} != REVIEWED_IDS:
         raise ValueError("Only the two explicitly reviewed advisory identities are allowed")
     torch_versions = re.findall(r"^torch==([^ ;\\\r\n]+)", requirements, re.MULTILINE)

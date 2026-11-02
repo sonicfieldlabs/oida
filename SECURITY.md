@@ -31,7 +31,26 @@ MOSS-Audio Hugging Face model lookup is disabled by default. Download weights
 into `weights/` or set `OIDA_ALLOW_HF_HUB=1` (legacy `HMM_`/`AEAR_`) explicitly.
 `HF_HUB_OFFLINE=1` always disables hub lookup.
 
-## Temporary upstream PyTorch exceptions
+## Optional native dependency candidate — 2 November 2026
+
+The source candidate uses Torch 2.13.0, TorchAudio 2.11.0 and TorchCodec 0.17.0.
+[TorchAudio's stable ABI](https://docs.pytorch.org/audio/stable/installation.html)
+supports this pair; [TorchCodec's matrix](https://github.com/pytorch/torchcodec#compatibility-with-torch-versions)
+includes Torch >=2.11 and Python 3.14. The current machine-readable policy has
+no advisory suppressions. Full locked registry audits must pass without either
+old Torch ignore flag; new findings fail CI.
+
+The added CI gate exercises generated CPU audio through encode/decode, finite
+tensors and SDK imports on macOS/Python 3.14.10. It does not download weights,
+construct a model or qualify inference, GPU/MPS behavior, human listening, or an
+installed operator environment. Existing model trust and activation gates remain.
+No operator environment is migrated by this source patch.
+
+The dated Torch 2.10 review below is historical. Its exact policy is retained
+only as a regression fixture, including refusal at expiry and on widened scope.
+It grants no exception to the replacement stack.
+
+## Historical upstream PyTorch 2.10 review
 
 The optional local runtime retains Torch and Torchaudio 2.10.0. Updating this
 pair requires separate model, dependency and accelerator qualification; this
