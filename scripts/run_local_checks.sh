@@ -9,16 +9,13 @@ uv run --extra dev pytest -q
 uv run --extra dev ruff check .
 uv run python -m compileall -q oida harness bench_adapter scripts tests
 
-# The validated MOSS runtime uses PyTorch 2.10. PYSEC-2026-139 has no patched
-# release; CVE-2025-3000 is fixed in unvalidated 2.13. Oída calls neither API.
-# Both exceptions have a review deadline in SECURITY.md.
-uv export --all-extras --no-emit-project --no-emit-local |
-  uvx --from pip-audit==2.10.1 pip-audit \
-    --requirement /dev/stdin \
-    --disable-pip \
-    --progress-spinner=off \
-    --ignore-vuln PYSEC-2026-139 \
-    --ignore-vuln CVE-2025-3000
+# Use the same unsuppressed, policy-aware audit as CI.
+audit_dir="$(mktemp -d "${TMPDIR:-/tmp}/oida-audit.XXXXXX")"
+trap 'rm -rf "$audit_dir"' EXIT
+uv export --locked --all-extras --no-emit-project --no-emit-local > "$audit_dir/dependencies.txt"
+uv run python scripts/audit_dependencies.py \
+  --requirements "$audit_dir/dependencies.txt" \
+  --output "$audit_dir/dependency-audit.json"
 
 if command -v node >/dev/null 2>&1; then
   node --check oida/static/app.js
