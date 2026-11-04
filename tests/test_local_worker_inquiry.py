@@ -31,7 +31,7 @@ def request():
 
 
 def answer(**changes):
-    block = dict(kind="fact", text="The RMS level is about -12 dBFS.", evidence_refs=["event:a:feature:rmsDbfs"])
+    block = dict(kind="fact", claim_scope="acoustic", text="The RMS level is about -12 dBFS.", evidence_refs=["event:a:feature:rmsDbfs"])
     value = dict(contract="oida/reasoning-response/v0.1", answer_blocks=[block], hypotheses=[], uncertainties=[],
                  suggested_questions=[], requested_action=None)
     value.update(changes)

@@ -178,10 +178,16 @@ def test_sglang_refuses_to_claim_an_unconfigured_thinking_budget(tmp_path: Path)
 
 
 def test_embedded_runtime_refuses_to_claim_an_unsupported_thinking_budget() -> None:
-    engine = MpsMossEngine(SimpleNamespace(moss_audio_repo=None))  # type: ignore[arg-type]
+    # Since 0.15 the embedded runtime closes a Thinking checkpoint's reasoning within a budget
+    # (engine_mps.ThinkingBudget). A budget asked of any other checkpoint is still refused, never
+    # silently ignored, which is what this audit finding protects.
+    engine = MpsMossEngine(
+        SimpleNamespace(moss_audio_repo=None, instruct_model="MOSS-Audio-4B-Instruct", thinking_model="MOSS-Audio-4B-Thinking")
+    )  # type: ignore[arg-type]
 
+    instruct = GenerationSettings(model_kind="instruct", temperature=0.1, top_p=0.9, top_k=50, max_new_tokens=128)
     with pytest.raises(EngineUnavailable, match="embedded Transformers runtime"):
-        engine.generate("unused.wav", "Describe it.", _settings(), thinking_budget=64)
+        engine.generate("unused.wav", "Describe it.", instruct, thinking_budget=64)
 
 
 def test_embedded_model_loader_requires_safetensors(tmp_path: Path, monkeypatch) -> None:

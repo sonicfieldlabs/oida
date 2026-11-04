@@ -719,6 +719,13 @@ class ReasoningOrchestrator:
                 "evidence_refs": [item.ref for item in _prepared_packet(context.packet, context.compiled).items],
                 "offered_evidence_refs": [item.ref for item in context.packet.items],
                 "withheld_evidence_refs": list(context.compiled.withheld_evidence_refs),
+                # Retain the actual bounded values, not a reconstruction from the source
+                # snapshots. Existing local-passage retention checks apply to this turn.
+                "research_evidence_shown": [
+                    item.model_dump(mode="json")
+                    for item in _prepared_packet(context.packet, context.compiled).items
+                    if item.source in {"sonicfield", "local_passage"} or item.kind == "relisten"
+                ],
                 "prompt_hash": context.compiled.prompt_hash,
                 "listening_identity": identity_block,
                 "profile_id": context.profile.id,

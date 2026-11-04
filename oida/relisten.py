@@ -5,10 +5,9 @@ import ipaddress
 import json
 import math
 import re
-import threading
 from contextlib import nullcontext
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -16,7 +15,7 @@ from urllib.parse import urlsplit
 from oida.contracts import new_id, now_iso
 from oida.covenant import CovenantStore
 from oida.dsp import audio_info
-from oida.engine_base import EngineUnavailable, MossEngine
+from oida.engine_base import EngineUnavailable, MossEngine, use_listening_model
 from oida.listening_identity import ListeningIdentitySnapshot
 from oida.pass_provenance import SourceChangedError, audio_fingerprint, file_identity
 from oida.recipes import TARGETED_RELISTEN_REASONING
@@ -42,7 +41,6 @@ class TargetedRelistener:
     engine: MossEngine
     covenant_store: CovenantStore | None = None
     model_resolver: Callable[[str], str | None] | None = None
-    _model_lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False, compare=False)
 
     def run(
         self,
@@ -183,46 +181,40 @@ class TargetedRelistener:
             if callable(policy_factory)
             else nullcontext(None)
         )
-        with policy_context as audio_policy:
-            # A selected checkpoint is a temporary override on a shared engine.
-            # Keep selection, inference, and restoration atomic across concurrent
-            # conversation turns, including turns that use the configured default.
-            with self._model_lock:
-                previous_model: str | None = None
-                switched_model = False
-                if model_id and self.model_resolver is not None:
-                    resolved = self.model_resolver(model_id)
-                    if resolved is None:
-                        raise RelistenUnavailable(f"unknown local targeted re-listen model: {model_id}")
-                    assignments = self.engine.runtime_status().get("assignments")
-                    supports_selection = isinstance(assignments, dict) and bool(assignments)
-                    if supports_selection and assignments.get("targeted_relisten"):
-                        previous_model = str(assignments["targeted_relisten"])
-                    if supports_selection:
-                        try:
-                            self.engine.set_model("targeted_relisten", resolved)
-                            switched_model = True
-                        except ValueError as exc:
-                            raise RelistenUnavailable(str(exc)) from exc
-                    elif model_id not in {"thinking", "instruct"}:
-                        raise RelistenUnavailable(
-                            f"the {self.engine.profile} engine does not support selecting checkpoint {model_id!r}"
-                        )
-                try:
-                    verify_source()
-                    from oida.research_recipes import consume
-                    consume("audio_calls")
-                    result = self.engine.generate(str(audio_path), prompt, TARGETED_RELISTEN_REASONING)
-                    verify_source()
-                except EngineUnavailable as exc:
-                    raise RelistenUnavailable(str(exc)) from exc
-                finally:
-                    if switched_model and previous_model and self.model_resolver is not None:
-                        restore = self.model_resolver(previous_model) or previous_model
-                        try:
-                            self.engine.set_model("targeted_relisten", restore)
-                        except ValueError:
-                            pass
+        resolved = None
+        selection_context = nullcontext()
+        model_context = nullcontext()
+        if model_id:
+            if self.model_resolver is None:
+                raise RelistenUnavailable("explicit re-listen model selection has no resolver")
+            resolved = self.model_resolver(model_id)
+            if resolved is None:
+                raise RelistenUnavailable(f"unknown or unsupported local targeted re-listen model: {model_id}")
+            from oida.reasoning.audio_selection import selector, use_audio_model
+            from oida.reasoning.model_catalog import find_model_spec
+            spec = find_model_spec("oida_moss", resolved)
+            if spec is not None:
+                if not spec.selectable or "targeted_relisten" not in spec.roles:
+                    raise RelistenUnavailable("selected checkpoint does not support targeted re-listening")
+                selection_context = use_audio_model(selector(spec))
+            model_context = use_listening_model(resolved)
+
+        with policy_context as audio_policy, model_context, selection_context:
+            try:
+                verify_source()
+                from oida.research_recipes import consume
+                consume("audio_calls")
+                result = self.engine.generate(str(audio_path), prompt, TARGETED_RELISTEN_REASONING)
+                verify_source()
+            except EngineUnavailable as exc:
+                raise RelistenUnavailable(str(exc)) from exc
+        if resolved is not None:
+            def matches(actual):
+                return actual == resolved or self.model_resolver(actual) == resolved
+            if not matches(result.model) or any(
+                not matches(receipt.get("model", "")) for receipt in result.pass_provenance
+            ):
+                raise RelistenUnavailable("local re-listen did not return the selected checkpoint")
         if result.unavailable_reason:
             raise RelistenUnavailable(result.unavailable_reason)
         observation = str(result.text or "").strip()

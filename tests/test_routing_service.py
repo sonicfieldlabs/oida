@@ -209,15 +209,22 @@ def test_archive_visibility_batches_current_policy(client, monkeypatch):
     c, _ = client
     calls = []
 
-    def view(workspace, identifier):
-        calls.append(identifier)
-        return {"view": {"state": "withheld" if identifier == "akm_hidden" else "available"}}
+    def states(workspace, identifiers):
+        calls.append(list(identifiers))
+        return {
+            i: {"state": "withheld" if i == "akm_hidden" else "available", "record_sha256": None}
+            for i in identifiers
+        }
 
+    def view(workspace, identifier):
+        raise AssertionError("a state needs no full view of the record and its relations")
+
+    monkeypatch.setattr("oida.routing.archive.archive_states", states)
     monkeypatch.setattr("oida.routing.archive.archive_view", view)
     response = c.post("/routing/archive/visibility", json={"ids": ["akm_one", "akm_hidden"]})
     assert response.status_code == 200
     assert response.json() == {"states": {"akm_one": "available", "akm_hidden": "withheld"}}
-    assert calls == ["akm_one", "akm_hidden"]
+    assert calls == [["akm_one", "akm_hidden"]], "one batch for the whole page"
     assert c.post("/routing/archive/visibility", json={"ids": ["akm_one", "akm_one"]}).status_code == 400
     assert c.post("/routing/archive/visibility", json={"ids": ["bad.id"]}).status_code == 400
     assert c.post("/routing/archive/visibility", json={"ids": ["akm_one"], "unused": True}).status_code == 422

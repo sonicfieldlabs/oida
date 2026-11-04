@@ -8,7 +8,7 @@ import wave
 from pathlib import Path
 
 from oida.covenant import CovenantStore
-from oida.engine_base import EngineResult, MossEngine
+from oida.engine_base import EngineResult, MossEngine, selected_model
 from oida.listening_identity import ListeningIdentitySnapshot
 from oida.recipes import THINKING_REASONING
 from oida.relisten import RELISTEN_CONTRACT, RelistenUnavailable, TargetedRelistener
@@ -55,8 +55,9 @@ class _SelectableEngine(_Engine):
         self.assignments[model_kind] = model_id
 
     def generate(self, audio_path: str, prompt: str, settings, thinking_budget=None) -> EngineResult:
-        self.model_during_generate = self.assignments[settings.model_kind]
-        return super().generate(audio_path, prompt, settings, thinking_budget)
+        from dataclasses import replace
+        self.model_during_generate = selected_model() or self.assignments[settings.model_kind]
+        return replace(super().generate(audio_path, prompt, settings, thinking_budget), model=self.model_during_generate)
 
 
 class TargetedRelistenerTests(unittest.TestCase):
@@ -205,7 +206,7 @@ class TargetedRelistenerTests(unittest.TestCase):
             engine = _Engine()
             sidecar = TargetedRelistener(
                 engine,
-                model_resolver=lambda model_id: "configured-thinking" if model_id == "thinking" else None,
+                model_resolver=lambda model_id: "MOSS-Audio-4B-Thinking" if model_id in {"thinking", "MOSS-Audio-4B-Thinking"} else None,
             ).run(
                 event=self._event(audio),
                 question="Is there a metallic impact?",
@@ -259,14 +260,66 @@ class TargetedRelistenerTests(unittest.TestCase):
             )
 
         self.assertEqual(engine.model_during_generate, "/models/deep-model")
-        self.assertEqual(
-            engine.set_calls,
-            [
-                ("targeted_relisten", "/models/deep-model"),
-                ("targeted_relisten", "/models/default-targeted"),
-            ],
-        )
+        self.assertEqual(engine.set_calls, [])
+        self.assertIsNone(selected_model())
+        self.assertEqual(engine.assignments["targeted_relisten"], "default-targeted")
         self.assertEqual(engine.assignments["thinking"], "default-thinking")
+
+    def test_explicit_selection_refuses_missing_unknown_or_unsupported_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio = Path(tmp) / "clip.wav"
+            audio.write_bytes(b"RIFF")
+            for resolver, model in ((None, "thinking"), (lambda _: None, "unknown"),
+                                    (lambda _: "MOSS-Audio-4B-Instruct", "instruct")):
+                engine = _Engine()
+                with self.subTest(model=model), self.assertRaises(RelistenUnavailable):
+                    TargetedRelistener(engine, model_resolver=resolver).run(
+                        event=self._event(audio), question="Is there a pulse?",
+                        conversation_id="c", turn_id="t", model_id=model)
+                self.assertEqual(engine.calls, [])
+
+    def test_wrong_returned_checkpoint_or_receipt_is_discarded(self):
+        from dataclasses import replace
+        for wrong_receipt in (False, True):
+            with tempfile.TemporaryDirectory() as tmp:
+                audio = Path(tmp) / "clip.wav"
+                audio.write_bytes(b"RIFF")
+                class Mismatch(_Engine):
+                    def generate(self, *args, **kwargs):
+                        result = super().generate(*args, **kwargs)
+                        return replace(result, model="/models/chosen" if wrong_receipt else "/models/wrong",
+                                       pass_provenance=[{"model": "/models/wrong"}] if wrong_receipt else [])
+                with self.assertRaisesRegex(RelistenUnavailable, "selected checkpoint"):
+                    TargetedRelistener(Mismatch(), model_resolver=lambda value: "/models/chosen" if value == "chosen" else None).run(
+                        event=self._event(audio), question="Is there a pulse?",
+                        conversation_id="c", turn_id="t", model_id="chosen")
+                self.assertIsNone(selected_model())
+
+    def test_concurrent_selections_are_request_scoped_and_leave_defaults_intact(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from dataclasses import replace
+        from threading import Barrier
+        barrier = Barrier(2)
+        class Concurrent(_SelectableEngine):
+            def generate(self, *args, **kwargs):
+                chosen = selected_model()
+                barrier.wait(timeout=5)
+                assert selected_model() == chosen
+                return replace(_Engine.generate(self, *args, **kwargs), model=chosen)
+        with tempfile.TemporaryDirectory() as tmp:
+            audio = Path(tmp) / "clip.wav"
+            audio.write_bytes(b"RIFF")
+            engine = Concurrent()
+            listener = TargetedRelistener(engine, model_resolver={"a":"/models/a", "b":"/models/b"}.get)
+            def run(name):
+                return listener.run(event=self._event(audio), question="Is there a pulse?",
+                                    conversation_id=name, turn_id=name, model_id=name)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(run, ("a", "b")))
+            self.assertEqual([r["model"] for r in results], ["/models/a", "/models/b"])
+            self.assertEqual(engine.set_calls, [])
+            self.assertEqual(engine.assignments["targeted_relisten"], "default-targeted")
+            self.assertIsNone(selected_model())
 
     def test_active_max_window_refuses_unsliced_audio_before_moss_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

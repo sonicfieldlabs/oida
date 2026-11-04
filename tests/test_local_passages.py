@@ -270,6 +270,10 @@ def test_private_context_roundtrips_in_existing_custody_then_withdrawal_withhold
     exposure = turn["research"]["local_exposure"]
     assert exposure["context_basis"] == "informed_context"
     assert exposure["prepared_reference_refs"] == exposure["reference_refs"]
+    shown = turn["audit"]["research_evidence_shown"]
+    assert [item["ref"] for item in shown] == ["context:" + exposure["reference_refs"][0]]
+    prepared = next(item for item in provider.requests[0].metadata["evidence_packet"]["items"] if item["ref"] == shown[0]["ref"])
+    assert shown[0]["value"] == prepared["value"]
     snapshot = turn["research"]["sources"][0]["local_reference"]
     assert snapshot["excerpt"].encode() in pilot["original"]
     assert "relative_path" not in json.dumps(provider.requests[0].metadata)
@@ -343,6 +347,7 @@ def test_bounded_model_cannot_cite_or_receive_a_withheld_private_item(tmp_path, 
     assert turn["research"]["local_exposure"]["withheld_reference_refs"] == [ref.reference_ref]
     assert cited not in turn["audit"]["evidence_refs"]
     assert cited in turn["audit"]["withheld_evidence_refs"]
+    assert turn["audit"]["research_evidence_shown"] == []
 
 
 def test_host_prepare_and_mislabelled_external_provider_cannot_export_local_only_context(tmp_path, pilot):

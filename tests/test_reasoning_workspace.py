@@ -85,6 +85,84 @@ def test_session_followup_and_idempotence_are_separate(workspace):
         )
 
 
+def test_long_request_ids_have_independent_execution_and_cancellation(workspace):
+    import threading
+
+    w = workspace
+    first, second = "a" * 73 + "first", "a" * 73 + "second"
+    for identifier in (first, second):
+        w.enqueue(Ask(request_id=identifier, record_id="akm_one", question="Explain"))
+    one = w.journal.get("reasoning_job", first)["operation_id"]
+    two = w.journal.get("reasoning_job", second)["operation_id"]
+    assert one != two and max(len(one), len(two)) <= 80
+    entered, release = threading.Event(), threading.Event()
+    errors = []
+
+    def run():
+        try:
+            def wait():
+                entered.set()
+                assert release.wait(5)
+                return {}
+            w.operations.run(one, wait)
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    assert entered.wait(5)
+    try:
+        assert w.cancel_job(second)["status"] == "cancelled"
+        assert not w.operations.active[one].event.is_set()
+    finally:
+        release.set()
+        worker.join(5)
+    assert not errors and w.journal.get("operation", one)["status"] == "complete"
+
+
+def test_legacy_queued_job_gets_new_identity_and_does_not_reuse_truncated_receipt(workspace):
+    w = workspace
+    identifier = "b" * 80
+    w.enqueue(Ask(request_id=identifier, record_id="akm_one", question="Explain"))
+    job = w.journal.get("reasoning_job", identifier)
+    del job["operation_id"]
+    w.save_job(job)
+    legacy = "reason_" + identifier[:73]
+    w.operations.save(legacy, "complete")
+    assert w.execute_one()
+    job = w.journal.get("reasoning_job", identifier)
+    assert job["status"] == "complete" and job["operation_id"] != legacy
+    assert w.journal.get("operation", legacy)["status"] == "complete"
+
+
+def test_owner_abandonment_prevents_late_admission_without_replaying_or_cancelling(workspace):
+    w = workspace
+    receipt = w.abandon_submission("lost")
+    assert receipt["status"] == "not_admitted" and receipt["automatic_replay"] is False
+    assert w.abandon_submission("lost") == receipt
+    with pytest.raises(HTTPException, match="explicitly abandoned"):
+        w.enqueue(Ask(request_id="lost", record_id="akm_one", question="Late arrival"))
+    assert w.journal.get("reasoning_job", "lost") is None
+    job = w.enqueue(Ask(request_id="accepted", record_id="akm_one", question="Already accepted"))
+    assert w.abandon_submission("accepted")["status"] == "queued"
+    assert w.journal.get("reasoning_abandonment", job["id"]) is None
+    assert w.execute_one()
+
+
+def test_conversation_anchor_filter_precedes_private_source_authorization(tmp_path):
+    import json
+    from oida.conversation import ConversationStore
+
+    calls = []
+    root = tmp_path / "sessions"
+    root.mkdir()
+    for identifier in ("wanted", "other"):
+        (root / (identifier + ".json")).write_text(json.dumps(dict(id=identifier, event_id=identifier, turns=[dict(research=dict(sources=[dict(kind="local_passage")]))])))
+    store = ConversationStore(root, local_passage_policy=lambda value, **kw: calls.append(value["id"]))
+    assert len(store.list(event_id="wanted")) == 1
+    assert calls == ["wanted"]
+
+
 def test_auto_future_arrivals_only_no_feedback_or_replay(workspace):
     w = workspace
     w.journal.record_reference("akm_old")
@@ -269,6 +347,7 @@ def test_strict_harness_schema_closes_all_objects_without_mutating_contract():
                 {
                     "kind": "answer",
                     "text": "Fixture",
+                    "claim_scope": "acoustic",
                     "evidence_refs": ["event:one:anchor"],
                 }
             ],

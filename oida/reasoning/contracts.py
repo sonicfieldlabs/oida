@@ -444,6 +444,7 @@ class EvidencePacket(StrictModel):
 
 class AnswerBlock(StrictModel):
     kind: Literal["answer", "fact", "interpretation", "dialogue"] = "answer"
+    claim_scope: Literal["acoustic", "source_report"] = "acoustic"
     text: str = Field(min_length=1, max_length=12_000)
     evidence_refs: list[str] = Field(default_factory=list, max_length=64)
 

@@ -82,6 +82,13 @@ class MpsMossEngine(MossEngine):
             else self.config.instruct_model
         )
 
+    def _is_thinking_checkpoint(self, model_id: str) -> bool:
+        thinking = getattr(self.config, "thinking_model", None)
+        if thinking and (model_id == thinking or (Path(str(model_id)).is_dir() and Path(str(thinking)).is_dir()
+                                                  and Path(str(model_id)).resolve() == Path(str(thinking)).resolve())):
+            return not self._roles_overlap()
+        return "thinking" in Path(str(model_id)).name.lower()
+
     def set_model(self, model_kind: str, model_id: str) -> None:
         if model_kind not in {"instruct", "thinking", "transcription", "music", "targeted_relisten"}:
             raise ValueError(f"unknown model kind: {model_kind}")
@@ -306,7 +313,7 @@ class MpsMossEngine(MossEngine):
             # mutate the dict mid-iteration (without blocking on the load lock)
             "loaded_models": [Path(model_id).name for model_id in list(self._models)],
             "device": device,
-            "thinking_budget_supported": False,
+            "thinking_budget_supported": True,
             "native_decoder": getattr(self, "_native_decoder", None),
             "role_ambiguity": self._roles_overlap(),
             "assignments": {
@@ -346,12 +353,13 @@ class MpsMossEngine(MossEngine):
         settings: GenerationSettings,
         thinking_budget: int | None = None,
     ) -> EngineResult:
-        if thinking_budget is not None:
-            if thinking_budget < 0:
-                raise ValueError("thinking_budget must be greater than or equal to zero")
+        if thinking_budget is not None and thinking_budget < 0:
+            raise ValueError("thinking_budget must be greater than or equal to zero")
+        if thinking_budget is not None and not self._is_thinking_checkpoint(self._model_id(settings)):
+            # Only a Thinking checkpoint has reasoning to close; a budget elsewhere is refused
+            # rather than silently ignored.
             raise EngineUnavailable(
-                "thinking budgets are not supported by the embedded Transformers runtime; "
-                "omit the budget or use SGLang with its configured logit processor"
+                "a thinking budget applies only to a Thinking checkpoint in the embedded Transformers runtime"
             )
         try:
             import torch
@@ -410,6 +418,30 @@ class MpsMossEngine(MossEngine):
                         "top_k": settings.top_k,
                     }
                 )
+            thinking = self._is_thinking_checkpoint(model_id)
+            budget, budget_source, closer = None, None, None
+            if thinking:
+                # A Thinking checkpoint opens its reasoning in the prompt. Without a close it can
+                # spend every token on reasoning and never answer; the budget closes it in time.
+                if thinking_budget is not None:
+                    budget, budget_source = int(thinking_budget), "caller"
+                else:
+                    budget, budget_source = max(0, settings.max_new_tokens - ANSWER_RESERVE_TOKENS), "default"
+                if budget >= settings.max_new_tokens:
+                    raise ValueError("thinking_budget must leave room for an answer within max_new_tokens")
+                encode = getattr(processor.tokenizer, "encode", None)
+                if callable(encode):
+                    closer = ThinkingBudget(
+                        int(inputs["input_ids"].shape[1]),
+                        budget,
+                        encode(THINK_CLOSE, add_special_tokens=False),
+                        encode("</think>", add_special_tokens=False),
+                    )
+                    from transformers import LogitsProcessorList
+
+                    generation_kwargs["logits_processor"] = LogitsProcessorList([closer])
+                else:
+                    budget_source = "unavailable"
             if deadline is not None:
                 remaining = deadline - time.time()
                 if remaining < 1:
@@ -450,6 +482,12 @@ class MpsMossEngine(MossEngine):
                 "stop_reason": stop,
                 "deadline_bound": deadline is not None,
                 **(
+                    {"thinking_budget": {"tokens": budget, "source": budget_source,
+                                         "forced_close": bool(closer and closer.forced)}}
+                    if budget is not None
+                    else {}
+                ),
+                **(
                     {"host_memory": {"start": memory_at_start, "end": host_memory()}}
                     if memory_at_start
                     else {}
@@ -468,7 +506,7 @@ class MpsMossEngine(MossEngine):
             wall_ms = round((time.perf_counter() - start) * 1000)
         finally:
             self._lock.release()
-        reasoning_trace, answer = split_reasoning(text)
+        reasoning_trace, answer = split_reasoning(text, thinking=thinking, stop=stop)
         return EngineResult(
             text=answer,
             model=model_id,
@@ -594,11 +632,71 @@ def _load_moss_processor(processor_cls: type, model_id: str, *, revision: str | 
     return processor_cls(tokenizer, enable_time_marker=True)
 
 
-def split_reasoning(text: str) -> tuple[str | None, str]:
-    start_tag = "<think>"
+#: Tokens kept for the answer when a Thinking pass gets no explicit budget.
+ANSWER_RESERVE_TOKENS = 256
+THINK_OPEN = "<think>"
+THINK_CLOSE = "\n</think>\n\n"
+
+
+class ThinkingBudget:
+    """Close a Thinking checkpoint's reasoning after ``budget`` new tokens, then let it answer.
+
+    The embedded Transformers runtime has no SGLang logit processor; this one does the same job.
+    Once the budget is spent and the reasoning is still open, it forces the closing tokens one at
+    a time; after the close it leaves the model alone.
+    """
+
+    def __init__(self, prompt_length: int, budget: int, close_ids: list[int], end_ids: list[int] | None = None):
+        if not close_ids:
+            raise ValueError("the reasoning close does not tokenize")
+        self.prompt_length = prompt_length
+        self.budget = budget
+        self.close_ids = list(close_ids)
+        # The bare end tag, however the model spaced it, counts as a close of its own.
+        self.end_ids = list(end_ids or close_ids)
+        self.forced = False
+
+    def _forced_prefix(self, new: list[int]) -> int:
+        for k in range(min(len(self.close_ids), len(new)), 0, -1):
+            if new[-k:] == self.close_ids[:k]:
+                return k
+        return 0
+
+    def __call__(self, input_ids, scores):
+        new = input_ids[0, self.prompt_length :].tolist()
+        if len(new) < self.budget and not self.forced:
+            return scores
+        if (self.forced and new[-len(self.close_ids):] == self.close_ids) or (not self.forced and self._closed(new)):
+            return scores
+        if self.forced and self.close_ids[-1] in new and self._forced_prefix(new) == 0:
+            return scores
+        k = self._forced_prefix(new)
+        if k >= len(self.close_ids):
+            return scores
+        self.forced = True
+        target = self.close_ids[k]
+        masked = scores.new_full(scores.shape, float("-inf"))
+        masked[:, target] = 0.0
+        return masked
+
+    def _closed(self, new: list[int]) -> bool:
+        n = len(self.end_ids)
+        return any(new[i : i + n] == self.end_ids for i in range(0, max(0, len(new) - n) + 1))
+
+
+def split_reasoning(text: str, *, thinking: bool = False, stop: str | None = None) -> tuple[str | None, str]:
+    """Separate a reasoning trace from the answer.
+
+    MOSS Thinking opens ``<think>`` in its prompt, so its output usually holds only the close.
+    The answer is what follows the last ``</think>``. A Thinking pass that never closed its
+    reasoning reached no answer: its text is the trace and the answer is empty, rather than the
+    trace standing in for an answer.
+    """
     end_tag = "</think>"
-    if start_tag in text and end_tag in text:
-        start = text.index(start_tag) + len(start_tag)
-        end = text.index(end_tag)
-        return text[start:end].strip(), text[end + len(end_tag) :].strip()
+    if end_tag in text:
+        head, _, answer = text.rpartition(end_tag)
+        reasoning = head.split(THINK_OPEN, 1)[-1].strip()
+        return reasoning or None, answer.replace(THINK_OPEN, "").strip()
+    if THINK_OPEN in text or (thinking and stop == "max_new_tokens"):
+        return text.split(THINK_OPEN, 1)[-1].strip() or None, ""
     return None, text.strip()

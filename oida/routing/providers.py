@@ -129,6 +129,16 @@ class TextDecisionProvider:
                 question.model_dump(mode="json") for question in questions or []
             ],
         }
+        circuit = (context.get("host_context") or {}).get("circuit")
+        if circuit:
+            # Only a circuit request carries these, so the qualified decision path is unchanged.
+            payload["akouo_route"] = context.get("akouo_route")
+            payload["circuit"] = circuit
+            payload["circuit_guidance"] = (
+                "akouo_route is AKOÚŌ's reading of the account (primary, secondary and corrective "
+                "ears); circuit says where the listening loop stands. Weigh both and keep within "
+                "the offered candidates."
+            )
         selected_model = (settings.model_id if settings else None) or self.model_id
         locality = self.adapter.locality(self.provider_id, selected_model)
         locality = getattr(locality, "value", locality)

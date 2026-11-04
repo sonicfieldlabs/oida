@@ -179,3 +179,23 @@ P7 owns installed cohort qualification; P8/P9 own evaluation/training;
 P10/P11 own website and release work. Current source tests or public retrieval
 reads do not qualify those later outcomes. Application source changes are not
 inside the already pinned companion wheels and do not restart the live daemon.
+
+## Audit repair provenance and recovery
+
+The 0.14.1 candidate retains `audit.research_evidence_shown`: the exact bounded
+reference and re-listen values present in the prepared packet. Existing passage
+retention and current-access checks govern the containing turn. It is not a
+reconstruction from the full source snapshots.
+
+`AnswerBlock.claim_scope` defaults to `acoustic`. An acoustic `fact` requires
+cited measured evidence; model summaries and specialist interpretations cannot
+alone establish it. An attributed statement about a source uses
+`claim_scope: source_report`. This structural distinction does not verify the
+truth of prose or replace listening and human review.
+
+`POST /reasoning/workspace/jobs/{id}/abandon` resolves an uncertain submission
+under the same lock as admission. It returns an existing job or durably closes
+an unadmitted ID. A late `/ask` with that ID is refused; it is never replayed.
+Only explicit new submissions receive a new identity. Legacy jobs remain stored;
+queued legacy jobs receive a full-ID digest before execution, while ambiguous
+running legacy identities require restart reconciliation.

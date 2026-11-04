@@ -266,6 +266,8 @@ class Workspace:
 
     def enqueue(self, req, mode="manual"):
         with self.lock:
+            if self.journal.get("reasoning_abandonment", req.request_id):
+                raise HTTPException(409, "Inquiry request was explicitly abandoned before admission")
             if req.local_passages:
                 if not req.scope.local_passages or mode != "manual":
                     raise HTTPException(409, "Local passages require explicit manual context scope")
@@ -342,6 +344,7 @@ class Workspace:
                 raise HTTPException(409,"Preview the exact recipe selection before dispatch")
             job = dict(
                 id=req.request_id,
+                operation_id="reason_" + hashlib.sha256(req.request_id.encode()).hexdigest(),
                 status="queued",
                 mode=mode,
                 record_id=req.record_id,
@@ -599,7 +602,11 @@ class Workspace:
                     if actual != expected:
                         raise HTTPException(409, "Retrieved memory evidence changed")
             with bounded(budget) if budget else nullcontext():
-                result = self.operations.run("reason_" + job["id"][:73], run, recheck=recheck, deadline_at=job.get("deadline_at",job["request"].get("deadline_at")))
+                # Old queued jobs acquire an unambiguous identity before they execute.
+                operation_id = job.get("operation_id") or "reason_" + hashlib.sha256(job["id"].encode()).hexdigest()
+                if not job.get("operation_id"):
+                    self.save_job({**(self.journal.get("reasoning_job", job["id"]) or job), "operation_id": operation_id})
+                result = self.operations.run(operation_id, run, recheck=recheck, deadline_at=job.get("deadline_at",job["request"].get("deadline_at")))
             self.save_job(
                 {
                     **(self.journal.get("reasoning_job",job["id"]) or job),
@@ -625,15 +632,35 @@ class Workspace:
             )
         return True
 
+    def abandon_submission(self, identifier):
+        """Resolve an uncertain submission without racing a late arrival or replaying it."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", identifier):
+            raise HTTPException(422, "Invalid inquiry identity")
+        with self.lock:
+            job = self.journal.get("reasoning_job", identifier)
+            if job is not None:
+                return self.public_job(job)
+            receipt = self.journal.get("reasoning_abandonment", identifier)
+            if receipt is None:
+                receipt = dict(contract="oida/inquiry-abandonment/v1", id=identifier,
+                               status="not_admitted", created_at=now_iso(), automatic_replay=False)
+                self.journal.save("reasoning_abandonment", identifier, receipt)
+            return receipt
+
     def cancel_job(self, identifier):
         with self.lock:
             job = self.journal.get("reasoning_job", identifier)
             if job is None:
                 raise HTTPException(404, "Inquiry job not found")
             if job["status"] in {"queued", "running"}:
-                operation_id = "reason_" + identifier[:73]
-                accepted = self.operations.cancel(operation_id)
-                operation = self.journal.get("operation", operation_id) or {}
+                operation_id = job.get("operation_id")
+                # Legacy running jobs are reconciled on startup. A truncated legacy
+                # receipt cannot establish which request it belongs to, so never send
+                # cancellation to that guessed identity.
+                if operation_id is None and job["status"] == "running":
+                    raise HTTPException(409, "Legacy inquiry needs restart reconciliation before cancellation")
+                accepted = self.operations.cancel(operation_id) if operation_id else False
+                operation = (self.journal.get("operation", operation_id) or {}) if operation_id else {}
                 if not accepted and operation.get("status") in {"committing", "complete"}:
                     return self.public_job(job)
                 job.update(cancel_requested=True, status="cancelled" if job["status"] == "queued" else job["status"])
@@ -818,6 +845,11 @@ def workspace_router(
     def cancel_job(identifier: str, request: Request):
         require_admin(request)
         return workspace.cancel_job(identifier)
+
+    @router.post("/jobs/{identifier}/abandon")
+    def abandon_submission(identifier: str, request: Request):
+        require_admin(request)
+        return workspace.abandon_submission(identifier)
 
     @router.post("/automatic")
     def automatic(req: Automatic, request: Request):
