@@ -14,10 +14,10 @@ registry_requirements = runpy.run_path(str(ROOT / "scripts/audit_dependencies.py
 
 
 def policy():
-    return json.loads((ROOT / "advisory-exceptions.json").read_text())
+    return json.loads((ROOT / "tests/fixtures/torch-2.10-advisory-policy.json").read_text())
 
 
-def test_current_review_is_exact_and_expires_at_its_deadline():
+def test_historical_review_is_exact_and_expires_at_its_deadline():
     value = policy()
     reviewed = date.fromisoformat(value["exceptions"][0]["reviewed_on"])
     assert reviewed_exceptions(value, "torch==2.10.0\n", today=reviewed) == ["CVE-2025-3000", "PYSEC-2026-139"]
@@ -66,3 +66,32 @@ def test_git_source_review_cannot_hide_registry_or_changed_dependencies():
         registry_requirements(value, "torch==2.10.0\n", today=reviewed)
     with pytest.raises(ValueError, match="expired"):
         registry_requirements(value, requirements, today=date.fromisoformat(entry["expires_on"]))
+
+
+def test_no_exception_policy_does_not_suppress_audit_failures(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    current = json.loads((ROOT / "advisory-exceptions.json").read_text())
+    assert current["exceptions"] == []
+    assert reviewed_exceptions(current, "torch==2.13.0\n") == []
+    requirements = tmp_path / "dependencies.txt"
+    requirements.write_text("torch==2.13.0\n")
+    output = tmp_path / "audit.json"
+    module = runpy.run_path(str(ROOT / "scripts/audit_dependencies.py"))
+    main = module["main"]
+    calls = []
+
+    def failed_audit(command, **kwargs):
+        calls.append(command)
+        assert "--ignore-vuln" not in command
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(sys, "argv", ["audit", "--requirements", str(requirements), "--output", str(output)])
+    monkeypatch.setattr(subprocess, "run", failed_audit)
+    # Source-review expiry is tested separately; this test targets audit failure propagation.
+    monkeypatch.setitem(main.__globals__, "registry_requirements", lambda policy, text: (text, []))
+    assert main() == 1
+    assert len(calls) == 1
+    assert output.with_suffix(".requirements.txt").read_text() == "torch==2.13.0\n"
