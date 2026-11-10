@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.1 — Unreleased
+
+- The caption and analysis sanity check declines short fragments of unstable
+  decoding as well as long ones. A text of any length is discarded when it holds
+  the replacement character, more than 5 % of its letters outside the Latin
+  script, a word that mixes scripts or fuses a letter with a pictographic symbol,
+  words fused by a dot or a lower-case run fused to capitals, or one punctuation
+  mark repeated six times or more; prose of fewer than four words that does not
+  end like a sentence is a fragment. Answers to a question may still be short.
+  Hyphens no longer count as words in the long-text ratio. Transcripts are not
+  checked, as before.
+
 ## 0.15.0 — Unreleased: relistening by what was heard
 
 - Add the `akouo` decision provider: local, deterministic, always available. It
