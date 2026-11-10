@@ -36,6 +36,13 @@ uv run hf download OpenMOSS-Team/MOSS-Audio-4B-Thinking \
   --local-dir weights/MOSS-Audio-4B-Thinking
 ```
 
+To bring an existing environment that hears with MOSS up to date, use
+`scripts/sync_operator.sh` rather than `uv sync`. The MOSS stack is the `moss` extra, so
+`uv sync --locked` alone uninstalls torch from such an environment. The script always passes
+`--extra moss`, refuses while an Oída server runs from `.venv`, and prints the stack's versions
+afterwards; `--dry-run` shows what would change. With the locked stack (torch 2.13.0, torchcodec
+0.17.0), Homebrew's FFmpeg 8 and 9 both decode.
+
 The released MOSS-Audio checkpoints are public Apache-2.0 downloads. A Hugging
 Face login is not normally needed for these four repositories. Review the
 exact upstream model card before use.
