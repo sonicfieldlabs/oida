@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -82,26 +83,86 @@ DEGENERATE_NOTE = (
 )
 
 
-def looks_degenerate(text: str | None) -> bool:
+_DOTTED_WORDS_RE = re.compile(r"\b[a-z]{3,}\.[a-z]{3,}\b")
+_FUSED_CASE_RE = re.compile(r"[a-z]{2,}[A-Z]{3,}")
+_PUNCTUATION_RUN_RE = re.compile(r"([^\w\s])\1{5,}")
+_ENDS_LIKE_A_SENTENCE_RE = re.compile(r"[.!?\u2026:;)\]\"'\u201d\u2019]\s*$")
+_WORDISH = set(" .,;:'\"!?()")
+#: The share of letters outside the Latin script above which caption prose is token soup.
+_FOREIGN_LETTER_SHARE = 0.05
+#: A sentence begun this way and abandoned within fewer words than this is a fragment.
+_MIN_ACCOUNT_WORDS = 4
+_SENTENCE_OPENINGS = {"a", "an", "the", "this"}
+
+
+def _script(character: str) -> str:
+    if character == "\u00b5":  # the micro sign is written in Latin measurements ("µs")
+        return "LATIN"
+    try:
+        return unicodedata.name(character).split(" ", 1)[0]
+    except ValueError:
+        return "UNKNOWN"
+
+
+def looks_degenerate(text: str | None, *, allow_short: bool = False) -> bool:
     """Detect token-soup output (mixed-script garbage from unstable decoding).
 
-    Legitimate captions are overwhelmingly ASCII English; a transcript may
-    legitimately be non-English, so this guard is only applied to caption /
-    analysis prose, never to transcripts.
+    Legitimate captions are overwhelmingly English in the Latin script; a transcript may
+    legitimately be non-English, so this guard is only applied to caption / analysis prose
+    and answers, never to transcripts. Unstable decoding also produces short fragments
+    ("A 意", "The audio\ufffd", "An audio k\u0131sm\u0131"), so length alone never exempts a
+    text. Each rule below declines a text on its own:
+
+    * the replacement character;
+    * more than 5 % of its letters outside the Latin script (the micro sign counts as Latin);
+    * one word mixing scripts, or fusing a letter with a pictographic symbol;
+    * words fused by a dot ("audio.upload"), lower case fused to capitals ("audioATORY"),
+      or one punctuation mark repeated six times or more;
+    * a sentence begun with "A", "An", "The" or "This" and abandoned within three words
+      ("A radio", "An audio k\u0131sm\u0131"); a short caption such as "Steady hum" is kept, and
+      ``allow_short`` lifts the rule for answers to a question;
+    * at 48 characters or more, less than 72 % of its characters ASCII letters, digits,
+      spaces or sentence punctuation (hyphens are not counted as words).
     """
     if not text:
         return False
     stripped = text.strip()
-    if len(stripped) < 48:
+    if not stripped:
         return False
-    if "�" in stripped:
+    if "\ufffd" in stripped:
         return True
-    ascii_wordish = sum(1 for ch in stripped if ch.isascii() and (ch.isalnum() or ch in " .,;:'\"!?()-"))
-    return (ascii_wordish / len(stripped)) < 0.72
+    letters = [ch for ch in stripped if ch.isalpha()]
+    foreign = [ch for ch in letters if _script(ch) != "LATIN"]
+    if letters and len(foreign) / len(letters) > _FOREIGN_LETTER_SHARE:
+        return True
+    for word in stripped.split():
+        if len({_script(ch) for ch in word if ch.isalpha()}) > 1:
+            return True
+        if any(ch.isalpha() for ch in word) and any(unicodedata.category(ch) == "So" for ch in word):
+            return True
+    if (
+        _DOTTED_WORDS_RE.search(stripped)
+        or _FUSED_CASE_RE.search(stripped)
+        or _PUNCTUATION_RUN_RE.search(stripped)
+    ):
+        return True
+    words = stripped.split()
+    if (
+        not allow_short
+        and len(words) < _MIN_ACCOUNT_WORDS
+        and words[0].lower() in _SENTENCE_OPENINGS
+        and not _ENDS_LIKE_A_SENTENCE_RE.search(stripped)
+    ):
+        return True
+    if len(stripped) >= 48:
+        wordish = sum(1 for ch in stripped if ch.isascii() and (ch.isalnum() or ch in _WORDISH))
+        if wordish / len(stripped) < 0.72:
+            return True
+    return False
 
 
-def _guard_prose(text: str | None) -> tuple[str | None, str | None]:
-    if looks_degenerate(text):
+def _guard_prose(text: str | None, *, allow_short: bool = False) -> tuple[str | None, str | None]:
+    if looks_degenerate(text, allow_short=allow_short):
         return None, DEGENERATE_NOTE
     return text, None
 
@@ -228,7 +289,7 @@ def qa(engine: MossEngine, path: str, question: str, thinking_budget: int | None
     context_block = f"\nConversation context:\n{context.strip()}\n" if context and context.strip() else ""
     recipe = get_recipe("qa", question=question, context_block=context_block)
     result = _bound_helper(engine, path).generate(path, recipe.prompt, recipe.settings, thinking_budget=thinking_budget)
-    answer, sanity_note = _guard_prose(result.text)
+    answer, sanity_note = _guard_prose(result.text, allow_short=True)
     return QaItem(question=question, answer=answer or (sanity_note or ""), reasoning_trace=result.reasoning_trace, thinking_budget=thinking_budget), result
 
 

@@ -2,6 +2,10 @@
 
 > **Public alpha · Open research release · Local-first · Open-source · Under active development**
 
+The 0.15.1 source declines short fragments of unstable decoding in captions,
+not only long ones, and names local passage corpora in the operator's
+configuration rather than in source.
+
 The 0.15.0 source lets a listening loop relisten by what it heard. A new local,
 deterministic decision provider, `akouo`, reads the retained account through
 AKOÚŌ's router (`akouo-contract` 0.13.0) and orders the offered moves: focus with
@@ -287,7 +291,7 @@ component for explicit cultivation handoffs.
 | [AKOÚŌ](https://github.com/sonicfieldlabs/akouo) | Local candidate `akouo-contract 0.12.1` / `akouo/v0.10` | Representation routes and complete-file scoped lifecycle beside the existing listening vocabulary and claim boundaries. |
 | [Earworm / Akousma](https://github.com/sonicfieldlabs/earworm) | Local candidate `akousma 0.11.0` / opt-in spec v1.9, listening circuits | Exact representation custody, current shared material uses and returns beside existing audio memory; listening circuits and run memory. |
 | [Akousmata](https://github.com/sonicfieldlabs/akousmata) | Local candidate `akousmata 0.10.0` | Embedded library and private inscription reader with comparison, selected export and prepared returns; runs and circuits. |
-| OÍDA gateway | Local candidate `sonicfield-oida 0.15.0` / `oida/gateway/v0.6` plus `oida/representation-execution/v1` | Versioned primary-text execution and adoption alongside existing REST, MCP, audio and host-perception paths. |
+| OÍDA gateway | Local candidate `sonicfield-oida 0.15.1` / `oida/gateway/v0.6` plus `oida/representation-execution/v1` | Versioned primary-text execution and adoption alongside existing REST, MCP, audio and host-perception paths. |
 | [GERM](https://github.com/sonicfieldlabs/germ) | Optional owner; 0.7.0 source | Explicit sound, prompt, and lineage handoff when separately installed and enabled; exact environment/owner qualification is separate. |
 | [Algophony](https://github.com/sonicfieldlabs/algophony) | 0.5.2 integration | Batch evaluation can consume the same AKOÚŌ reports and Earworm context. |
 | [ORAM](https://github.com/sonicfieldlabs/oram) | 0.4.1 | ORAM recordings and exports can be listened and remembered through the normal file surface; no special adapter is required. |
