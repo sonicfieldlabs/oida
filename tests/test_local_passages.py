@@ -42,7 +42,7 @@ def pilot(tmp_path):
     source.write_bytes(original)
     start, end = len(b"Header\n"), len(original) - len(b"Footer\n")
     entry = CatalogEntry.model_validate(dict(
-        passage_id="p-01", corpus="sonicbrain", relative_path="work.md",
+        passage_id="p-01", corpus="wiki", relative_path="work.md",
         work_ref="work:fixture", title="Synthetic work", creators=["Fixture author"],
         year="2026", language="es", edition="Synthetic edition, not a wiki book",
         locator=dict(format="PDF-derived text", first_line=2, last_line=3,
@@ -77,7 +77,7 @@ def pilot(tmp_path):
         return SelectedPassage(passage_id=entry.passage_id, expected_source_sha256=entry.source_sha256,
                                expected_excerpt_sha256=entry.excerpt_sha256,
                                terms_revision=declaration["revision"] if declaration else "missing", **kwargs)
-    local = LocalPassages(manifest, roots={"sonicbrain": root}, terms_factory=terms_factory)
+    local = LocalPassages(manifest, roots={"wiki": root}, terms_factory=terms_factory)
     return dict(local=local, entry=entry, source=source, original=original,
                 catalog=catalog, manifest=manifest, grant=grant, selection=selection,
                 terms_factory=terms_factory, clock=clock)
@@ -191,7 +191,7 @@ def test_source_must_still_be_regular_exact_bytes_inside_selected_root(pilot, ki
         root = p["source"].parent
         link = root.with_name("root-link")
         link.symlink_to(root, target_is_directory=True)
-        p["local"].roots["sonicbrain"] = link
+        p["local"].roots["wiki"] = link
     with pytest.raises(LocalPassageDenied):
         p["local"].read(p["selection"]())
 
@@ -428,7 +428,10 @@ def test_mounted_owner_private_routes_and_conversation_reads_recheck_uses(tmp_pa
     monkeypatch.setenv("OIDA_LOCAL_PASSAGES_MANIFEST", str(pilot["manifest"]))
     monkeypatch.setenv("AKOUSMATA_PATH", str(tmp_path / "unused-default-store"))
     monkeypatch.setenv("AKOUSMATA_WATCHER", "0")
-    monkeypatch.setattr(module, "ROOTS", pilot["local"].roots)
+    roots_file = tmp_path / "roots.json"
+    roots_file.write_text(json.dumps({"contract": "oida/local-passage-roots/v1",
+                                      "corpora": {k: str(v) for k, v in pilot["local"].roots.items()}}))
+    monkeypatch.setenv("OIDA_LOCAL_PASSAGES_ROOTS", str(roots_file))
     monkeypatch.setattr(module, "shared_terms", lambda actor: pilot["terms_factory"]())
     app = create_app(profile="stub")
     client = TestClient(app, base_url="http://127.0.0.1")
@@ -452,3 +455,33 @@ def test_mounted_owner_private_routes_and_conversation_reads_recheck_uses(tmp_pa
     pilot["grant"](USE, active=False)
     assert client.get("/conversation/" + identifier).status_code == 423
     assert client.get("/conversation").json()["conversations"] == []
+
+
+def test_corpora_come_from_the_operators_file(tmp_path, monkeypatch):
+    from oida.local_passages import ROOTS_CONTRACT, configured_roots
+
+    folder = tmp_path / "wiki"
+    folder.mkdir()
+    good = tmp_path / "roots.json"
+    good.write_text(json.dumps({"contract": ROOTS_CONTRACT, "corpora": {
+        "wiki": str(folder), "Bad Key": str(folder), "notes": "relative/folder"}}))
+    assert configured_roots(good) == {"wiki": folder}
+    assert configured_roots(tmp_path / "absent.json") == {}
+    wrong = tmp_path / "wrong.json"
+    wrong.write_text(json.dumps({"contract": "other", "corpora": {"wiki": str(folder)}}))
+    assert configured_roots(wrong) == {}
+    monkeypatch.setenv("OIDA_LOCAL_PASSAGES_ROOTS", str(good))
+    assert LocalPassages.from_environment().roots == {"wiki": folder}
+
+
+def test_no_configuration_offers_no_corpus(tmp_path, monkeypatch):
+    monkeypatch.setenv("OIDA_LOCAL_PASSAGES_ROOTS", str(tmp_path / "absent.json"))
+    assert LocalPassages.from_environment().roots == {}
+    assert LocalPassages().roots == {}
+
+
+def test_a_corpus_the_operator_did_not_name_is_refused(pilot):
+    pilot["grant"](READ)
+    pilot["local"].roots.clear()
+    with pytest.raises(LocalPassageDenied):
+        pilot["local"].read(pilot["selection"]())
