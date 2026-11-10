@@ -35,6 +35,10 @@ with no file, or a file that does not validate, no corpus is offered and every
 local passage is refused. A catalog entry's `corpus` must be one of these keys,
 and the catalog itself must live outside every named folder.
 
+Name each folder by its real path. Passages are read without following symbolic
+links at any step of the path, so a folder reached through a link (for example a
+folder moved to another volume and linked back) is refused.
+
 A catalog entry names an exact relative file, original SHA-256 and byte count,
 one start-inclusive/end-exclusive UTF-8 byte interval, and its excerpt SHA-256.
 It retains original language, creators, year, edition, complete line bounds,
