@@ -4,7 +4,7 @@ Oída can consult explicit local passages as subject-bound research context. Thi
 is an optional source implementation. It does not activate a running owner,
 index a wiki, ingest books, create material grants or write a canonical account.
 The public Discovery and existing Akousmata-generated wiki scopes remain
-separate. Neither scope searches ALEPH or SonicBrain automatically.
+separate. Neither scope searches a local wiki automatically.
 
 ## Catalog and selection
 
@@ -15,14 +15,29 @@ contract is `oida/local-passage-catalog/v1`; the Pydantic `Catalog` and
 The private phase packet supplies a metadata-only pilot catalog, never packaged
 research text. Configuring a catalog does not authorize any material use.
 
-The four corpus keys resolve under the current operator's home:
+The operator names the corpora, and source code names none. A corpus is a key
+and a read-only folder in a small JSON file: `OIDA_LOCAL_PASSAGES_ROOTS` names it,
+or else it is `local-passages/roots.json` in Oída's data directory.
 
-| Corpus | Read-only source root |
-| --- | --- |
-| `aleph` | `Documents/CHIXI/ALEPH/wiki` |
-| `sonicbrain` | `Documents/SFL/sonicbrain` |
-| `listeningmd` | `Documents/SFL/listeningmd` |
-| `akdraft` | `Documents/SFL/akdraft` |
+```json
+{
+  "contract": "oida/local-passage-roots/v1",
+  "corpora": {
+    "wiki": "/absolute/path/to/a/wiki",
+    "notes": "/absolute/path/to/notes"
+  }
+}
+```
+
+A key is lower-case letters, digits, `-` and `_` (at most 40, starting with a
+letter), and a folder is an absolute path. Entries that do not fit are ignored;
+with no file, or a file that does not validate, no corpus is offered and every
+local passage is refused. A catalog entry's `corpus` must be one of these keys,
+and the catalog itself must live outside every named folder.
+
+Name each folder by its real path. Passages are read without following symbolic
+links at any step of the path, so a folder reached through a link (for example a
+folder moved to another volume and linked back) is refused.
 
 A catalog entry names an exact relative file, original SHA-256 and byte count,
 one start-inclusive/end-exclusive UTF-8 byte interval, and its excerpt SHA-256.

@@ -12,6 +12,12 @@
   "Steady hum" are kept, and answers to a question may still be short.
   Hyphens no longer count as words in the long-text ratio. Transcripts are not
   checked, as before.
+- Local passage corpora are named by the operator, not in source. A JSON file
+  (`OIDA_LOCAL_PASSAGES_ROOTS`, else `local-passages/roots.json` in the data
+  directory, contract `oida/local-passage-roots/v1`) maps each corpus key to an
+  absolute read-only folder; with none, no corpus is offered. A catalog entry's
+  `corpus` is any key that file defines, and a passage in an unnamed corpus is
+  refused like any other denial.
 
 ## 0.15.0 — Unreleased: relistening by what was heard
 
