@@ -25,8 +25,15 @@ def test_short_sentence_is_an_account_and_short_fragment_is_not():
     assert looks_degenerate("An audio kısmı")
 
 
+def test_short_captions_are_kept_and_abandoned_sentences_are_not():
+    for caption in ("Steady hum", "Segment 1", "Silence", "Low drone, hiss"):
+        assert not looks_degenerate(caption)
+    for fragment in ("A radio", "The audio", "An audio track"):
+        assert looks_degenerate(fragment)
+
+
 def test_answers_to_a_question_may_be_short():
-    for answer in ("Yes", "No", "Two", "Silence"):
+    for answer in ("A dog", "The left one"):
         assert looks_degenerate(answer)
         assert not looks_degenerate(answer, allow_short=True)
         assert _guard_prose(answer, allow_short=True) == (answer, None)

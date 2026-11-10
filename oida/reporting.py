@@ -90,8 +90,9 @@ _ENDS_LIKE_A_SENTENCE_RE = re.compile(r"[.!?\u2026:;)\]\"'\u201d\u2019]\s*$")
 _WORDISH = set(" .,;:'\"!?()")
 #: The share of letters outside the Latin script above which caption prose is token soup.
 _FOREIGN_LETTER_SHARE = 0.05
-#: Fewer words than this, without a sentence's ending, is a fragment rather than an account.
+#: A sentence begun this way and abandoned within fewer words than this is a fragment.
 _MIN_ACCOUNT_WORDS = 4
+_SENTENCE_OPENINGS = {"a", "an", "the", "this"}
 
 
 def _script(character: str) -> str:
@@ -117,8 +118,9 @@ def looks_degenerate(text: str | None, *, allow_short: bool = False) -> bool:
     * one word mixing scripts, or fusing a letter with a pictographic symbol;
     * words fused by a dot ("audio.upload"), lower case fused to capitals ("audioATORY"),
       or one punctuation mark repeated six times or more;
-    * prose of fewer than four words that does not end like a sentence (``allow_short``
-      lifts this for answers to a question, where "Yes" is an answer);
+    * a sentence begun with "A", "An", "The" or "This" and abandoned within three words
+      ("A radio", "An audio k\u0131sm\u0131"); a short caption such as "Steady hum" is kept, and
+      ``allow_short`` lifts the rule for answers to a question;
     * at 48 characters or more, less than 72 % of its characters ASCII letters, digits,
       spaces or sentence punctuation (hyphens are not counted as words).
     """
@@ -144,9 +146,11 @@ def looks_degenerate(text: str | None, *, allow_short: bool = False) -> bool:
         or _PUNCTUATION_RUN_RE.search(stripped)
     ):
         return True
+    words = stripped.split()
     if (
         not allow_short
-        and len(stripped.split()) < _MIN_ACCOUNT_WORDS
+        and len(words) < _MIN_ACCOUNT_WORDS
+        and words[0].lower() in _SENTENCE_OPENINGS
         and not _ENDS_LIKE_A_SENTENCE_RE.search(stripped)
     ):
         return True

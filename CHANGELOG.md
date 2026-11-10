@@ -7,8 +7,9 @@
   the replacement character, more than 5 % of its letters outside the Latin
   script, a word that mixes scripts or fuses a letter with a pictographic symbol,
   words fused by a dot or a lower-case run fused to capitals, or one punctuation
-  mark repeated six times or more; prose of fewer than four words that does not
-  end like a sentence is a fragment. Answers to a question may still be short.
+  mark repeated six times or more; a sentence begun with an article or "This"
+  and abandoned within three words is a fragment. Short captions such as
+  "Steady hum" are kept, and answers to a question may still be short.
   Hyphens no longer count as words in the long-text ratio. Transcripts are not
   checked, as before.
 
