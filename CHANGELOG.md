@@ -18,6 +18,10 @@
   absolute read-only folder; with none, no corpus is offered. A catalog entry's
   `corpus` is any key that file defines, and a passage in an unnamed corpus is
   refused like any other denial.
+- `scripts/sync_operator.sh` is the way to sync an environment that hears with
+  MOSS: it always keeps the `moss` extra (a plain `uv sync --locked` removes
+  torch), refuses while an Oída server runs from it, and checks the stack
+  imports. With torch 2.13.0 and torchcodec 0.17.0, FFmpeg 8 and 9 both decode.
 
 ## 0.15.0 — Unreleased: relistening by what was heard
 
