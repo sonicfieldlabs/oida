@@ -3114,6 +3114,8 @@ def create_app(
             controls=available_harness_controls(),
             # A caller may bound a listening's model passes; the ranges a request accepts.
             pass_limits={"max_new_tokens": [16, 4096], "thinking_budget": [0, 4096]},
+            # What a host may state in a decision's circuit context beyond the first contract.
+            circuit_context=["used"],
         )
 
     # Each owner admits its own future adapters. Existing selections are unchanged.
