@@ -77,6 +77,58 @@ def record_digest(record) -> str | None:
     ).hexdigest()
 
 
+#: What Akousmata's curator writes when rights are asserted (its `set_consent`), and nothing else.
+RIGHTS_FIELDS = (
+    ("provenance", "consent_status"),
+    ("provenance", "rights_note"),
+    ("extensions", "akousmata.app", "consent_set_by"),
+)
+
+
+def without_rights(record):
+    """The record as it was before a curator recorded its rights: those fields removed, and any
+    container the assertion created, and left otherwise empty, removed with them."""
+    value = deepcopy(record)
+    for path in RIGHTS_FIELDS:
+        trail, node = [], value
+        for key in path[:-1]:
+            if not isinstance(node, dict) or not isinstance(node.get(key), dict):
+                node = None
+                break
+            trail.append((node, key))
+            node = node[key]
+        if not isinstance(node, dict) or path[-1] not in node:
+            continue
+        del node[path[-1]]
+        for parent, key in reversed(trail[1:] if path[0] == "provenance" else trail):
+            if parent[key] == {}:
+                del parent[key]
+    return value
+
+
+class _BeforeRights:
+    """The workspace with each record read as it was before its rights were recorded.
+
+    Recording consent rewrites a record under its id. A decision binds the digest of every
+    record it read, so a rights assertion made afterwards read as changed evidence and withheld
+    the decision. A record a curator has since marked restricted is read as it stands, so its
+    decisions stay withheld."""
+
+    def __init__(self, workspace):
+        self._workspace = workspace
+
+    def __getattr__(self, name):
+        return getattr(self._workspace, name)
+
+    def reader(self, identifier):
+        record = self._workspace.reader(identifier)
+        if not isinstance(record, dict):
+            return record
+        if (record.get("provenance") or {}).get("consent_status") == "restricted":
+            return record
+        return without_rights(record)
+
+
 def _context_binding(req: RoutingRequest, *, execution: bool):
     if req.context:
         workspace_id = os.getenv("LISTENINGSTACK_WORKSPACE_ID")
@@ -668,9 +720,13 @@ def routing_router(workspace, require_admin):
             if not row or not value.get("prepared_context"):
                 raise ValueError("Unverifiable historical decision")
             req = RoutingRequest.model_validate_json(row[0])
+            expected = context_digest(value["prepared_context"])
             current = historical_context(workspace, req.record_id, req, req.settings)
-            if context_digest(current) != context_digest(value["prepared_context"]):
-                raise ValueError("Dependency changed")
+            if context_digest(current) != expected:
+                # A rights assertion recorded since is not a change in what was heard.
+                bare = historical_context(_BeforeRights(workspace), req.record_id, req, req.settings)
+                if context_digest(bare) != expected:
+                    raise ValueError("Dependency changed")
             return value
         except (HTTPException, ValueError, KeyError, TypeError, OSError, RuntimeError, sqlite3.DatabaseError):
             return {"id": value.get("id"), "status": "withheld_or_unavailable", "action": "stop"}

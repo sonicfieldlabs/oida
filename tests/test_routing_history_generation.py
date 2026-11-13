@@ -59,3 +59,45 @@ def test_restart_does_not_restore_denied_or_changed_dependencies(client, monkeyp
     assert c.post("/routing/disclosure", json={"ids": ["routing-one"]}).json()["states"]["routing-one"] is False
     assert c.get("/routing/history").json()["decisions"][0]["status"] == "withheld_or_unavailable"
     assert w.journal.get("routing_decision", "routing-one") == before
+
+
+def curate(record, status):
+    """What Akousmata's `set_consent` does to a record, and nothing more."""
+    record.setdefault("provenance", {})["consent_status"] = status
+    record["provenance"]["rights_note"] = "Operator attestation"
+    record.setdefault("extensions", {}).setdefault("akousmata.app", {})["consent_set_by"] = "human"
+
+
+@pytest.mark.parametrize("status", ["licensed", "owned", "restricted"])
+def test_recording_rights_after_a_decision_does_not_read_as_changed_evidence(client, monkeypatch, status):
+    """13 November 2026: consent recorded on a session's records, so their text could be
+    published, withheld every decision of that session. A record marked restricted since still
+    withholds them, and so does any other change."""
+    c, w = client
+    original = w.reader
+
+    def reader(identifier):
+        # As every stored record is: with its provenance, before any rights were recorded.
+        return {**original(identifier), "provenance": {"origin": "file"}}
+
+    monkeypatch.setattr(w, "reader", reader)
+    _, before = decision(client, monkeypatch)
+
+    def curated(identifier):
+        record = reader(identifier)
+        curate(record, status)
+        return record
+
+    monkeypatch.setattr(w, "reader", curated)
+    disclosed = c.post("/routing/disclosure", json={"ids": ["routing-one"]}).json()["states"]["routing-one"]
+    assert disclosed is (status != "restricted")
+    assert w.journal.get("routing_decision", "routing-one") == before
+
+    def curated_and_changed(identifier):
+        record = curated(identifier)
+        if identifier == "akm_two":
+            record["summary"] = "Different retained evidence"
+        return record
+
+    monkeypatch.setattr(w, "reader", curated_and_changed)
+    assert c.post("/routing/disclosure", json={"ids": ["routing-one"]}).json()["states"]["routing-one"] is False
