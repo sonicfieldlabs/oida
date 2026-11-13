@@ -49,6 +49,15 @@
   tokens). Both reach hosted providers as well as the local model. The receipt
   records the limit and who set it (`max_new_tokens_source`), and
   `/listening/options` lists `pass_limits`. Without them nothing changes.
+- A window lease lets the same live window be heard again. A public radio whose
+  terms allow temporary recording may declare `lease` in the capture manifest; a
+  capture that asks (`lease_seconds`, at most 30 minutes) holds exactly the
+  input it listened to, in local custody outside the library, and answers the
+  lease's id, digest and expiry. `POST /sources/window-leases/{id}/listen`
+  listens to the held file, named by its digest, with another model, route or
+  question. A lease ends at its release, at its expiry or with its owner; each
+  ending deletes the audio and journals a receipt. No record, event or export
+  names a lease ([source admission](docs/source-admission.md)).
 - A remembered trace is written as compact JSON, about a quarter of the
   indented size. Traces already written are read as before.
 - Tests: `test_engine_readiness` hides only the MOSS-Audio modules. It used to

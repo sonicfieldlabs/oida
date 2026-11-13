@@ -119,6 +119,40 @@ What is kept, and where:
   `DELETE /sources/research-samples/{id}` deletes one early, journaled with
   `status: "deleted"` and `reason: "operator request"`.
 
+### Window leases (public radio, opt-in)
+
+A second listening of a live station would hear other audio, because the first window is
+deleted. A station whose terms allow temporary recording may carry a `lease` block:
+
+```json
+"lease": {"basis": "<the terms read, and when>", "max_seconds": 1800}
+```
+
+`max_seconds` is 30 s to 30 minutes (the default and the most a lease may last). A
+listening holds its window only when its request asks, with `"lease_seconds": <n>` on
+`POST /sources/capture/{id}/listen`. A station without the block, a longer lease than it
+allows, or an active covenant forbidding `raw-audio` or `memory` retention refuses the
+request before anything is captured.
+
+- **Exactly the listened input**, under the research samples' rule: the file is held only
+  if its SHA-256 equals the listening event's `segment.data_ref.sha256`. The acquisition
+  receipt carries `window_lease` (`status: "leased"` with the lease's id, digest, size and
+  expiry, or `"not_leased"` with the reason) and `raw_audio_deleted: false`.
+- **Heard again by name.** `POST /sources/window-leases/{id}/listen` takes the digest the
+  caller expects (`sha256`) and the listening's own choices (model, route, passes, focus
+  question, context, limits, a declared circuit). Oída listens to the file it holds, with
+  the first window's source time, and answers a receipt whose `same_window_as` is the
+  first record. Another digest is refused (409). Nothing is captured.
+- **Outside the library, local only.** Leases live in `<data dir>/window-leases/` (files
+  mode 0600). No record, listening event or export names a lease or its folder.
+  `GET /sources/window-leases` (`oida/window-leases/v1`) lists the leases held, without
+  paths, with `exportable: false`.
+- **Ending.** `DELETE /sources/window-leases/{id}?reason=…` releases a lease; a sweep
+  every 5 s ends one at its expiry; a covenant that begins to forbid retention ends all;
+  and no lease survives its owner (a restart or a shutdown deletes what is held). Each
+  ending deletes the audio and journals a `window_lease` receipt (`status`, `deleted_at`,
+  `audio_deleted`, `reason`); the release answers that receipt.
+
 FFmpeg must be installed with the selected input backend. `avfoundation` uses the
 macOS device's current native format; set it in the operating system first.
 `alsa` passes the configured rate/channels as input negotiation options. `radio`
