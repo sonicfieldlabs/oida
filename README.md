@@ -8,7 +8,7 @@ configuration rather than in source.
 
 The 0.15.0 source lets a listening loop relisten by what it heard. A new local,
 deterministic decision provider, `akouo`, reads the retained account through
-AKOÚŌ's router (`akouo-contract` 0.13.0) and orders the offered moves: focus with
+AKOÚŌ's router (`akouo-contract` 0.13.1) and orders the offered moves: focus with
 the primary ear, correct, sound (Small Music for a musical ear, Small SFX
 otherwise), move on; a host may also choose a reasoner bounded by the same moves,
 with `akouo` as its fallback. A gateway listen may declare the circuit that

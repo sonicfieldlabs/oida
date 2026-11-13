@@ -63,6 +63,9 @@
   two generators for one purpose), it takes the one the run has made least,
   as the host counts them in the circuit context (`used`, by candidate id).
   With no counts it takes the first offered, as before.
+- Vendor akouo-contract 0.13.1: the router reads steady noise (hum, hiss,
+  static) as a signal to inspect before it is music or material, and an account
+  made only of negations as one that names nothing.
 - A remembered trace is written as compact JSON, about a quarter of the
   indented size. Traces already written are read as before.
 - Tests: `test_engine_readiness` hides only the MOSS-Audio modules. It used to

@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
   "anyio>=4.14.2,<5",
-  "akouo-contract>=0.13.0",
+  "akouo-contract>=0.13.1",
   "akousma>=0.11.0",
   "akousmata>=0.10.0",
   "fastapi>=0.139",
@@ -46,7 +46,7 @@ Issues = "https://github.com/sonicfieldlabs/oida/issues"
 [tool.uv.sources]
 # Reviewed wheels include packaged resources and cannot be masked by siblings.
 akousma = { path = "vendor/akousma-0.11.0-py3-none-any.whl" }
-akouo-contract = { path = "vendor/akouo_contract-0.13.0-py3-none-any.whl" }
+akouo-contract = { path = "vendor/akouo_contract-0.13.1-py3-none-any.whl" }
 akousmata = { path = "vendor/akousmata-0.10.0-py3-none-any.whl" }
 
 [project.optional-dependencies]
