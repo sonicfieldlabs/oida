@@ -34,5 +34,10 @@ def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -
     return target
 
 
-def write_json_atomic(path: str | Path, data: Any, *, indent: int = 2) -> Path:
-    return atomic_write_text(path, json.dumps(data, indent=indent, ensure_ascii=False) + "\n")
+def write_json_atomic(path: str | Path, data: Any, *, indent: int | None = 2) -> Path:
+    """Write JSON atomically; `indent=None` writes it compact, on one line."""
+    if indent is None:
+        text = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+    else:
+        text = json.dumps(data, indent=indent, ensure_ascii=False)
+    return atomic_write_text(path, text + "\n")

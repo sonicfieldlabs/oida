@@ -11,7 +11,7 @@
   and abandoned within three words is a fragment. Short captions such as
   "Steady hum" are kept, and answers to a question may still be short.
   Hyphens no longer count as words in the long-text ratio. Transcripts are not
-  checked, as before.
+  checked, as before. The degree sign may stand beside a letter ("19°C").
 - Local passage corpora are named by the operator, not in source. A JSON file
   (`OIDA_LOCAL_PASSAGES_ROOTS`, else `local-passages/roots.json` in the data
   directory, contract `oida/local-passage-roots/v1`) maps each corpus key to an
@@ -22,6 +22,39 @@
   MOSS: it always keeps the `moss` extra (a plain `uv sync --locked` removes
   torch), refuses while an Oída server runs from it, and checks the stack
   imports. With torch 2.13.0 and torchcodec 0.17.0, FFmpeg 8 and 9 both decode.
+- On Apple silicon the Metal allocator's cached buffers are released during and
+  after each generation. PyTorch's MPS allocator otherwise keeps the buffers each
+  decoding step frees until its low watermark (1.4 times Metal's recommended
+  working set, about 37.5 GB on a 32 GB computer): one pass of 600 new tokens
+  filled it, the computer swapped, and later passes ran several times slower.
+  The driver's memory now stays within `OIDA_MPS_POOL_HEADROOM_MB` (2048) of its
+  level at the start of a pass and returns to the model's size afterwards; the
+  pass receipt records it (`generation.metal_memory`). 0 turns the release off.
+  The release applies from torch 2.13. On torch 2.10.0 it turned every answer
+  to a prompt over about 2,300 characters into unrelated tokens, so earlier
+  versions keep the allocator as it was.
+- On Apple silicon each sampled token is drawn on the CPU. With torch 2.13.0,
+  `torch.multinomial` on mps returned a token of zero probability in 139 of
+  30,000 draws from a distribution top-k had left with 50 tokens (torch 2.10.0:
+  none). In captions that was one unrelated word in about one account in seven,
+  and the caption check declined the whole account: 15 of 100 sampled passes on
+  test audio, none of 100 with the draw on the CPU, at the same speed. The
+  temperature, top-k and top-p are applied as before; the pass receipt records
+  where the token was drawn (`generation.sampled_on`), and
+  `OIDA_MPS_SAMPLE_ON_CPU=0` returns the draw to the GPU.
+- A listening may bound its model passes. `max_new_tokens` on a listening
+  request is a ceiling under each recipe's own limit, and `thinking_budget` is
+  the reasoning a Thinking checkpoint gets before it must answer (ignored by
+  other checkpoints, and lowered when it would leave the answer fewer than 256
+  tokens). Both reach hosted providers as well as the local model. The receipt
+  records the limit and who set it (`max_new_tokens_source`), and
+  `/listening/options` lists `pass_limits`. Without them nothing changes.
+- A remembered trace is written as compact JSON, about a quarter of the
+  indented size. Traces already written are read as before.
+- Tests: `test_engine_readiness` hides only the MOSS-Audio modules. It used to
+  restore the whole module table, which dropped a torch first imported inside
+  the block; the next import of torch then crashed the interpreter (torch 2.13)
+  or failed a later test.
 
 ## 0.15.0 — Unreleased: relistening by what was heard
 

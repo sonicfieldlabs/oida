@@ -77,6 +77,30 @@ intended direct and deep-listening roles.
 `OIDA_MOSS_RESIDENT=single` keeps only one checkpoint resident and hot-swaps
 between them. This is the safer default on unified-memory systems.
 
+On Apple silicon, Oída releases the Metal allocator's cached buffers during and
+after each generation. Each decoding step frees buffers a little too small for
+the next, and PyTorch's MPS allocator keeps freed buffers until its low
+watermark, 1.4 times Metal's recommended working set: about 37.5 GB on a 32 GB
+computer. Measured with one 10.4 GB checkpoint, a pass of 600 new tokens filled
+it, the computer swapped 12 GB, and the passes that followed ran at 1 to 5
+tokens a second. With the release, the driver's memory stays within
+`OIDA_MPS_POOL_HEADROOM_MB` megabytes (2048 by default) of its level when the
+pass began and returns to the model's own size when it ends. Each pass's receipt
+records the start, the peak, the end and the number of releases
+(`generation.metal_memory`). `OIDA_MPS_POOL_HEADROOM_MB=0` leaves the allocator
+alone. The release needs torch 2.13 or later: on torch 2.10.0 it made answers to
+long prompts unreadable, so with an earlier torch the allocator is left alone
+whatever the setting.
+
+On Apple silicon Oída also draws each sampled token on the CPU. With torch
+2.13.0, `torch.multinomial` on the mps device sometimes returns a token whose
+probability is zero, which puts one unrelated word into an otherwise readable
+account. The temperature, top-k and top-p of the recipe are applied to the
+scores on the CPU, the token is drawn there, and the generation takes it as it
+is. The pass receipt records it (`generation.sampled_on`: `cpu`, or the device
+when the draw stayed there). `OIDA_MPS_SAMPLE_ON_CPU=0` returns the draw to the
+GPU.
+
 ## Hardware Planning
 
 | Checkpoint family | Minimum RAM | Suggested RAM | Approx. repository size |

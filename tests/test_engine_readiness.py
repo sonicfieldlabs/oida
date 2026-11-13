@@ -8,6 +8,8 @@ cause. Each of those is now a stated fact somewhere, and these tests keep it so.
 
 from __future__ import annotations
 
+import sys
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
@@ -17,6 +19,28 @@ from oida.engine import FallbackEngine, build_engine
 from oida.engine_base import EngineUnavailable
 from oida.engine_mps import MpsMossEngine
 from oida.engine_stub import StubMossEngine
+
+
+@contextmanager
+def _without_moss_modules():
+    """Hide the MOSS-Audio modules, and only those.
+
+    `patch.dict("sys.modules", ...)` restores the whole table when it exits, so it also drops
+    every module first imported inside the block, torch among them; importing torch's extension
+    a second time in one process crashes the interpreter (torch 2.13) or fails a later test.
+    """
+    names = ("src", "src.audio_io")
+    absent = object()
+    saved = {name: sys.modules.get(name, absent) for name in names}
+    sys.modules.update(dict.fromkeys(names))
+    try:
+        yield
+    finally:
+        for name, module in saved.items():
+            if module is absent:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
 
 def _mps(monkeypatch, **env):
@@ -29,7 +53,7 @@ def test_ensure_ready_names_what_is_missing(monkeypatch, tmp_path):
     """Cheap: imports the MOSS modules, loads no weights, says where it looked."""
     config = _mps(monkeypatch, OIDA_MOSS_AUDIO_REPO=str(tmp_path / "nowhere"))
     engine = MpsMossEngine(config)
-    with patch.dict("sys.modules", {"src": None, "src.audio_io": None}):
+    with _without_moss_modules():
         with pytest.raises(EngineUnavailable) as caught:
             engine.ensure_ready()
     message = str(caught.value)
@@ -41,7 +65,7 @@ def test_status_distinguishes_cold_from_broken(monkeypatch, tmp_path):
     config = _mps(monkeypatch, OIDA_MOSS_AUDIO_REPO=str(tmp_path / "nowhere"))
     primary = MpsMossEngine(config)
     engine = FallbackEngine(primary, StubMossEngine())
-    with patch.dict("sys.modules", {"src": None, "src.audio_io": None}):
+    with _without_moss_modules():
         status = engine.runtime_status()
     assert status["falls_back_to_stub"] is True
     assert "unavailable" in status["primary_unavailable_reason"]
@@ -57,7 +81,7 @@ def test_without_a_backup_an_unavailable_primary_refuses(monkeypatch, tmp_path):
     config = _mps(monkeypatch, OIDA_MOSS_AUDIO_REPO=str(tmp_path / "nowhere"))
     engine = build_engine(config)
     assert isinstance(engine, MpsMossEngine), "no backup configured, so no substitute stands behind mac-mps"
-    with patch.dict("sys.modules", {"src": None, "src.audio_io": None}):
+    with _without_moss_modules():
         with pytest.raises(EngineUnavailable):
             engine.ensure_ready()
 
@@ -66,7 +90,7 @@ def test_status_names_real_backup_without_claiming_stub_or_loading_it(monkeypatc
     config = _mps(monkeypatch, OIDA_MOSS_AUDIO_REPO=str(tmp_path / "nowhere"),
                   OIDA_MOSS_BACKUP_MODEL="Backup-Model-1B")
     engine = build_engine(config)
-    with patch.dict("sys.modules", {"src": None, "src.audio_io": None}), \
+    with _without_moss_modules(), \
             patch.object(engine.fallback, "ensure_ready") as backup_ready:
         status = engine.runtime_status()
     assert status["falls_back_to_stub"] is False
@@ -84,7 +108,7 @@ def test_explicit_selection_status_agrees_with_no_substitution_policy(monkeypatc
     config = _mps(monkeypatch, OIDA_MOSS_AUDIO_REPO=str(tmp_path / "nowhere"))
     engine = FallbackEngine(MpsMossEngine(config), StubMossEngine())
     selected = selector(next(spec for spec in MODEL_SPECS if spec.id == "instruct"))
-    with patch.dict("sys.modules", {"src": None, "src.audio_io": None}):
+    with _without_moss_modules():
         with use_audio_model(selected):
             status = engine.runtime_status()
         restored = engine.runtime_status()

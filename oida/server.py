@@ -31,7 +31,7 @@ try:
         StreamingResponse,
     )
     from fastapi.staticfiles import StaticFiles
-    from pydantic import BaseModel, ConfigDict, Field
+    from pydantic import BaseModel, ConfigDict, Field, model_validator
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised only without deps
     FastAPI = None  # type: ignore[assignment]
     HTTPException = RuntimeError  # type: ignore[assignment]
@@ -44,6 +44,9 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised only without 
 
     def Field(default=None, **_):  # type: ignore[no-redef]
         return default
+
+    def model_validator(**_):  # type: ignore[no-redef]
+        return lambda function: function
 
     FASTAPI_IMPORT_ERROR = exc
 else:
@@ -369,6 +372,21 @@ class ListenEventRequest(PathRequest):
     context_refs: list[str] | None = Field(default=None, max_length=7)
     focus_question: str | None = Field(default=None, max_length=4096)
     expected_source_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    # The caller's bounds on this listening's model passes. `max_new_tokens` is a ceiling under
+    # each recipe's own limit; `thinking_budget` is the reasoning a Thinking checkpoint gets
+    # before it must answer, ignored by other checkpoints. Absent, the recipes decide, as before.
+    max_new_tokens: int | None = Field(default=None, ge=16, le=4096)
+    thinking_budget: int | None = Field(default=None, ge=0, le=4096)
+
+    @model_validator(mode="after")
+    def budget_leaves_an_answer(self):
+        if (
+            self.max_new_tokens is not None
+            and self.thinking_budget is not None
+            and self.thinking_budget >= self.max_new_tokens
+        ):
+            raise ValueError("thinking_budget must be below max_new_tokens, so an answer has room")
+        return self
 
 
 class AudioProbeRequest(BaseModel):
@@ -658,6 +676,17 @@ def scan_moss_models(weights_dir: Path, configured=()) -> list[dict[str, object]
         )
     return models
 
+
+
+def pass_limits(req):
+    """The bounds a listening request names for its model passes, or None when it names none."""
+    ceiling = getattr(req, "max_new_tokens", None)
+    budget = getattr(req, "thinking_budget", None)
+    if ceiling is None and budget is None:
+        return None
+    from oida.recipes import PassLimits
+
+    return PassLimits(max_new_tokens=ceiling, thinking_budget=budget)
 
 
 def dispatch_deadline(passes, *, now=None, wall=None) -> float:
@@ -3083,6 +3112,8 @@ def create_app(
             compound_routes=compound_listening_routes(),
             route_presets=akouo_manifest()["route_presets"],
             controls=available_harness_controls(),
+            # A caller may bound a listening's model passes; the ranges a request accepts.
+            pass_limits={"max_new_tokens": [16, 4096], "thinking_budget": [0, 4096]},
         )
 
     # Each owner admits its own future adapters. Existing selections are unchanged.
@@ -3349,6 +3380,7 @@ def create_app(
                     ),
                     deadline=dispatch_deadline(passes),
                     focus=focus,
+                    limits=pass_limits(req),
                 ) as audio_policy,
             ):
                 from oida.specialists.dispatch import interpret

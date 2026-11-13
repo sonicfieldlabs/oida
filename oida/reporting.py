@@ -88,6 +88,8 @@ _FUSED_CASE_RE = re.compile(r"[a-z]{2,}[A-Z]{3,}")
 _PUNCTUATION_RUN_RE = re.compile(r"([^\w\s])\1{5,}")
 _ENDS_LIKE_A_SENTENCE_RE = re.compile(r"[.!?\u2026:;)\]\"'\u201d\u2019]\s*$")
 _WORDISH = set(" .,;:'\"!?()")
+#: Symbols that belong beside a letter in plain prose: the degree sign of "19°C".
+_UNIT_SIGNS = frozenset("\u00b0")
 #: The share of letters outside the Latin script above which caption prose is token soup.
 _FOREIGN_LETTER_SHARE = 0.05
 #: A sentence begun this way and abandoned within fewer words than this is a fragment.
@@ -138,7 +140,9 @@ def looks_degenerate(text: str | None, *, allow_short: bool = False) -> bool:
     for word in stripped.split():
         if len({_script(ch) for ch in word if ch.isalpha()}) > 1:
             return True
-        if any(ch.isalpha() for ch in word) and any(unicodedata.category(ch) == "So" for ch in word):
+        if any(ch.isalpha() for ch in word) and any(
+            unicodedata.category(ch) == "So" and ch not in _UNIT_SIGNS for ch in word
+        ):
             return True
     if (
         _DOTTED_WORDS_RE.search(stripped)

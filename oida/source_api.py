@@ -49,6 +49,9 @@ class AcquisitionRequest(BaseModel):
     ) = Field(default=None, max_length=5)
     context_refs: list[str] | None = Field(default=None, max_length=7)
     focus_question: str | None = Field(default=None, max_length=4096)
+    # The caller's bounds on this listening's model passes (see ListenEventRequest).
+    max_new_tokens: int | None = Field(default=None, ge=16, le=4096)
+    thinking_budget: int | None = Field(default=None, ge=0, le=4096)
     aperture: Aperture | None = None
     specialist_tasks: list[
         Literal["tag_events", "track_beats", "transcribe", "speech_quality"]
@@ -421,6 +424,8 @@ def source_router(
                             passes=req.passes,
                             context_refs=req.context_refs,
                             focus_question=req.focus_question,
+                            max_new_tokens=req.max_new_tokens,
+                            thinking_budget=req.thinking_budget,
                             **(
                                 {"audio_model": req.audio_model.model_dump()}
                                 if req.audio_model is not None

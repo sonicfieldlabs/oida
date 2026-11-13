@@ -68,6 +68,30 @@ revision as host-declared provenance, reports missing or changed revisions,
 and never treats identity text as evidence. Oída-owned perception snapshots
 the same file for the whole multi-pass event.
 
+## Bounding a listening's model passes
+
+A listening request (`/gateway/listen`, `/gateway/listen-window`, `/listen-event`
+and a source capture's `/listen`) may name two bounds for its model passes:
+
+- `max_new_tokens` (16 to 4096) is a ceiling. It lowers each recipe's own limit
+  for this listening and never raises it. Oída's recipes allow 1,024 to 2,048
+  new tokens whatever the audio's length, so a pass that falls into a loop runs
+  to that limit; a caller that knows its window is ten seconds long can stop it
+  sooner.
+- `thinking_budget` (0 to 4096, below `max_new_tokens` when both are sent) is
+  the number of reasoning tokens a Thinking checkpoint gets before its reasoning
+  is closed and it must answer. A pass heard by another checkpoint ignores it.
+  When the budget would leave the answer fewer than 256 tokens it is lowered to
+  leave them, and the receipt says `listening_clamped`.
+
+Without either, the recipes decide, as before. Each pass's receipt records the
+limit it ran under and who set it (`generation.max_new_tokens`,
+`generation.max_new_tokens_source`: `recipe` or `listening`) and, for a Thinking
+pass, the budget, its source and whether the close was forced
+(`generation.thinking_budget`). `GET /listening/options` lists `pass_limits` with
+the accepted ranges, so a caller can tell an Oída that applies them from an
+older one that would ignore the fields.
+
 ## Lifecycle
 
 - `oida` or `oida serve` runs the agent, REST gateway, dashboard, and mounted
