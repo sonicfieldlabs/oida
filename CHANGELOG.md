@@ -58,6 +58,11 @@
   question. A lease ends at its release, at its expiry or with its owner; each
   ending deletes the audio and journals a receipt. No record, event or export
   names a lease ([source admission](docs/source-admission.md)).
+- The AKOÚŌ decider breaks ties by use. Where several offered moves fit one
+  step of its rubric equally (two re-listenings that hear with the same ear,
+  two generators for one purpose), it takes the one the run has made least,
+  as the host counts them in the circuit context (`used`, by candidate id).
+  With no counts it takes the first offered, as before.
 - A remembered trace is written as compact JSON, about a quarter of the
   indented size. Traces already written are read as before.
 - Tests: `test_engine_readiness` hides only the MOSS-Audio modules. It used to

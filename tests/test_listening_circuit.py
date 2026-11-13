@@ -284,3 +284,45 @@ def test_the_owner_admits_the_deciders_proposals_with_their_annotations():
     proposal = decide(ctx)
     changed = proposal.model_copy(update={"arguments": {**proposal.arguments, "route_preset": "voice"}})
     assert admission_blockers(ctx, changed) == ["The proposal changed the offered execution arguments"]
+
+
+def test_among_equal_moves_the_one_this_run_used_least_is_taken():
+    # Three setups hear with the musical ear; nothing separates them but how often they were used.
+    def offered():
+        return [
+            {"id": "texture", "action": "relisten", "arguments": {"listening_mode": "music", "model_id": "instruct"}},
+            {"id": "deliberate", "action": "relisten", "arguments": {"listening_mode": "music", "model_id": "thinking"}},
+            {"id": "timing", "action": "relisten", "arguments": {"listening_mode": "music", "model_id": "instruct"}},
+            {"id": "stop", "action": "stop", "arguments": {}},
+        ]
+
+    def chosen(**circuit):
+        ctx = context(MUSIC, heard_listening_modes=[], **circuit)
+        ctx["candidates"], ctx["allowed_actions"] = offered(), ["relisten", "stop"]
+        return decide(ctx).candidate_id
+
+    assert chosen() == "texture", "with no counts, the first offered, as before"
+    assert chosen(used={"texture": 2, "deliberate": 1, "timing": 0}) == "timing"
+    assert chosen(used={"texture": 3, "deliberate": 1, "timing": 1}) == "deliberate", "the first offered on a tie"
+    assert chosen(used={"texture": 0, "deliberate": 5, "timing": 5}) == "texture"
+    # The count never widens the offer or outranks the rubric: an ear already heard stays out.
+    ctx = context(MUSIC, used={"relisten_route_0": 9, "relisten_route_1": 0})
+    assert decide(ctx).candidate_id == "relisten_route_0", "one move fits the primary ear; its count does not matter"
+
+
+def test_among_generators_of_one_purpose_the_least_used_sounds():
+    ctx = context(MUSIC, heard_modes=["musical-aesthetic-listening", "signal-inspection-listening",
+                                      "acoulogical-object-listening", "transductive-media-listening",
+                                      "material-event-listening", "ecological-posthuman-listening"],
+                  heard_listening_modes=["music", "field", "signal", "basic"],
+                  used={"generate_music": 2, "generate_music_b": 0})
+    ctx["candidates"] = [c for c in ctx["candidates"] if c["action"] in {"generate", "stop"}] + [
+        {"id": "generate_music_b", "action": "generate", "arguments": {"generation_model": "another-music", "generation_purpose": "music"}}
+    ]
+    assert decide(ctx).candidate_id == "generate_music_b"
+
+
+def test_the_circuit_context_bounds_its_counts():
+    DecisionContext(circuit={"used": {"texture": 3}})
+    with pytest.raises(ValueError):
+        DecisionContext(circuit={"used": {f"c{i}": 1 for i in range(65)}})

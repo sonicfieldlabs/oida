@@ -17,6 +17,10 @@ and then follows one explicit rubric:
    another source.
 7. Otherwise stops.
 
+Where several offered moves fit one step of the rubric equally (two re-listenings that hear with
+the same ear, two generators for the same purpose), it takes the one this run has used least, as
+the host counts them (``circuit.used``); with no counts it takes the first offered, as before.
+
 It selects only an offered candidate id and copies that candidate's arguments; it adds the route,
 the reasoning, the alternative reading and the target layer as non-executable arguments so the host
 can record them in the listening circuit. No probabilities are invented.
@@ -127,6 +131,13 @@ class AkouoDecisionProvider:
         confidence = route.get("confidence") or "undetermined"
         primary, corrective = route.get("primary"), route.get("corrective")
         current_source = circuit.get("source_key")
+        used = circuit.get("used") if isinstance(circuit.get("used"), dict) else {}
+
+        def least_used(options: list[dict]) -> dict | None:
+            """Among moves ranked equal, the one this run has made least; the first offered on a tie."""
+            if not options:
+                return None
+            return min(options, key=lambda c: int(used.get(c.get("id"), 0) or 0))
 
         def fresh(c: dict) -> bool:
             arguments = c.get("arguments") or {}
@@ -141,18 +152,19 @@ class AkouoDecisionProvider:
         def by_ear(mode: str | None) -> dict | None:
             if not mode:
                 return None
-            return next((c for c in relistens if mode in candidate_ears(c) and fresh(c)), None)
+            return least_used([c for c in relistens if mode in candidate_ears(c) and fresh(c)])
 
         declined_model = circuit.get("declined_model")
 
         def other_model() -> dict | None:
             """A re-listening on a model other than the one that declined."""
+            others = []
             for c in relistens:
                 arguments = c.get("arguments") or {}
                 model = arguments.get("model_id") or arguments.get("audio_model")
                 if model and model != declined_model:
-                    return c
-            return None
+                    others.append(c)
+            return least_used(others)
 
         def leave() -> dict | None:
             stay = [c for c in move_on if (c.get("arguments") or {}).get("source_key") == current_source]
@@ -194,7 +206,7 @@ class AkouoDecisionProvider:
                         break
         if choice is None and not why and generate and int(circuit.get("depth") or 0) < int(circuit.get("max_depth") or 0):
             want = "music" if "music" in (route.get("heard_as") or []) else "sfx"
-            choice = next((c for c in generate if _purpose(c) == want), generate[0])
+            choice = least_used([c for c in generate if _purpose(c) == want]) or generate[0]
             layer, why = "sounding", f"Answer the account with a {_purpose(choice) or 'generated'} sounding and listen to it in turn."
         if choice is None:
             choice = leave()
