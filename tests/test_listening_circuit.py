@@ -326,3 +326,30 @@ def test_the_circuit_context_bounds_its_counts():
     DecisionContext(circuit={"used": {"texture": 3}})
     with pytest.raises(ValueError):
         DecisionContext(circuit={"used": {f"c{i}": 1 for i in range(65)}})
+
+
+def test_a_model_decider_is_asked_for_the_candidate_alone_on_a_circuit():
+    """A small planner given the route and the circuit explains itself in a second key, which
+    the selection contract refuses; the guidance asks for the id alone."""
+    import json
+
+    from oida.routing.providers import TextDecisionProvider
+
+    asked = []
+
+    class Adapter:
+        def locality(self, *_):
+            return "local"
+
+        def complete(self, request):
+            asked.append(json.loads(request.user_prompt))
+            raise RuntimeError("recorded")
+
+    candidates = [{"id": "stop", "action": "stop", "description": "Stop", "arguments": {}}]
+    plain = {"candidates": candidates, "allowed_actions": ["stop"]}
+    circuit = {**plain, "akouo_route": {"primary": "signal-inspection-listening"},
+               "host_context": {"circuit": {"source_key": "station", "depth": 0}}}
+    provider = TextDecisionProvider("a_model", Adapter())
+    assert provider.decide(plain).abstained and provider.decide(circuit).abstained
+    assert "circuit_guidance" not in asked[0], "a request without a circuit is as it was"
+    assert "candidate_id alone" in asked[1]["circuit_guidance"] and "no other key" in asked[1]["circuit_guidance"]

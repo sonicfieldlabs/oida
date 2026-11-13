@@ -63,6 +63,11 @@
   two generators for one purpose), it takes the one the run has made least,
   as the host counts them in the circuit context (`used`, by candidate id).
   With no counts it takes the first offered, as before.
+- A language model that decides a circuit is asked for the candidate id alone.
+  Given AKOÚŌ's route and the circuit's state, a small local planner chose an
+  offered candidate and explained itself in a second key, which the selection
+  contract refuses, so every decision fell to the fallback. Requests without a
+  circuit are unchanged.
 - Vendor akouo-contract 0.13.1: the router reads steady noise (hum, hiss,
   static) as a signal to inspect before it is music or material, and an account
   made only of negations as one that names nothing.
