@@ -26,6 +26,8 @@ from oida.observation_source import (
 from oida.operation_control import Control, OperationCancelled, checkpoint, controlled
 from oida.reasoning.audio_selection import AudioModel
 from oida.research_samples import ResearchSampleRefused, ResearchSamples
+from oida.window_leases import MAX_SECONDS as LEASE_MAX_SECONDS
+from oida.window_leases import WindowLeaseRefused, WindowLeases
 from oida.source_capture import (
     AcquisitionReceipts,
     CaptureInterrupted,
@@ -39,6 +41,7 @@ from oida.station_aperture import admit as admit_aperture
 
 LOGGER = logging.getLogger(__name__)
 RESEARCH_SWEEP_SECONDS = 30.0
+LEASE_SWEEP_SECONDS = 5.0
 
 
 class AcquisitionRequest(BaseModel):
@@ -49,6 +52,9 @@ class AcquisitionRequest(BaseModel):
     ) = Field(default=None, max_length=5)
     context_refs: list[str] | None = Field(default=None, max_length=7)
     focus_question: str | None = Field(default=None, max_length=4096)
+    # The caller's bounds on this listening's model passes (see ListenEventRequest).
+    max_new_tokens: int | None = Field(default=None, ge=16, le=4096)
+    thinking_budget: int | None = Field(default=None, ge=0, le=4096)
     aperture: Aperture | None = None
     specialist_tasks: list[
         Literal["tag_events", "track_beats", "transcribe", "speech_quality"]
@@ -66,6 +72,9 @@ class AcquisitionRequest(BaseModel):
     retain_library_audio: bool = False
     # Keep the listened input as a local research sample; only for opted-in stations.
     retain_research_sample: bool = False
+    # Hold the listened input for this many seconds so the same window can be heard again
+    # (a window lease); only where the station's configured terms allow temporary recording.
+    lease_seconds: float | None = Field(default=None, gt=0, le=LEASE_MAX_SECONDS)
     route_preset: str = "basic"
     response_mode: Literal["full", "summary"] = "full"
     model_id: str | None = Field(default=None, min_length=1, max_length=256)
@@ -75,6 +84,39 @@ class AcquisitionRequest(BaseModel):
     deadline_at: float | None = None
     # The listening loop's moves that led to this capture (earworm/listening-circuit/v1),
     # declared by the host that runs the loop and recorded on the remembered record.
+    declared_circuit: dict[str, Any] | None = None
+
+
+class LeaseListenRequest(BaseModel):
+    """Another listening of a leased window: the same file, named by its lease and its digest."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    acquisition_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    audio_model: AudioModel | None = None
+    allow_external_audio: bool = False
+    passes: (
+        list[Literal["transcribe", "events", "caption", "speech", "music"]] | None
+    ) = Field(default=None, max_length=5)
+    context_refs: list[str] | None = Field(default=None, max_length=7)
+    focus_question: str | None = Field(default=None, max_length=4096)
+    max_new_tokens: int | None = Field(default=None, ge=16, le=4096)
+    thinking_budget: int | None = Field(default=None, ge=0, le=4096)
+    specialist_tasks: list[
+        Literal["tag_events", "track_beats", "transcribe", "speech_quality"]
+    ] = Field(default_factory=list, max_length=3)
+    specialist_deployments: dict[
+        Literal["tag_events", "track_beats", "transcribe", "speech_quality"], str
+    ] = Field(default_factory=dict, max_length=3)
+    speech_vad: bool = True
+    speech_alignment: bool = False
+    speech_language: Literal["English", "Spanish", "Portuguese"] | None = None
+    remember: bool = False
+    route_preset: str = "basic"
+    response_mode: Literal["full", "summary"] = "full"
+    model_id: str | None = Field(default=None, min_length=1, max_length=256)
+    listening_mode: str | None = Field(default=None, min_length=1, max_length=100)
+    deadline_at: float | None = None
     declared_circuit: dict[str, Any] | None = None
 
 
@@ -150,6 +192,24 @@ def source_router(
         data_dir / "research-samples", receipts.journal, scanned_roots=scanned_roots
     )
     samples.sweep()
+    leases = WindowLeases(
+        data_dir / "window-leases", receipts.journal, scanned_roots=scanned_roots
+    )
+    # A lease does not outlive the owner that granted it: whatever a crash left is deleted.
+    leases.release_all("the owner restarted; no lease survives its owner")
+    stop_lease_sweep = threading.Event()
+
+    def sweep_leases():
+        while not stop_lease_sweep.wait(LEASE_SWEEP_SECONDS):
+            try:
+                if retention_forbidden is not None and retention_forbidden():
+                    leases.release_all("the active covenant forbids retaining raw audio")
+                leases.sweep()
+            except Exception:
+                LOGGER.exception("window-lease sweep failed")
+
+    if any(s.lease is not None for s in sources.values()):
+        threading.Thread(target=sweep_leases, name="window-lease-sweep", daemon=True).start()
     # Expiry must not wait for a reader: sweep on a timer while any station can keep
     # samples or any sample is still on disk.
     if samples.root.exists() or any(
@@ -202,6 +262,9 @@ def source_router(
                     else "temp",
                     research=dict(ttl_seconds=s.research.ttl_seconds, audience="local")
                     if s.research
+                    else None,
+                    lease=dict(max_seconds=s.lease.max_seconds, audience="local")
+                    if s.lease
                     else None,
                     status="configured_unverified",
                     claim_limit="native sample rate is not capture bandwidth",
@@ -285,6 +348,19 @@ def source_router(
                 if retention_forbidden is not None and retention_forbidden():
                     raise ValueError(
                         "The active covenant forbids retaining raw audio; no research sample"
+                    )
+            if req.lease_seconds is not None:
+                if source.lease is None:
+                    raise ValueError(
+                        "This station's configured terms do not allow a leased window; its audio is temporary"
+                    )
+                if req.lease_seconds > source.lease.max_seconds:
+                    raise ValueError(
+                        f"A lease on this station lasts at most {source.lease.max_seconds} seconds"
+                    )
+                if retention_forbidden is not None and retention_forbidden():
+                    raise ValueError(
+                        "The active covenant forbids retaining raw audio; no window lease"
                     )
             if source.consent != "granted" or req.seconds > source.max_seconds:
                 raise ValueError("source consent or duration refused")
@@ -421,6 +497,8 @@ def source_router(
                             passes=req.passes,
                             context_refs=req.context_refs,
                             focus_question=req.focus_question,
+                            max_new_tokens=req.max_new_tokens,
+                            thinking_budget=req.thinking_budget,
                             **(
                                 {"audio_model": req.audio_model.model_dump()}
                                 if req.audio_model is not None
@@ -483,14 +561,37 @@ def source_router(
                         except (ResearchSampleRefused, OSError) as exc:
                             sample = dict(status="not_retained", reason=str(exc)[:300])
                     retained = bool(sample and sample.get("status") == "retained")
+                    lease = None
+                    if req.lease_seconds is not None:
+                        segment = event.get("segment") or {}
+                        try:
+                            lease = leases.grant(
+                                path,
+                                seconds=req.lease_seconds,
+                                expected_sha256=(segment.get("data_ref") or {}).get(
+                                    "sha256"
+                                ),
+                                source=source,
+                                acquisition_id=req.acquisition_id,
+                                event_id=event.get("id"),
+                                record_id=result.get("akousma_id"),
+                                captured_at=item["started_at"],
+                                sample_rate=actual.samplerate,
+                                channels=actual.channels,
+                                duration_seconds=float(actual.duration),
+                            )
+                        except (WindowLeaseRefused, ResearchSampleRefused, OSError) as exc:
+                            lease = dict(status="not_leased", reason=str(exc)[:300])
+                    leased = bool(lease and lease.get("status") == "leased")
                     item.update(
                         status="complete",
                         event_id=event["id"],
                         akousma_id=result.get("akousma_id"),
                         source_admission=admission,
                         raw_audio_policy="temp",
-                        raw_audio_deleted=not retained,
+                        raw_audio_deleted=not (retained or leased),
                         **({"research_sample": sample} if sample else {}),
+                        **({"window_lease": lease} if lease else {}),
                     )
         except (CaptureInterrupted, OperationCancelled):
             result = None
@@ -546,6 +647,11 @@ def source_router(
     )
     if shutdown_callbacks is not None:
         shutdown_callbacks.append(scheduler.close)
+        # After the scheduler has closed, nothing can still be listening to a leased window.
+        shutdown_callbacks.append(stop_lease_sweep.set)
+        shutdown_callbacks.append(
+            lambda: leases.release_all("the owner is shutting down")
+        )
 
     @router.post("/sources/capture/{source_id}/listen")
     def capture_listen(source_id: str, req: AcquisitionRequest):
@@ -611,6 +717,242 @@ def source_router(
                 "X-Oida-Research-Sample-Sha256": value["sha256"],
             },
         )
+
+    @router.get("/sources/window-leases")
+    def window_leases():
+        return dict(
+            contract="oida/window-leases/v1",
+            audience="local",
+            exportable=False,
+            max_seconds=LEASE_MAX_SECONDS,
+            leases=leases.entries(),
+        )
+
+    @router.delete("/sources/window-leases/{identifier}")
+    def release_window_lease(identifier: str, reason: str = "released by its holder"):
+        try:
+            receipt = leases.release(identifier, reason)
+        except KeyError as exc:
+            raise HTTPException(404, "No such window lease, or it has ended") from exc
+        return {k: v for k, v in receipt.items() if k != "file"}
+
+    def listen_again(identifier: str, req: LeaseListenRequest):
+        """Listen to the leased file. The same gates as a capture, without a capture."""
+        try:
+            path, lease = leases.audio(identifier, req.sha256)
+        except KeyError as exc:
+            raise HTTPException(404, "No such window lease, or it has ended") from exc
+        except (WindowLeaseRefused, ResearchSampleRefused) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        source = resolve_source(lease["source_id"])
+        if source is None or source.lease is None:
+            leases.release(identifier, "the station no longer allows a leased window")
+            raise HTTPException(409, "The station no longer allows a leased window; the lease has ended")
+        seconds = float(lease.get("duration_seconds") or source.max_seconds)
+        caller_deadline = req.deadline_at
+        try:
+            if retention_forbidden is not None and retention_forbidden():
+                leases.release(identifier, "the active covenant forbids retaining raw audio")
+                raise ValueError("The active covenant forbids retaining raw audio; the lease has ended")
+            if source.consent != "granted":
+                raise ValueError("source consent refused")
+            if caller_deadline is not None and caller_deadline - time.time() < 1:
+                raise ValueError("operation deadline reached before the listening; nothing was started")
+            if validate_listening is not None:
+                validate_listening(
+                    req.model_id,
+                    req.listening_mode,
+                    **(
+                        {
+                            "audio_model": req.audio_model,
+                            "route_preset_id": req.route_preset,
+                            "explicit_passes": req.passes,
+                        }
+                        if req.audio_model is not None
+                        else {}
+                    ),
+                )
+            preflight(source.source_type, seconds, req.route_preset, req.remember)
+            item, cancel = receipts.begin(req.acquisition_id, source.id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        result = None
+        started = time.perf_counter()
+        timing = dict(
+            basis="observed owner wall time; workload/model evidence is recorded separately"
+        )
+        timer = None
+        try:
+            item["window_lease"] = {
+                "id": lease["id"],
+                "sha256": lease["sha256"],
+                "expires_at": lease["expires_at"],
+                "first_acquisition_id": lease["acquisition_id"],
+                "first_record_id": lease.get("record_id"),
+            }
+            item["source_descriptor"] = dict(
+                producer_id=source.producer_id,
+                source_id=source.id,
+                apparatus=source.apparatus,
+                consent=source.consent,
+                consent_ref=source.consent_ref,
+                rights_ref=source.rights_ref,
+                source_ref=source.source_ref,
+                registration_revision=source.registration_revision,
+                raw_audio_policy="temp",
+                source_time=lease["captured_at"],
+                source_time_basis="local-acquisition-start",
+                actual_format=dict(
+                    sample_rate=lease.get("sample_rate"), channels=lease.get("channels")
+                ),
+            )
+            if caller_deadline is not None:
+                item["deadline_at"] = caller_deadline
+                timer = threading.Timer(max(0.0, caller_deadline - time.time()), cancel.set)
+                timer.daemon = True
+                timer.start()
+            item.update(status="listening")
+            receipts.save(item)
+
+            def seal():
+                item.update(status="committing")
+                receipts.save(item)
+
+            control = Control(
+                event=cancel,
+                lock=receipts.lock,
+                recheck=lambda: preflight(
+                    source.source_type, seconds, req.route_preset, req.remember
+                ),
+                on_seal=seal,
+                identifier=req.acquisition_id,
+                deadline_at=caller_deadline,
+            )
+            listening_started = time.perf_counter()
+            # The listening reads a working copy under the capture's own temporary name, so no
+            # event, record or export carries the lease's id or folder.
+            with TemporaryDirectory(prefix="oida-lease-", dir=capture_temp) as temp, controlled(control):
+                working = Path(temp) / "capture.wav"
+                try:
+                    os.link(path, working)
+                except OSError:
+                    shutil.copyfile(path, working)
+                result = listen(
+                    dict(
+                        path=str(working),
+                        source_type=source.source_type,
+                        source_label=source.id,
+                        raw_audio_policy="temp",
+                        remember=req.remember,
+                        retain_library_audio=False,
+                        route_preset=req.route_preset,
+                        response_mode=req.response_mode,
+                        model_id=req.model_id,
+                        allow_external_audio=req.allow_external_audio,
+                        passes=req.passes,
+                        context_refs=req.context_refs,
+                        focus_question=req.focus_question,
+                        max_new_tokens=req.max_new_tokens,
+                        thinking_budget=req.thinking_budget,
+                        **(
+                            {"audio_model": req.audio_model.model_dump()}
+                            if req.audio_model is not None
+                            else {}
+                        ),
+                        listening_mode=req.listening_mode,
+                        **(
+                            {"declared_circuit": req.declared_circuit}
+                            if req.declared_circuit is not None
+                            else {}
+                        ),
+                        specialist_tasks=req.specialist_tasks,
+                        specialist_deployments=req.specialist_deployments,
+                        speech_vad=req.speech_vad,
+                        speech_alignment=req.speech_alignment,
+                        speech_language=req.speech_language,
+                        source_admission=dict(
+                            adapter="radio-window",
+                            producer_id=source.producer_id,
+                            source_id=source.id,
+                            source_time=lease["captured_at"],
+                            source_time_basis="local-acquisition-start",
+                            consent=source.consent,
+                            consent_ref=source.consent_ref,
+                            raw_audio_policy="temp",
+                            max_window_s=min(300.0, max(seconds, 0.001)),
+                            apparatus=source.apparatus,
+                        ),
+                    )
+                )
+                checkpoint(seal=True)
+            timing["listening_seconds"] = time.perf_counter() - listening_started
+            event = result.get("listening_event") or {}
+            if not event:
+                item.update(status="refused", reason="listening route refused the leased window")
+            else:
+                heard = ((event.get("segment") or {}).get("data_ref") or {}).get("sha256")
+                if heard != lease["sha256"]:
+                    # The listening read other bytes than the lease names: say so, claim nothing.
+                    item.update(
+                        status="failed",
+                        reason="the listening's input digest is not the leased window's",
+                    )
+                    result = None
+                else:
+                    leases.note_listening(identifier, req.acquisition_id, result.get("akousma_id"))
+                    item.update(
+                        status="complete",
+                        event_id=event["id"],
+                        akousma_id=result.get("akousma_id"),
+                        source_admission=event["source"]["details"]["source_admission"],
+                        raw_audio_policy="temp",
+                        raw_audio_deleted=False,
+                        same_window_as=lease.get("record_id"),
+                    )
+        except (CaptureInterrupted, OperationCancelled):
+            result = None
+            expired = caller_deadline is not None and time.time() >= caller_deadline
+            item.update(
+                status="expired" if expired else "cancelled",
+                reason="deadline elapsed before publication"
+                if expired
+                else "cancelled before publication; late output discarded",
+                **({"reason_code": "deadline"} if expired else {}),
+            )
+        except HTTPException as exc:
+            result = None
+            item.update(
+                status="refused", reason="listening route refused", http_status=exc.status_code
+            )
+        except (ValueError, RuntimeError, OSError, TimeoutError) as exc:
+            LOGGER.exception("leased-window listening failed for %s", item.get("source_id"))
+            item.update(
+                status="failed",
+                reason=f"listening to the leased window failed ({type(exc).__name__}: {exc})",
+            )
+        except Exception:
+            item.update(status="failed", reason="unexpected failure listening to the leased window")
+            raise
+        finally:
+            if timer is not None:
+                timer.cancel()
+            timing["execution_seconds"] = time.perf_counter() - started
+            item["timing"] = timing
+            item["owner_peak_rss"] = process_peak_rss()
+            item["finished_at"] = now_iso()
+            receipts.finish(item)
+        return dict(receipt=item, result=result)
+
+    @router.post("/sources/window-leases/{identifier}/listen")
+    def window_lease_listen(identifier: str, req: LeaseListenRequest):
+        if not scheduler.status()["accepting"]:
+            raise HTTPException(503, "source scheduler is shutting down")
+        if not operation_lock.acquire(blocking=False):
+            raise HTTPException(409, "source execution busy; the leased window is still held")
+        try:
+            return listen_again(identifier, req)
+        finally:
+            operation_lock.release()
 
     @router.get("/sources/scheduler")
     def scheduler_status():

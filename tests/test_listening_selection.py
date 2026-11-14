@@ -94,6 +94,8 @@ def test_modes_use_existing_harness_and_stub_is_not_selectable(client, tmp_path)
     options = client.get("/listening/options").json()
     assert not any(m["available"] for m in options["models"])
     assert "musical-aesthetic-listening" in options["controls"]["modes"]
+    assert options["pass_limits"] == {"max_new_tokens": [16, 4096], "thinking_budget": [0, 4096]}
+    assert options["circuit_context"] == ["used"]
     audio = tmp_path / "tone.wav"
     sf.write(
         audio,

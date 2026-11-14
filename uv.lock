@@ -206,14 +206,14 @@ wheels = [
 
 [[package]]
 name = "akouo-contract"
-version = "0.13.0"
-source = { path = "vendor/akouo_contract-0.13.0-py3-none-any.whl" }
+version = "0.13.1"
+source = { path = "vendor/akouo_contract-0.13.1-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
     { name = "referencing" },
 ]
 wheels = [
-    { filename = "akouo_contract-0.13.0-py3-none-any.whl", hash = "sha256:27b8e41499056268d23fe958dd40417d9e4cb772ab3d170e77ef0bb669c6fcb2" },
+    { filename = "akouo_contract-0.13.1-py3-none-any.whl", hash = "sha256:5e871a53952beae7469f15fe5f0911653cbbf352aaf7683db96020dc33573c38" },
 ]
 
 [package.metadata]
@@ -2505,7 +2505,7 @@ wheels = [
 
 [[package]]
 name = "sonicfield-oida"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "akouo-contract" },
@@ -2547,7 +2547,7 @@ songid = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'moss'", specifier = ">=1.15.0" },
-    { name = "akouo-contract", path = "vendor/akouo_contract-0.13.0-py3-none-any.whl" },
+    { name = "akouo-contract", path = "vendor/akouo_contract-0.13.1-py3-none-any.whl" },
     { name = "akousma", path = "vendor/akousma-0.11.0-py3-none-any.whl" },
     { name = "akousmata", path = "vendor/akousmata-0.10.0-py3-none-any.whl" },
     { name = "anyio", specifier = ">=4.14.2,<5" },

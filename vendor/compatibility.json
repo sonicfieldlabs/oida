@@ -3,13 +3,13 @@
   "packages": [
     {
       "distribution": "akouo-contract",
-      "version": "0.13.0",
-      "wheel": "vendor/akouo_contract-0.13.0-py3-none-any.whl",
-      "sha256": "27b8e41499056268d23fe958dd40417d9e4cb772ab3d170e77ef0bb669c6fcb2",
+      "version": "0.13.1",
+      "wheel": "vendor/akouo_contract-0.13.1-py3-none-any.whl",
+      "sha256": "5e871a53952beae7469f15fe5f0911653cbbf352aaf7683db96020dc33573c38",
       "source_repository": "akouo",
-      "base_commit": "a923e874d6100409213f331e7a96cdaa757a93e9",
+      "base_commit": "387c9f6decf8cc135b7df638ab7fca96a3a7353d",
       "build_state": "Built from the committed source at base_commit (clean worktree); registry publication remains separate.",
-      "source_changes_sha256": "e881b146c4d8fd2260daf3b3e0cbb3e854dd430cf829e73f1fbb36ae5027f6cc",
+      "source_changes_sha256": "c2e8af8c29557402ec0be7e029d41c18dcba8f7dbd9939d04cb70537058c66ac",
       "source_changes_basis": "SHA256 of compact sorted JSON mapping explicit source-distribution input paths to file SHA256; excludes generated PKG-INFO.",
       "published": false,
       "builder": "hatchling==1.32.4"

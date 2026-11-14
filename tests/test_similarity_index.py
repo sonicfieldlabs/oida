@@ -92,3 +92,21 @@ def test_a_changed_or_removed_trace_is_read_again_or_dropped(tmp_path):
     assert titles["one"] == "renamed and longer"
     (value.traces_dir / "two.json").unlink()
     assert [m["trace"]["id"] for m in value.similar_to_event(event)] == ["one"]
+
+
+def test_a_remembered_trace_is_written_compact_and_reads_back(tmp_path):
+    value = store(tmp_path)
+    event = {
+        "id": "evt_compact",
+        "source": {"type": "live_input", "label": "a window"},
+        "segment": {"data_ref": {"kind": "path", "uri": "a.wav"}},
+        "aggregate": {"title": "Low hum", "short_summary": "Low hum."},
+        "features": features(-30.0),
+        "privacy_mode": "session",
+        "raw_audio_policy": "temp",
+    }
+    remembered = value.remember(event)
+    text = (value.traces_dir / f"{remembered['id']}.json").read_text(encoding="utf-8")
+    assert text.count("\n") == 1 and text.endswith("\n"), "one line, no indentation"
+    assert '": ' not in text and json.loads(text)["title"] == "Low hum"
+    assert value.list()[0]["title"] == "Low hum"

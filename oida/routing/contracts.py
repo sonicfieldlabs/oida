@@ -117,6 +117,9 @@ class CircuitContext(Strict):
     prefer_stay: bool = False
     allow_speech_content: bool = False
     station_rule: str | None = Field(default=None, min_length=1, max_length=240)
+    # How many times this run has already made each offered move, by candidate id. Among moves
+    # a decider ranks equal, it takes the one used least.
+    used: dict[str, int] = Field(default_factory=dict, max_length=64)
 
 
 class DecisionContext(Strict):

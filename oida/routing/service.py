@@ -77,6 +77,104 @@ def record_digest(record) -> str | None:
     ).hexdigest()
 
 
+#: What Akousmata's curator writes when rights are asserted (its `set_consent`), and nothing else.
+RIGHTS_FIELDS = (
+    ("provenance", "consent_status"),
+    ("provenance", "rights_note"),
+    ("extensions", "akousmata.app", "consent_set_by"),
+)
+
+
+def detached(record):
+    """A copy of a record read from the store, to project without touching what was read.
+
+    The store keeps its records as JSON, so a JSON round trip makes the same copy as deepcopy,
+    and on a large record (its passes and their payloads) many times faster: disclosing one
+    decision copies its record and each record it compared. Anything that is not JSON is
+    deep-copied."""
+    try:
+        return json.loads(json.dumps(record))
+    except (TypeError, ValueError):
+        return deepcopy(record)
+
+
+def without_rights(record):
+    """The record as it was before a curator recorded its rights: those fields removed, and any
+    container the assertion created, and left otherwise empty, removed with them."""
+    value = detached(record)
+    for path in RIGHTS_FIELDS:
+        trail, node = [], value
+        for key in path[:-1]:
+            if not isinstance(node, dict) or not isinstance(node.get(key), dict):
+                node = None
+                break
+            trail.append((node, key))
+            node = node[key]
+        if not isinstance(node, dict) or path[-1] not in node:
+            continue
+        del node[path[-1]]
+        for parent, key in reversed(trail[1:] if path[0] == "provenance" else trail):
+            if parent[key] == {}:
+                del parent[key]
+    return value
+
+
+class _Reading:
+    """The workspace for one disclosure request: each record is read from the store once.
+
+    A request is one point in time, so a record two of its decisions read is the same record.
+    A failed read is not kept; it is tried again."""
+
+    def __init__(self, workspace):
+        self._workspace, self._records = workspace, {}
+        # What a record read through this view yields (its event, digests, comparison items),
+        # by the record object, which the view keeps: a record read through another view
+        # (`_BeforeRights`) is another object and is derived again.
+        self.derived = {}
+
+    def __getattr__(self, name):
+        return getattr(self._workspace, name)
+
+    def reader(self, identifier):
+        if identifier not in self._records:
+            self._records[identifier] = self._workspace.reader(identifier)
+        return self._records[identifier]
+
+
+def _once(workspace, record, kind, make):
+    """make(), or what it made for this record object earlier in the same request."""
+    memo = workspace.__dict__.get("derived") if isinstance(workspace, _Reading) else None
+    if memo is None:
+        return make()
+    key = (kind, id(record))
+    if key not in memo:
+        memo[key] = (record, make())
+    return memo[key][1]
+
+
+class _BeforeRights:
+    """The workspace with each record read as it was before its rights were recorded.
+
+    Recording consent rewrites a record under its id. A decision binds the digest of every
+    record it read, so a rights assertion made afterwards read as changed evidence and withheld
+    the decision. A record a curator has since marked restricted is read as it stands, so its
+    decisions stay withheld."""
+
+    def __init__(self, workspace):
+        self._workspace = workspace
+
+    def __getattr__(self, name):
+        return getattr(self._workspace, name)
+
+    def reader(self, identifier):
+        record = self._workspace.reader(identifier)
+        if not isinstance(record, dict):
+            return record
+        if (record.get("provenance") or {}).get("consent_status") == "restricted":
+            return record
+        return without_rights(record)
+
+
 def _context_binding(req: RoutingRequest, *, execution: bool):
     if req.context:
         workspace_id = os.getenv("LISTENINGSTACK_WORKSPACE_ID")
@@ -103,6 +201,16 @@ def historical_context(workspace, record_id: str, req: RoutingRequest, settings)
     return _evidence_context(workspace, record_id, req, settings)
 
 
+def _retained(workspace, record):
+    """A record's retained event under the current covenant, with the digests a decision binds."""
+    event = workspace.event_policy(retained_event(detached(record)))
+    return (
+        event,
+        workspace.journal.record_digest(record),
+        hashlib.sha256(canonical(event).encode()).hexdigest(),
+    )
+
+
 def _evidence_context(workspace, record_id: str, req: RoutingRequest, settings) -> dict:
     record = _read_current_record(workspace, record_id)
     if record.get("akousma_id") != record_id:
@@ -127,7 +235,8 @@ def _evidence_context(workspace, record_id: str, req: RoutingRequest, settings) 
         # A record's audio content hash identifies the captured excerpt, not
         # necessarily the original file. Only file_window.source_sha256 is
         # an owner-attested digest of the source before cropping.
-    event = workspace.event_policy(retained_event(deepcopy(record)))
+    event, record_sha256, event_sha256 = _once(workspace, record, "event", lambda: _retained(workspace, record))
+    event = deepcopy(event)  # what is built from it below may write into it
     if event.get("privacy_mode") == "incognito" or covenant_blocks_untyped_prose(
         event.get("covenant")
     ):
@@ -145,28 +254,38 @@ def _evidence_context(workspace, record_id: str, req: RoutingRequest, settings) 
         references=sources,
     )
     items = [item.model_dump(mode="json") for item in packet.items]
-    dependencies = [{"record_ref": record_id, "record_sha256": workspace.journal.record_digest(record), "event_sha256": hashlib.sha256(canonical(event).encode()).hexdigest()}]
+    dependencies = [{"record_ref": record_id, "record_sha256": record_sha256, "event_sha256": event_sha256}]
     for identifier in dict.fromkeys(req.comparison_ids):
         if identifier == record_id:
             continue
         previous = _read_current_record(workspace, identifier)
         if previous.get("akousma_id") != identifier:
             raise HTTPException(409, "A comparison returned a different Auditum record")
-        previous_event = workspace.event_policy(retained_event(deepcopy(previous)))
+        previous_event, previous_sha256, previous_event_sha256 = _once(
+            workspace, previous, "event", lambda: _retained(workspace, previous)
+        )
         if previous_event.get(
             "privacy_mode"
         ) == "incognito" or covenant_blocks_untyped_prose(
             previous_event.get("covenant")
         ):
             continue
-        comparison = workspace.reasoning.packet_builder.build(
-            event=previous_event,
-            question="Compare the retained listening accounts",
-            include_transcript=False,
-            references=[],
+        compared = _once(
+            workspace,
+            previous,
+            "comparison",
+            lambda: [
+                item.model_dump(mode="json")
+                for item in workspace.reasoning.packet_builder.build(
+                    event=previous_event,
+                    question="Compare the retained listening accounts",
+                    include_transcript=False,
+                    references=[],
+                ).items[:3]
+            ],
         )
-        dependencies.append({"record_ref": identifier, "record_sha256": workspace.journal.record_digest(previous), "event_sha256": hashlib.sha256(canonical(previous_event).encode()).hexdigest()})
-        items.extend(item.model_dump(mode="json") for item in comparison.items[:3])
+        dependencies.append({"record_ref": identifier, "record_sha256": previous_sha256, "event_sha256": previous_event_sha256})
+        items.extend(deepcopy(compared))
     items = items[:24]
     if req.context:
         from oida.reasoning.evidence import safe_external_text
@@ -660,17 +779,24 @@ def routing_router(workspace, require_admin):
             workspace.journal.save("routing_config", "primary", value)
             return value
 
-    def disclose(value):
-        """Immutable receipts stay internal; disclosure requires their exact inputs."""
+    def disclose(value, view=None):
+        """Immutable receipts stay internal; disclosure requires their exact inputs.
+
+        `view` is the workspace one request reads through (`_Reading`), when it asks for many."""
+        view = workspace if view is None else view
         try:
             with workspace.journal.connection() as db:
                 row = db.execute("SELECT payload FROM routing_jobs WHERE id=?", (value["id"],)).fetchone()
             if not row or not value.get("prepared_context"):
                 raise ValueError("Unverifiable historical decision")
             req = RoutingRequest.model_validate_json(row[0])
-            current = historical_context(workspace, req.record_id, req, req.settings)
-            if context_digest(current) != context_digest(value["prepared_context"]):
-                raise ValueError("Dependency changed")
+            expected = context_digest(value["prepared_context"])
+            current = historical_context(view, req.record_id, req, req.settings)
+            if context_digest(current) != expected:
+                # A rights assertion recorded since is not a change in what was heard.
+                bare = historical_context(_BeforeRights(view), req.record_id, req, req.settings)
+                if context_digest(bare) != expected:
+                    raise ValueError("Dependency changed")
             return value
         except (HTTPException, ValueError, KeyError, TypeError, OSError, RuntimeError, sqlite3.DatabaseError):
             return {"id": value.get("id"), "status": "withheld_or_unavailable", "action": "stop"}
@@ -686,11 +812,13 @@ def routing_router(workspace, require_admin):
 
     @router.post("/disclosure")
     def disclosure(payload: ArchiveVisibilityRequest):
-        return {"states": {identifier: disclose(workspace.journal.get("routing_decision", identifier) or {"id": identifier})["status"] != "withheld_or_unavailable" for identifier in payload.ids}}
+        view = _Reading(workspace)
+        return {"states": {identifier: disclose(workspace.journal.get("routing_decision", identifier) or {"id": identifier}, view)["status"] != "withheld_or_unavailable" for identifier in payload.ids}}
 
     @router.get("/history")
     def history():
-        return {"decisions": [disclose(value) for value in workspace.values("routing_decision", 200)]}
+        view = _Reading(workspace)
+        return {"decisions": [disclose(value, view) for value in workspace.values("routing_decision", 200)]}
 
     def execute(payload):
         req = RoutingRequest.model_validate(payload)

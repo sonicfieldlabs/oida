@@ -1,17 +1,29 @@
+# Portable PR checks run once; full platform qualification is deliberate.
 name: CI
 
 on:
+  pull_request:
+    branches:
+    - main
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Run complete platform and release qualification (prefer local execution)
+        type: boolean
+        required: false
+        default: false
   workflow_call:
     inputs:
       release_ref:
         description: Optional immutable release ref selected by the publishing workflow
         required: false
         type: string
-        default: ""
-  pull_request:
-  push:
-    branches:
-      - main
+        default: ''
+      full:
+        description: Run complete platform and release qualification (prefer local execution)
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -23,8 +35,8 @@ concurrency:
 
 jobs:
   test:
-    name: Python, Web, and macOS checks
-    runs-on: macos-latest
+    name: Python and Web checks
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       UV_PYTHON: "3.14.10"
@@ -51,9 +63,9 @@ jobs:
         run: shasum -a 256 -c vendor/SHA256SUMS
 
       - name: Install audio fixture tools
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: command -v ffmpeg >/dev/null || brew install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg libsndfile1
 
       - name: Install Python dependencies
         run: uv sync --extra dev --locked
@@ -98,19 +110,9 @@ jobs:
           --with "$GITHUB_WORKSPACE"/oida/dist/sonicfield_oida-*.whl
           python -c 'import importlib.resources as r; import oida, oida.reasoning.audio_router, oida.server; assert r.files("oida").joinpath("integration_assets", "codex", "README.md").is_file(); print(oida.__version__)'
 
-      - name: Build macOS shell
-        working-directory: oida/apps/macos
-        run: |
-          swift build
-          swift build -Xswiftc -strict-concurrency=complete
-
-      - name: Package unsigned app
-        run: apps/macos/script/package_unsigned.sh
-
-      - name: Release smoke
-        run: scripts/release_smoke_with_stub.sh
 
   optional-native:
+    if: inputs.full == true
     name: Optional native audio fixture
     runs-on: macos-latest
     timeout-minutes: 30
@@ -148,3 +150,44 @@ jobs:
         run: uv sync --locked --extra moss
       - name: Exercise synthetic CPU audio and SDK imports
         run: uv run --locked --extra moss python scripts/smoke_optional_torch.py
+
+  native-shell:
+    name: macOS shell and unsigned packaging
+    if: inputs.full == true
+    needs: test
+    env:
+      UV_PYTHON: "3.14.10"
+      UV_PYTHON_DOWNLOADS: never
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.release_ref || github.ref }}
+          path: oida
+      - name: Use a maintained CI Python patch
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14.10"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Install audio fixture tools
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: command -v ffmpeg >/dev/null || brew install ffmpeg
+      - name: Prepare the locked runtime
+        working-directory: oida
+        run: uv sync --extra dev --locked
+      - name: Build macOS shell
+        working-directory: oida/apps/macos
+        run: |
+          swift build
+          swift build -Xswiftc -strict-concurrency=complete
+
+      - name: Package unsigned app
+        working-directory: oida
+        run: apps/macos/script/package_unsigned.sh
+
+      - name: Release smoke
+        working-directory: oida
+        run: scripts/release_smoke_with_stub.sh

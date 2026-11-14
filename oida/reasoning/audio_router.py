@@ -52,7 +52,7 @@ from oida.reasoning.providers.base import (
 )
 from oida.reasoning.secrets import SecretStore, SecretStoreError
 from oida.reasoning.settings import ReasoningSettingsStore
-from oida.recipes import GenerationSettings
+from oida.recipes import GenerationSettings, PassLimits
 
 
 def _sanitize_vocal_specialist_output(text: str) -> str:
@@ -146,6 +146,8 @@ class AudioRequestPolicy:
     stop_check: Callable[[], bool] | None = None
     deadline: float | None = None
     focus: str = ""
+    # The listening's own bounds on its model passes (a token ceiling, a Thinking budget).
+    limits: PassLimits | None = None
 
     def listening_identity_block(
         self, passes: list[str] | tuple[str, ...]
@@ -216,6 +218,7 @@ class RoutedAudioEngine(MossEngine):
         stop_check: Callable[[], bool] | None = None,
         deadline: float | None = None,
         focus: str = "",
+        limits: PassLimits | None = None,
     ) -> Iterator[AudioRequestPolicy]:
         policy = AudioRequestPolicy(
             privacy_mode=str(privacy_mode or "ephemeral"),
@@ -233,6 +236,7 @@ class RoutedAudioEngine(MossEngine):
             stop_check=stop_check,
             deadline=deadline,
             focus=focus,
+            limits=limits,
         )
         token = self._policy.set(policy)
         try:
@@ -291,6 +295,10 @@ class RoutedAudioEngine(MossEngine):
         settings: GenerationSettings,
         thinking_budget: int | None = None,
     ) -> EngineResult:
+        bounds = getattr(self._policy.get(), "limits", None)
+        if bounds is not None:
+            # Before any route is chosen, so a hosted provider is bounded like the local model.
+            settings = bounds.apply(settings)
         role = _ROLE_FOR_MODEL_KIND.get(settings.model_kind)
         if role is None and selected_audio_model() is not None:
             raise EngineUnavailable("Unknown role for explicit audio model")

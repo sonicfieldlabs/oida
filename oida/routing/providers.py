@@ -137,7 +137,8 @@ class TextDecisionProvider:
             payload["circuit_guidance"] = (
                 "akouo_route is AKOÚŌ's reading of the account (primary, secondary and corrective "
                 "ears); circuit says where the listening loop stands. Weigh both and keep within "
-                "the offered candidates."
+                "the offered candidates. The answer is the candidate_id alone: give no reason and "
+                "no other key."
             )
         selected_model = (settings.model_id if settings else None) or self.model_id
         locality = self.adapter.locality(self.provider_id, selected_model)

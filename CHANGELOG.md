@@ -1,6 +1,99 @@
 # Changelog
 
-## 0.15.0 — Unreleased: relistening by what was heard
+## 0.16.0 — Unreleased
+
+Numbered 0.15.1 while it held only the first repair below; it adds the window lease, pass
+limits and operator-named corpora, so it is a minor version.
+
+- The caption and analysis sanity check declines short fragments of unstable
+  decoding as well as long ones. A text of any length is discarded when it holds
+  the replacement character, more than 5 % of its letters outside the Latin
+  script, a word that mixes scripts or fuses a letter with a pictographic symbol,
+  words fused by a dot or a lower-case run fused to capitals, or one punctuation
+  mark repeated six times or more; a sentence begun with an article or "This"
+  and abandoned within three words is a fragment. Short captions such as
+  "Steady hum" are kept, and answers to a question may still be short.
+  Hyphens no longer count as words in the long-text ratio. Transcripts are not
+  checked, as before. The degree sign may stand beside a letter ("19°C").
+- Local passage corpora are named by the operator, not in source. A JSON file
+  (`OIDA_LOCAL_PASSAGES_ROOTS`, else `local-passages/roots.json` in the data
+  directory, contract `oida/local-passage-roots/v1`) maps each corpus key to an
+  absolute read-only folder; with none, no corpus is offered. A catalog entry's
+  `corpus` is any key that file defines, and a passage in an unnamed corpus is
+  refused like any other denial.
+- `scripts/sync_operator.sh` is the way to sync an environment that hears with
+  MOSS: it always keeps the `moss` extra (a plain `uv sync --locked` removes
+  torch), refuses while an Oída server runs from it, and checks the stack
+  imports. With torch 2.13.0 and torchcodec 0.17.0, FFmpeg 8 and 9 both decode.
+- On Apple silicon the Metal allocator's cached buffers are released during and
+  after each generation. PyTorch's MPS allocator otherwise keeps the buffers each
+  decoding step frees until its low watermark (1.4 times Metal's recommended
+  working set, about 37.5 GB on a 32 GB computer): one pass of 600 new tokens
+  filled it, the computer swapped, and later passes ran several times slower.
+  The driver's memory now stays within `OIDA_MPS_POOL_HEADROOM_MB` (2048) of its
+  level at the start of a pass and returns to the model's size afterwards; the
+  pass receipt records it (`generation.metal_memory`). 0 turns the release off.
+  The release applies from torch 2.13. On torch 2.10.0 it turned every answer
+  to a prompt over about 2,300 characters into unrelated tokens, so earlier
+  versions keep the allocator as it was.
+- On Apple silicon each sampled token is drawn on the CPU. With torch 2.13.0,
+  `torch.multinomial` on mps returned a token of zero probability in 139 of
+  30,000 draws from a distribution top-k had left with 50 tokens (torch 2.10.0:
+  none). In captions that was one unrelated word in about one account in seven,
+  and the caption check declined the whole account: 15 of 100 sampled passes on
+  test audio, none of 100 with the draw on the CPU, at the same speed. The
+  temperature, top-k and top-p are applied as before; the pass receipt records
+  where the token was drawn (`generation.sampled_on`), and
+  `OIDA_MPS_SAMPLE_ON_CPU=0` returns the draw to the GPU.
+- A listening may bound its model passes. `max_new_tokens` on a listening
+  request is a ceiling under each recipe's own limit, and `thinking_budget` is
+  the reasoning a Thinking checkpoint gets before it must answer (ignored by
+  other checkpoints, and lowered when it would leave the answer fewer than 256
+  tokens). Both reach hosted providers as well as the local model. The receipt
+  records the limit and who set it (`max_new_tokens_source`), and
+  `/listening/options` lists `pass_limits`. Without them nothing changes.
+- A window lease lets the same live window be heard again. A public radio whose
+  terms allow temporary recording may declare `lease` in the capture manifest; a
+  capture that asks (`lease_seconds`, at most 30 minutes) holds exactly the
+  input it listened to, in local custody outside the library, and answers the
+  lease's id, digest and expiry. `POST /sources/window-leases/{id}/listen`
+  listens to the held file, named by its digest, with another model, route or
+  question. A lease ends at its release, at its expiry or with its owner; each
+  ending deletes the audio and journals a receipt. No record, event or export
+  names a lease ([source admission](docs/source-admission.md)).
+- The AKOÚŌ decider breaks ties by use. Where several offered moves fit one
+  step of its rubric equally (two re-listenings that hear with the same ear,
+  two generators for one purpose), it takes the one the run has made least,
+  as the host counts them in the circuit context (`used`, by candidate id).
+  With no counts it takes the first offered, as before.
+- A language model that decides a circuit is asked for the candidate id alone.
+  Given AKOÚŌ's route and the circuit's state, a small local planner chose an
+  offered candidate and explained itself in a second key, which the selection
+  contract refuses, so every decision fell to the fallback. Requests without a
+  circuit are unchanged.
+- Vendor akouo-contract 0.13.1: the router reads steady noise (hum, hiss,
+  static) as a signal to inspect before it is music or material, and an account
+  made only of negations as one that names nothing.
+- Recording a record's rights does not withhold its routing decisions. A decision
+  binds the digest of every record it read, and recording consent rewrites a
+  record under its id, so a rights assertion made afterwards read as changed
+  evidence. Disclosure also accepts the record as it was before its rights were
+  recorded; a record marked restricted since, or changed in any other way, still
+  withholds its decisions.
+- One disclosure request reads and derives each record once. A host asks about
+  every decision of a session on each reading, and each decision read and copied
+  its record and every record it compared again, about 0.4 s a decision on a
+  session of a hundred listenings. It is now about 0.03 s; the next request
+  reads everything again, so a record changed or restricted since still
+  withholds its decisions.
+- A remembered trace is written as compact JSON, about a quarter of the
+  indented size. Traces already written are read as before.
+- Tests: `test_engine_readiness` hides only the MOSS-Audio modules. It used to
+  restore the whole module table, which dropped a torch first imported inside
+  the block; the next import of torch then crashed the interpreter (torch 2.13)
+  or failed a later test.
+
+## 0.15.0 — 2026-11-04: relistening by what was heard
 
 - Add the `akouo` decision provider: local, deterministic, always available. It
   reads the retained account (summaries, claims, routes and uncertainties; never
@@ -32,7 +125,7 @@
   reasoning off as one.
 - Vendor akousma 0.11.0, akouo-contract 0.13.0 and akousmata 0.10.0.
 
-## 0.14.1 — Unreleased audit repair candidate
+## 0.14.1 — not released on its own; its repairs are in 0.15.0
 
 - Enforce explicit re-listen checkpoint selection through the server resolver,
   reject unsupported roles and mismatched returns, and keep selections request-local.

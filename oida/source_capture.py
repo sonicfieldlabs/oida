@@ -24,6 +24,8 @@ from oida.owner_journal import OwnerJournal
 
 MAX_AUDIO_BYTES = 128 * 1024 * 1024
 RESEARCH_TTL_DEFAULT = 30 * 24 * 3600
+# A leased window is held for a circuit's re-listenings, never longer than this.
+LEASE_MAX_SECONDS = 1800
 
 
 class ResearchPolicy(BaseModel):
@@ -34,6 +36,15 @@ class ResearchPolicy(BaseModel):
     ttl_seconds: int = Field(
         default=RESEARCH_TTL_DEFAULT, ge=60, le=RESEARCH_TTL_DEFAULT
     )
+
+
+class LeasePolicy(BaseModel):
+    """The operator's statement that a station's terms allow a heard window to be held for a while."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    # Where the permission comes from: the terms read, their date, the registry that records them.
+    basis: str = Field(min_length=1, max_length=1024)
+    max_seconds: int = Field(default=LEASE_MAX_SECONDS, ge=30, le=LEASE_MAX_SECONDS)
 
 
 class CaptureSource(BaseModel):
@@ -57,6 +68,7 @@ class CaptureSource(BaseModel):
     network_policy: Literal["public_radio"] | None = None
     retention: Literal["temp_only", "research_sample"] | None = None
     research: ResearchPolicy | None = None
+    lease: LeasePolicy | None = None
 
     @model_validator(mode="after")
     def bounded(self):
@@ -89,6 +101,8 @@ class CaptureSource(BaseModel):
                 raise ValueError("retention is valid only for guarded public radio")
         elif self.network_policy is not None or self.retention is not None:
             raise ValueError("network policy is valid only for radio")
+        if self.lease is not None and self.network_policy != "public_radio":
+            raise ValueError("a window lease is valid only for guarded public radio")
         if (self.retention == "research_sample") != (self.research is not None):
             raise ValueError(
                 "research_sample retention requires, and only it accepts, a research attestation"

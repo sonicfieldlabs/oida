@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -10,7 +10,33 @@ class GenerationSettings:
     top_p: float
     top_k: int
     max_new_tokens: int
+    # Reasoning tokens for a Thinking checkpoint when the listening names a budget; ignored by any
+    # other checkpoint. An explicit budget argument to the engine takes precedence.
     thinking_budget: int | None = None
+    # Who set max_new_tokens: this recipe, or the listening's own ceiling.
+    limit_source: str = "recipe"
+
+
+@dataclass(frozen=True)
+class PassLimits:
+    """A listening's own bounds on its model passes, set by the caller for one listening.
+
+    `max_new_tokens` is a ceiling: it lowers a recipe's limit and never raises it, so a pass stops
+    there whatever the recipe allows. `thinking_budget` is the number of reasoning tokens a
+    Thinking checkpoint gets before its reasoning is closed; a pass heard by any other checkpoint
+    ignores it. Each pass's receipt records the limit it ran under and who set it.
+    """
+
+    max_new_tokens: int | None = None
+    thinking_budget: int | None = None
+
+    def apply(self, settings: GenerationSettings) -> GenerationSettings:
+        changes: dict[str, object] = {}
+        if self.max_new_tokens is not None and self.max_new_tokens < settings.max_new_tokens:
+            changes.update(max_new_tokens=self.max_new_tokens, limit_source="listening")
+        if self.thinking_budget is not None and settings.thinking_budget is None:
+            changes["thinking_budget"] = self.thinking_budget
+        return replace(settings, **changes) if changes else settings
 
 
 @dataclass(frozen=True)

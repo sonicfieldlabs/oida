@@ -140,7 +140,9 @@ class AkousmataStore:
         }
         trace["earworm"] = _earworm_surface(trace, event)
         trace_path = self._path(trace_id)
-        write_json_atomic(trace_path, trace)
+        # Compact: a trace holds the whole event and its measured features, and an indented copy
+        # was about four times the size (17.6 MB a window in a long radio session).
+        write_json_atomic(trace_path, trace, indent=None)
         self._cache_trace(trace_path, trace)
         return trace
 

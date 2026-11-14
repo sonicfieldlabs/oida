@@ -16,6 +16,7 @@ from pathlib import Path
 
 from oida.config import HF_INSTRUCT_ID, HF_THINKING_ID, OidaConfig
 from oida.engine_base import EngineResult, EngineUnavailable, MossEngine
+from oida.cpu_sampling import CpuSampler, sample_on_cpu
 from oida.recipes import GenerationSettings
 from oida import stage_timing
 from oida.pass_provenance import WeightHashCache, pass_receipt, weight_inventory
@@ -420,13 +421,20 @@ class MpsMossEngine(MossEngine):
                 )
             thinking = self._is_thinking_checkpoint(model_id)
             budget, budget_source, closer = None, None, None
+            watchers = []
             if thinking:
                 # A Thinking checkpoint opens its reasoning in the prompt. Without a close it can
                 # spend every token on reasoning and never answer; the budget closes it in time.
+                room = max(0, settings.max_new_tokens - ANSWER_RESERVE_TOKENS)
                 if thinking_budget is not None:
                     budget, budget_source = int(thinking_budget), "caller"
+                elif settings.thinking_budget is not None:
+                    # A listening's own budget (pass limits) applies wherever a Thinking checkpoint
+                    # hears a pass, and never takes the whole pass: the answer keeps its reserve.
+                    budget = min(int(settings.thinking_budget), room)
+                    budget_source = "listening" if budget == settings.thinking_budget else "listening_clamped"
                 else:
-                    budget, budget_source = max(0, settings.max_new_tokens - ANSWER_RESERVE_TOKENS), "default"
+                    budget, budget_source = room, "default"
                 if budget >= settings.max_new_tokens:
                     raise ValueError("thinking_budget must leave room for an answer within max_new_tokens")
                 encode = getattr(processor.tokenizer, "encode", None)
@@ -437,11 +445,28 @@ class MpsMossEngine(MossEngine):
                         encode(THINK_CLOSE, add_special_tokens=False),
                         encode("</think>", add_special_tokens=False),
                     )
-                    from transformers import LogitsProcessorList
-
-                    generation_kwargs["logits_processor"] = LogitsProcessorList([closer])
+                    watchers.append(closer)
                 else:
                     budget_source = "unavailable"
+            pool = MetalPool.watching(model, torch)
+            if pool is not None:
+                watchers.append(pool)
+            sampler = None
+            if do_sample and sample_on_cpu(model):
+                # torch.multinomial on mps can return a token of zero probability. The token is
+                # drawn on the CPU instead, by the last processor, and the generation runs
+                # greedily over the one token it leaves.
+                sampler = CpuSampler(
+                    torch, temperature=settings.temperature, top_k=settings.top_k, top_p=settings.top_p
+                )
+                watchers.append(sampler)
+                generation_kwargs["do_sample"] = False
+                for name in ("temperature", "top_p", "top_k"):
+                    generation_kwargs.pop(name, None)
+            if watchers:
+                from transformers import LogitsProcessorList
+
+                generation_kwargs["logits_processor"] = LogitsProcessorList(watchers)
             if deadline is not None:
                 remaining = deadline - time.time()
                 if remaining < 1:
@@ -452,12 +477,18 @@ class MpsMossEngine(MossEngine):
                 generation_kwargs["max_time"] = remaining
             memory_at_start = host_memory()
             generating = time.perf_counter()
-            with torch.no_grad():
-                out = model.generate(
-                    **inputs,
-                    **generation_kwargs,
-                )
-            new_ids = out[0, inputs["input_ids"].shape[1] :]
+            try:
+                with torch.no_grad():
+                    out = model.generate(
+                        **inputs,
+                        **generation_kwargs,
+                    )
+                # Only the new ids are needed from here on.
+                new_ids = out[0, inputs["input_ids"].shape[1] :]
+            finally:
+                out = inputs = None
+                if pool is not None:
+                    pool.finish()
             generated = int(new_ids.shape[0])
             eos = processor.tokenizer.eos_token_id
             if generated and int(new_ids[-1]) == eos:
@@ -479,6 +510,8 @@ class MpsMossEngine(MossEngine):
                 "generate_ms": round((time.perf_counter() - generating) * 1000),
                 "new_tokens": generated,
                 "max_new_tokens": settings.max_new_tokens,
+                # Who set the limit: the recipe, or the listening's own ceiling (pass limits).
+                "max_new_tokens_source": settings.limit_source,
                 "stop_reason": stop,
                 "deadline_bound": deadline is not None,
                 **(
@@ -492,6 +525,9 @@ class MpsMossEngine(MossEngine):
                     if memory_at_start
                     else {}
                 ),
+                **({"metal_memory": pool.receipt()} if pool is not None else {}),
+                # Where each token was drawn, when the pass sampled.
+                **({"sampled_on": "cpu" if sampler is not None else str(model.device)} if do_sample else {}),
             }
             if cold and loaded.get("weights_verification"):
                 provenance["weights_verification"] = loaded["weights_verification"]
@@ -630,6 +666,97 @@ def _load_moss_processor(processor_cls: type, model_id: str, *, revision: str | 
 
     tokenizer = Qwen2Tokenizer.from_pretrained(model_id, revision=revision)
     return processor_cls(tokenizer, enable_time_marker=True)
+
+
+#: Megabytes the Metal allocator's pool may grow during one generation before it is released.
+POOL_HEADROOM_MB = 2048
+# The first torch on which the release during a generation was verified (see MetalPool.watching).
+POOL_RELEASE_SINCE = (2, 13)
+
+
+def _torch_release(torch) -> tuple[int, int]:
+    """torch's major and minor version; (0, 0) when it cannot be read."""
+    parts = str(getattr(torch, "__version__", "")).split("+")[0].split(".")
+    try:
+        return int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        return 0, 0
+
+
+class MetalPool:
+    """Keep the MPS allocator's cached buffers from growing through a generation.
+
+    Each decoding step grows the key-value cache by one token, so every step frees buffers a
+    little too small for the next. PyTorch's MPS allocator keeps freed buffers in its pool until
+    its low watermark, 1.4 times Metal's recommended working set by default: about 37.5 GB on a
+    32 GB Apple silicon computer. Measured on 11 November 2026 with one 10.4 GB checkpoint: the
+    driver's memory passed 26 GB after 400 new tokens and stopped at 37.5 GB after 600, the
+    computer swapped 12 GB, and the passes that followed ran at 1 to 3 tokens a second.
+
+    This watcher sits among the logits processors, where it sees every step and changes no
+    score. When the driver's memory exceeds its level at the start of the generation by the
+    headroom, it empties the cache; when the generation ends it empties it again. At 400 tokens
+    that held the peak 2 GB above the model with no loss of speed. `OIDA_MPS_POOL_HEADROOM_MB`
+    sets the headroom; 0 leaves the allocator alone. Before torch 2.13 the allocator is left alone
+    whatever the headroom.
+    """
+
+    def __init__(self, mps, headroom_mb: int):
+        self.mps = mps
+        self.headroom = headroom_mb * 2**20
+        self.start = self.peak = self.end = int(mps.driver_allocated_memory())
+        self.releases = 0
+
+    @classmethod
+    def watching(cls, model, torch):
+        device = str(getattr(model, "device", ""))
+        if not device.startswith("mps"):
+            return None
+        if _torch_release(torch) < POOL_RELEASE_SINCE:
+            # torch 2.10.0, measured 12 November 2026: emptying the cache during a generation
+            # turned every answer to a prompt over about 2,300 characters into unrelated tokens
+            # (11 of 11), and none without the release. torch 2.13.0 showed none in either case.
+            return None
+        raw = os.getenv("OIDA_MPS_POOL_HEADROOM_MB", "").strip()
+        try:
+            headroom = int(raw) if raw else POOL_HEADROOM_MB
+        except ValueError:
+            headroom = POOL_HEADROOM_MB
+        if headroom <= 0:
+            return None
+        try:
+            torch.mps.empty_cache()
+            return cls(torch.mps, headroom)
+        except Exception:
+            return None
+
+    def __call__(self, input_ids, scores):
+        held = int(self.mps.driver_allocated_memory())
+        if held > self.peak:
+            self.peak = held
+        if held > self.start + self.headroom:
+            self.mps.empty_cache()
+            self.releases += 1
+        return scores
+
+    def finish(self) -> None:
+        try:
+            import gc
+
+            gc.collect()
+            self.mps.empty_cache()
+            self.end = int(self.mps.driver_allocated_memory())
+        except Exception:
+            pass
+
+    def receipt(self) -> dict:
+        return {
+            "headroom_mb": round(self.headroom / 2**20),
+            "driver_start_mb": round(self.start / 2**20),
+            "driver_peak_mb": round(self.peak / 2**20),
+            "driver_end_mb": round(self.end / 2**20),
+            "releases": self.releases,
+        }
 
 
 #: Tokens kept for the answer when a Thinking pass gets no explicit budget.

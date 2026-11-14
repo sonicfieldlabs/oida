@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import asyncio
+import json
 from hashlib import sha256
 import os
+import re
 from pathlib import Path, PurePosixPath
 import stat
 from typing import Annotated, Literal
@@ -26,12 +28,51 @@ MAX_SOURCE_BYTES = 16 * 1024 * 1024
 MAX_CATALOG_BYTES = 512 * 1024
 Key = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.:-]{1,160}$")]
 Text = Annotated[str, Field(min_length=1, max_length=4000)]
-ROOTS = {
-    "aleph": Path.home() / "Documents/CHIXI/ALEPH/wiki",
-    "sonicbrain": Path.home() / "Documents/SFL/sonicbrain",
-    "listeningmd": Path.home() / "Documents/SFL/listeningmd",
-    "akdraft": Path.home() / "Documents/SFL/akdraft",
-}
+CorpusKey = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,39}$")]
+ROOTS_CONTRACT = "oida/local-passage-roots/v1"
+MAX_ROOTS_BYTES = 16 * 1024
+
+
+def configured_roots(path: str | os.PathLike | None = None) -> dict[str, Path]:
+    """The local corpora the operator named, as {corpus key: absolute folder}.
+
+    They are read from ``path``, else ``OIDA_LOCAL_PASSAGES_ROOTS``, else
+    ``local-passages/roots.json`` in Oída's data directory, written as
+    ``{"contract": "oida/local-passage-roots/v1", "corpora": {"wiki": "/absolute/folder"}}``.
+    Source code names no folder: with no file, or a file that does not validate, no local
+    corpus is offered and every local passage is refused.
+    """
+    if path is None:
+        named = os.environ.get("OIDA_LOCAL_PASSAGES_ROOTS", "").strip()
+        if named:
+            path = named
+        else:
+            from oida.config import data_dir
+
+            path = data_dir() / "local-passages" / "roots.json"
+    try:
+        with open(path, "rb") as stream:
+            raw = stream.read(MAX_ROOTS_BYTES + 1)
+        if len(raw) > MAX_ROOTS_BYTES:
+            return {}
+        value = json.loads(raw)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(value, dict) or value.get("contract") != ROOTS_CONTRACT:
+        return {}
+    corpora = value.get("corpora")
+    if not isinstance(corpora, dict):
+        return {}
+    roots = {}
+    for key, folder in corpora.items():
+        if (
+            isinstance(key, str)
+            and re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", key)
+            and isinstance(folder, str)
+            and Path(folder).is_absolute()
+        ):
+            roots[key] = Path(folder)
+    return roots
 
 
 class LocalPassageDenied(PermissionError):
@@ -79,7 +120,7 @@ class Ancestry(Strict):
 
 class Passage(Strict):
     passage_id: Key
-    corpus: Literal["aleph", "sonicbrain", "listeningmd", "akdraft"]
+    corpus: CorpusKey
     work_ref: Key
     title: Text
     creators: list[Text] = Field(min_length=1, max_length=16)
@@ -251,11 +292,12 @@ def shared_terms(actor_ref):
 class LocalPassages:
     def __init__(self, manifest=None, *, roots=None, terms_factory=None, actor_ref="owner:oida-local"):
         self.manifest = Path(manifest) if manifest else None
-        self.roots = dict(ROOTS if roots is None else roots)
+        self.roots = {} if roots is None else dict(roots)
         self.terms_factory = terms_factory or (lambda: shared_terms(actor_ref))
 
     @classmethod
     def from_environment(cls, **kwargs):
+        kwargs.setdefault("roots", configured_roots())
         return cls(os.environ.get("OIDA_LOCAL_PASSAGES_MANIFEST"), **kwargs)
 
     def catalog(self):
@@ -315,6 +357,8 @@ class LocalPassages:
 
     def _bytes(self, entry):
         """Read only regular files via no-follow descriptors, including root parents."""
+        if entry.corpus not in self.roots:
+            raise LocalPassageDenied()
         root = Path(self.roots[entry.corpus])
         if not root.is_absolute():
             raise LocalPassageDenied()
