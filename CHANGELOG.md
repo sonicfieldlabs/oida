@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.15.1 — Unreleased
+## 0.16.0 — Unreleased
+
+Numbered 0.15.1 while it held only the first repair below; it adds the window lease, pass
+limits and operator-named corpora, so it is a minor version.
 
 - The caption and analysis sanity check declines short fragments of unstable
   decoding as well as long ones. A text of any length is discarded when it holds
@@ -71,6 +74,18 @@
 - Vendor akouo-contract 0.13.1: the router reads steady noise (hum, hiss,
   static) as a signal to inspect before it is music or material, and an account
   made only of negations as one that names nothing.
+- Recording a record's rights does not withhold its routing decisions. A decision
+  binds the digest of every record it read, and recording consent rewrites a
+  record under its id, so a rights assertion made afterwards read as changed
+  evidence. Disclosure also accepts the record as it was before its rights were
+  recorded; a record marked restricted since, or changed in any other way, still
+  withholds its decisions.
+- One disclosure request reads and derives each record once. A host asks about
+  every decision of a session on each reading, and each decision read and copied
+  its record and every record it compared again, about 0.4 s a decision on a
+  session of a hundred listenings. It is now about 0.03 s; the next request
+  reads everything again, so a record changed or restricted since still
+  withholds its decisions.
 - A remembered trace is written as compact JSON, about a quarter of the
   indented size. Traces already written are read as before.
 - Tests: `test_engine_readiness` hides only the MOSS-Audio modules. It used to
@@ -78,7 +93,7 @@
   the block; the next import of torch then crashed the interpreter (torch 2.13)
   or failed a later test.
 
-## 0.15.0 — Unreleased: relistening by what was heard
+## 0.15.0 — 2026-11-04: relistening by what was heard
 
 - Add the `akouo` decision provider: local, deterministic, always available. It
   reads the retained account (summaries, claims, routes and uncertainties; never
@@ -110,7 +125,7 @@
   reasoning off as one.
 - Vendor akousma 0.11.0, akouo-contract 0.13.0 and akousmata 0.10.0.
 
-## 0.14.1 — Unreleased audit repair candidate
+## 0.14.1 — not released on its own; its repairs are in 0.15.0
 
 - Enforce explicit re-listen checkpoint selection through the server resolver,
   reject unsupported roles and mismatched returns, and keep selections request-local.
