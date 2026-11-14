@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.16.0 — Unreleased
+## 0.16.0 — 2026-11-14
 
 Numbered 0.15.1 while it held only the first repair below; it adds the window lease, pass
 limits and operator-named corpora, so it is a minor version.
