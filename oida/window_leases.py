@@ -55,6 +55,15 @@ class WindowLeases:
         return sorted(self.root.glob("wl_*.json"))
 
     def _read(self, sidecar: Path) -> dict | None:
+        # Read only a lease sidecar immediately inside the configured custody root.
+        if (
+            sidecar.parent != self.root
+            or sidecar.suffix != ".json"
+            or not IDENTIFIER.fullmatch(sidecar.stem)
+            or sidecar.is_symlink()
+        ):
+            return None
+        sidecar = self.root / sidecar.name
         try:
             value = json.loads(sidecar.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -244,6 +253,8 @@ class WindowLeases:
 
     def note_listening(self, identifier: str, acquisition_id: str, record_id: str | None) -> None:
         """Record on the lease that it was heard again (ids only)."""
+        if not IDENTIFIER.fullmatch(identifier):
+            raise KeyError(identifier)
         with self.lock:
             sidecar = self.root / f"{identifier}.json"
             value = self._read(sidecar)

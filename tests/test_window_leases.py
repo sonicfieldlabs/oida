@@ -48,7 +48,24 @@ def test_lease_identifiers_require_an_exact_match(tmp_path, identifier):
         leases.release(identifier)
     with pytest.raises(KeyError):
         leases.audio(identifier, "0" * 64)
+    with pytest.raises(KeyError):
+        leases.note_listening(identifier, "listening", None)
     assert not leases.root.exists()
+
+
+def test_sidecars_cannot_be_read_outside_the_custody_root(tmp_path):
+    leases = WindowLeases(tmp_path / "leases", None)
+    leases.root.mkdir()
+    identifier = "wl_" + "a" * 24
+    outside = tmp_path / f"{identifier}.json"
+    outside.write_text(json.dumps({"contract": "oida/window-lease/v1", "id": identifier}))
+    assert leases._read(outside) is None
+    inside = leases.root / outside.name
+    inside.symlink_to(outside)
+    assert leases._read(inside) is None
+    inside.unlink()
+    inside.write_bytes(outside.read_bytes())
+    assert leases._read(inside)["id"] == identifier
 
 
 def test_only_guarded_public_radio_may_declare_a_lease_and_never_past_thirty_minutes():
