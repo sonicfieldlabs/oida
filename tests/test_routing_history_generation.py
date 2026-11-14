@@ -101,3 +101,40 @@ def test_recording_rights_after_a_decision_does_not_read_as_changed_evidence(cli
 
     monkeypatch.setattr(w, "reader", curated_and_changed)
     assert c.post("/routing/disclosure", json={"ids": ["routing-one"]}).json()["states"]["routing-one"] is False
+
+
+def test_one_disclosure_request_reads_each_record_once_and_the_next_reads_again(client, monkeypatch):
+    """14 November 2026: a live session's khipu asks Oída about every decision of the session on
+    each reading, and each decision read its record and every record it compared again, about
+    0.4 s a decision: a run's hundred decisions passed Khipu's ten seconds and were withheld.
+    Within one request a record is read and derived once; the next request reads it again."""
+    c, w = client
+    monkeypatch.setenv("LISTENINGSTACK_WORKSPACE_ID", "workspace-one")
+    monkeypatch.setenv("LISTENINGSTACK_WORKSPACE_GENERATION", "generation-one")
+    for request_id in ("routing-one", "routing-two"):
+        body = payload(request_id=request_id, comparison_ids=["akm_two"], context={
+            "workspace_id": "workspace-one", "owner_generation": "generation-one",
+        })
+        assert c.post("/routing/decide", json=body).status_code == 200
+    before = deepcopy(w.journal.get("routing_decision", "routing-one"))
+    reads, original = [], w.reader
+
+    def counted(identifier):
+        reads.append(identifier)
+        return original(identifier)
+
+    monkeypatch.setattr(w, "reader", counted)
+    states = c.post("/routing/disclosure", json={"ids": ["routing-one", "routing-two"]}).json()["states"]
+    assert states == {"routing-one": True, "routing-two": True}
+    assert sorted(reads) == ["akm_one", "akm_two"]
+
+    def changed(identifier):
+        record = counted(identifier)
+        if identifier == "akm_two":
+            record["summary"] = "Different retained evidence"
+        return record
+
+    monkeypatch.setattr(w, "reader", changed)
+    states = c.post("/routing/disclosure", json={"ids": ["routing-one", "routing-two"]}).json()["states"]
+    assert states == {"routing-one": False, "routing-two": False}
+    assert w.journal.get("routing_decision", "routing-one") == before
