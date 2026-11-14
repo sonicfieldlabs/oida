@@ -1,13 +1,16 @@
+# Publishing is deliberate; creating a tag alone does not start hosted work.
 name: Publish Python stack
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       release_ref:
-        description: Existing release tag to rebuild and publish
+        description: Existing v-prefixed release tag to qualify and publish
+        type: string
+        required: true
+      expected_sha:
+        description: Exact 40-character commit already selected for this release tag
+        type: string
         required: true
 
 permissions:
@@ -18,22 +21,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize:
+    name: Bind the release tag to the reviewed commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+      - name: Verify the tag before starting full qualification
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+        run: |
+          test "${#EXPECTED_SHA}" -eq 40
+          case "$EXPECTED_SHA" in *[!0-9a-f]*) exit 1 ;; esac
+          case "$RELEASE_REF" in v*) ;; *) exit 1 ;; esac
+          git check-ref-format "refs/tags/$RELEASE_REF"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse "refs/tags/$RELEASE_REF^{commit}")" = "$EXPECTED_SHA"
+
   checks:
+    needs: authorize
     uses: ./.github/workflows/ci.yml
     with:
-      release_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref_name }}
+      full: true
+      release_ref: ${{ inputs.expected_sha }}
 
   build:
     needs: checks
     name: Build and verify distributions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout Oída
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref_name }}
+          ref: ${{ inputs.expected_sha }}
           fetch-depth: 0
           path: oida
 
@@ -107,7 +134,7 @@ jobs:
           - project: akousmata
             directory: akousmata
             environment: pypi-akousmata
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: ${{ matrix.environment }}
     permissions:
@@ -134,7 +161,7 @@ jobs:
       - build
       - publish
     if: ${{ github.event_name == 'workflow_dispatch' && vars.PYPI_PUBLISH_ENABLED == 'true' && vars.PYPI_OIDA_PUBLISH_ENABLED == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: pypi-sonicfield-oida
     permissions:
